@@ -38,10 +38,10 @@ class TrainConfig(Config):
         self.rollout.terminate_on_success = True         # end rollout early after task success
 
         ## training config
-        self.training.num_data_workers = 0
+        self.training.num_data_workers = 2
         self.training.batch_size = 100
         self.training.num_epochs = 2000
-        self.training.epoch_every_n_steps = 100                   # number of gradient steps in train epoch (None for full dataset pass)
+        self.training.epoch_every_n_steps = 10          # number of gradient steps in train epoch (None for full dataset pass)
 
         ## validation config
         self.validation.num_data_workers = 0

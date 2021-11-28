@@ -1,14 +1,14 @@
-from tbsim.configs.base_config import TrainConfig, EnvConfig, AlgoConfig
+from tbsim.configs.base import TrainConfig, EnvConfig, AlgoConfig
 
 
 class L5KitTrainConfig(TrainConfig):
     def __init__(self):
         super(L5KitTrainConfig, self).__init__()
 
-        self.dataset_path = "path-to-dataset"
+        self.dataset_path = "/home/danfeix"
         self.dataset_valid_key = "scenes/train.zarr"
         self.dataset_train_key = "scenes/validate.zarr"
-        self.dataset_mata_key = "meta.json"
+        self.dataset_meta_key = "meta.json"
 
 
 class L5KitEnvConfig(EnvConfig):
@@ -42,15 +42,21 @@ class L5KitEnvConfig(EnvConfig):
         # With this change, the vertical flipping on the raster used in the visualization code is no longer needed.
         # Set it to False for models trained before v1.1.0-25-g3c517f0 (December 2020).
         # In that case visualisation will be flipped (we've removed the flip there) but the model's input will be correct.
-        self.rasterizer.set_origin_to_bottom =True
+        self.rasterizer.set_origin_to_bottom = True
 
 
 class L5RasterizedPlanningConfig(AlgoConfig):
     def __init__(self):
         super(L5RasterizedPlanningConfig, self).__init__()
+
         self.name = "l5_rasterized"
         self.model_architecture = "resnet50"
         self.history_num_frames = 5
         self.future_num_frames = 50
         self.step_time = 0.1
         self.render_ego_history = False
+
+        self.optim_params.policy.learning_rate.initial = 1e-4      # policy learning rate
+        self.optim_params.policy.learning_rate.decay_factor = 0.1  # factor to decay LR by (if epoch schedule non-empty)
+        self.optim_params.policy.learning_rate.epoch_schedule = [] # epochs where LR decay occurs
+        self.optim_params.policy.regularization.L2 = 0.00          # L2 regularization strength
