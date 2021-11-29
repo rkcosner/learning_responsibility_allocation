@@ -185,7 +185,8 @@ def main(config):
     log_dir, ckpt_dir, video_dir = TrainUtils.get_exp_dir(
         exp_name=config.name,
         output_dir=config.root_dir,
-        save_checkpoints=config.train.save.enabled
+        save_checkpoints=config.train.save.enabled,
+        auto_remove_exp_dir=True
     )
 
     if config.train.logging.terminal_output_to_txt:
@@ -210,6 +211,7 @@ def main(config):
 
     train_loader = DataLoader(
         dataset=trainset,
+        shuffle=True,
         batch_size=config.train.training.batch_size,
         num_workers=config.train.training.num_data_workers,
         drop_last=True
@@ -219,7 +221,7 @@ def main(config):
     validset = AgentDataset(l5_config, valid_zarr, rasterizer)
     valid_loader = DataLoader(
         dataset=validset,
-        sampler=None,
+        shuffle=True,
         batch_size=config.train.validation.batch_size,
         num_workers=config.train.validation.num_data_workers,
         drop_last=True
@@ -241,7 +243,7 @@ def main(config):
     train_num_steps = config.train.training.epoch_every_n_steps
     valid_num_steps = config.train.validation.epoch_every_n_steps
 
-    for epoch in range(1, config.train.training.num_epochs + 1): # epoch numbers start at 1
+    for epoch in range(1, config.train.num_epochs + 1):  # epoch numbers start at 1
         step_log = TrainUtils.run_epoch(model=model, data_loader=train_loader, epoch=epoch, num_steps=train_num_steps)
         model.on_epoch_end(epoch)
 

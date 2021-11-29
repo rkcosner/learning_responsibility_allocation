@@ -22,6 +22,7 @@ class TrainConfig(Config):
         self.save.on_best_rollout_return = False         # save models that achieve best rollout return
         self.save.on_best_rollout_success_rate = True    # save models that achieve best success rate
 
+        self.num_epochs = 2000
 
         ## rendering config ##
         self.render = False                              # render on-screen or not
@@ -38,16 +39,15 @@ class TrainConfig(Config):
         self.rollout.terminate_on_success = True         # end rollout early after task success
 
         ## training config
-        self.training.num_data_workers = 2
         self.training.batch_size = 100
-        self.training.num_epochs = 2000
+        self.training.num_data_workers = 0
         self.training.epoch_every_n_steps = 10          # number of gradient steps in train epoch (None for full dataset pass)
 
         ## validation config
-        self.validation.num_data_workers = 0
-        self.validation.enabled = True
-        self.validation.epoch_every_n_steps = 10
         self.validation.batch_size = 100
+        self.validation.num_data_workers = 0
+        self.validation.enabled = False
+        self.validation.epoch_every_n_steps = 10
 
         ## learning config ##
         self.cuda = True          # use GPU or not

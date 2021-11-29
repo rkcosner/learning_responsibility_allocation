@@ -1,10 +1,12 @@
 from collections import OrderedDict
+import numpy as np
 
 import torch.nn as nn
 from tbsim.models.l5kit_models import RasterizedPlanningModel
 import robomimic.utils.tensor_utils as TensorUtils
 import robomimic.utils.torch_utils as TorchUtils
 
+import tbsim.utils.metrics as Metrics
 from tbsim.algos.base import PolicyAlgo
 
 
@@ -19,7 +21,7 @@ class L5TrafficModel(PolicyAlgo):
             model_arch=self.algo_config.model_architecture,
             num_input_channels=self.modality_shapes["image"][0], # [C, H, W]
             num_targets=3 * self.algo_config.future_num_frames,  # X, Y, Yaw * number of future states,
-            weights_scaling= [1., 1., 1.],
+            weights_scaling=[1., 1., 1.],
             criterion=nn.MSELoss(reduction="none")
         )
 
@@ -73,6 +75,20 @@ class L5TrafficModel(PolicyAlgo):
 
             info["losses"] = TensorUtils.detach(losses)
 
+            # TODO: metric compute needs to go somewhere else
+            preds = TensorUtils.to_numpy(pout["predictions"]["positions"])
+            gt = TensorUtils.to_numpy(batch["target_positions"])
+            conf = np.ones((preds.shape[0], 1))
+            avail = TensorUtils.to_numpy(batch["target_availabilities"])
+
+            preds = preds[:, None]
+
+            ade = Metrics.batch_average_displacement_error(gt, preds, conf, avail, mode="oracle")
+            fde = Metrics.batch_final_displacement_error(gt, preds, conf, avail, mode="oracle")
+
+            info["ADE"] = ade
+            info["FDE"] = fde
+
         return info
 
     def log_info(self, info):
@@ -88,6 +104,8 @@ class L5TrafficModel(PolicyAlgo):
         """
         log = super(PolicyAlgo, self).log_info(info)
         log["Loss"] = info["losses"]["prediction_loss"].item()
+        log["Metrics_ADE"] = info["ADE"]
+        log["Metrics_FDE"] = info["FDE"]
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
         return log

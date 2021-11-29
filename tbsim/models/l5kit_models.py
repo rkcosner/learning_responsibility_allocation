@@ -18,7 +18,7 @@ class RasterizedPlanningModel(nn.Module):
             num_targets: int,
             weights_scaling: List[float],
             criterion: nn.Module,
-            pretrained: bool = True,
+            pretrained: bool = False,
     ) -> None:
         super().__init__()
         self.model_arch = model_arch

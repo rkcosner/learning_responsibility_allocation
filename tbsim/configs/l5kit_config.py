@@ -5,10 +5,14 @@ class L5KitTrainConfig(TrainConfig):
     def __init__(self):
         super(L5KitTrainConfig, self).__init__()
 
-        self.dataset_path = "/home/danfeix"
+        self.dataset_path = "/home/danfeix/workspace/lfs/lyft/lyft_prediction/"
         self.dataset_valid_key = "scenes/train.zarr"
         self.dataset_train_key = "scenes/validate.zarr"
         self.dataset_meta_key = "meta.json"
+
+        self.training.num_data_workers = 2
+        self.validation.num_data_workers = 2
+        self.validation.enabled = True
 
 
 class L5KitEnvConfig(EnvConfig):
@@ -56,7 +60,7 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.step_time = 0.1
         self.render_ego_history = False
 
-        self.optim_params.policy.learning_rate.initial = 1e-4      # policy learning rate
+        self.optim_params.policy.learning_rate.initial = 1e-3      # policy learning rate
         self.optim_params.policy.learning_rate.decay_factor = 0.1  # factor to decay LR by (if epoch schedule non-empty)
         self.optim_params.policy.learning_rate.epoch_schedule = [] # epochs where LR decay occurs
         self.optim_params.policy.regularization.L2 = 0.00          # L2 regularization strength
