@@ -6,6 +6,8 @@ import os
 import time
 import json
 import psutil
+from typing import Dict, List, Optional
+
 import imageio
 
 from torch import nn, optim
@@ -23,135 +25,13 @@ from robomimic.utils.log_utils import PrintLogger, DataLogger
 from robomimic.algo import RolloutPolicy, PolicyAlgo
 import robomimic.utils.torch_utils as TorchUtils
 import robomimic.utils.log_utils as LogUtils
+import pytorch_lightning as pl
+from pytorch_lightning.loggers import TensorBoardLogger
 
 import tbsim.utils.train_utils as TrainUtils
-from tbsim.algos.l5kit_algos import L5TrafficModel
+from tbsim.algos.l5kit_algos import L5TrafficModel, L5TrafficModelPL
 from tbsim.configs import ExperimentConfig, L5KitEnvConfig, L5KitTrainConfig, L5RasterizedPlanningConfig
 
-
-
-def rollout_scenes(
-        policy,
-        envs,
-        horizon,
-        use_goals=False,
-        num_episodes=None,
-        render=False,
-        video_dir=None,
-        video_path=None,
-        epoch=None,
-        video_skip=5,
-        terminate_on_success=False,
-        verbose=False,
-):
-    """
-    A helper function used in the train loop to conduct evaluation rollouts per environment
-    and summarize the results.
-
-    Can specify @video_dir (to dump a video per environment) or @video_path (to dump a single video
-    for all environments).
-
-    Args:
-        policy (RolloutPolicy instance): policy to use for rollouts.
-
-        envs (dict): dictionary that maps env_name (str) to EnvBase instance. The policy will
-            be rolled out in each env.
-
-        horizon (int): maximum number of steps to roll the agent out for
-
-        use_goals (bool): if True, agent is goal-conditioned, so provide goal observations from env
-
-        num_episodes (int): number of rollout episodes per environment
-
-        render (bool): if True, render the rollout to the screen
-
-        video_dir (str): if not None, dump rollout videos to this directory (one per environment)
-
-        video_path (str): if not None, dump a single rollout video for all environments
-
-        epoch (int): epoch number (used for video naming)
-
-        video_skip (int): how often to write video frame
-
-        terminate_on_success (bool): if True, terminate episode early as soon as a success is encountered
-
-        verbose (bool): if True, print results of each rollout
-
-    Returns:
-        all_rollout_logs (dict): dictionary of rollout statistics (e.g. return, success rate, ...)
-            averaged across all rollouts
-
-        video_paths (dict): path to rollout videos for each environment
-    """
-    assert isinstance(policy, RolloutPolicy)
-
-    all_rollout_logs = OrderedDict()
-
-    # handle paths and create writers for video writing
-    assert (video_path is None) or (video_dir is None), "rollout_with_stats: can't specify both video path and dir"
-    write_video = (video_path is not None) or (video_dir is not None)
-    video_paths = OrderedDict()
-    video_writers = OrderedDict()
-    if video_path is not None:
-        # a single video is written for all envs
-        video_paths = { k : video_path for k in envs }
-        video_writer = imageio.get_writer(video_path, fps=20)
-        video_writers = { k : video_writer for k in envs }
-    if video_dir is not None:
-        # video is written per env
-        video_str = "_epoch_{}.mp4".format(epoch) if epoch is not None else ".mp4"
-        video_paths = { k : os.path.join(video_dir, "{}{}".format(k, video_str)) for k in envs }
-        video_writers = { k : imageio.get_writer(video_paths[k], fps=20) for k in envs }
-
-    for env_name, env in envs.items():
-        env_video_writer = None
-        if write_video:
-            print("video writes to " + video_paths[env_name])
-            env_video_writer = video_writers[env_name]
-
-        print("rollout: env={}, horizon={}, use_goals={}, num_episodes={}".format(
-            env.name, horizon, use_goals, num_episodes,
-        ))
-        rollout_logs = []
-        iterator = range(num_episodes)
-        if not verbose:
-            iterator = LogUtils.custom_tqdm(iterator, total=num_episodes)
-
-        num_success = 0
-        for ep_i in iterator:
-            rollout_timestamp = time.time()
-            rollout_info = run_rollout(
-                policy=policy,
-                env=env,
-                horizon=horizon,
-                render=render,
-                use_goals=use_goals,
-                video_writer=env_video_writer,
-                video_skip=video_skip,
-                terminate_on_success=terminate_on_success,
-            )
-            rollout_info["time"] = time.time() - rollout_timestamp
-            rollout_logs.append(rollout_info)
-            num_success += rollout_info["Success_Rate"]
-            if verbose:
-                print("Episode {}, horizon={}, num_success={}".format(ep_i + 1, horizon, num_success))
-                print(json.dumps(rollout_info, sort_keys=True, indent=4))
-
-        if video_dir is not None:
-            # close this env's video writer (next env has it's own)
-            env_video_writer.close()
-
-        # average metric across all episodes
-        rollout_logs = dict((k, [rollout_logs[i][k] for i in range(len(rollout_logs))]) for k in rollout_logs[0])
-        rollout_logs_mean = dict((k, np.mean(v)) for k, v in rollout_logs.items())
-        rollout_logs_mean["Time_Episode"] = np.sum(rollout_logs["time"]) / 60. # total time taken for rollouts in minutes
-        all_rollout_logs[env_name] = rollout_logs_mean
-
-    if video_path is not None:
-        # close video writer that was used for all envs
-        video_writer.close()
-
-    return all_rollout_logs, video_paths
 
 
 def translate_l5kit_cfg(config):
@@ -168,6 +48,155 @@ def translate_l5kit_cfg(config):
     rcfg["raster_params"]["dataset_meta_key"] = config.train.dataset_meta_key
     rcfg["model_params"] = config.algo
     return rcfg
+
+
+class L5DataModule(pl.LightningDataModule):
+    def __init__(
+            self,
+            dataset_train_key,
+            dataset_valid_key,
+            train_batch_size,
+            valid_batch_size,
+            train_n_workers,
+            valid_n_workers,
+            l5_config,
+            data_manager,
+            rasterizer,
+    ):
+        super().__init__()
+        self.train_batch_size = train_batch_size
+        self.train_n_workers = train_n_workers
+        self.valid_n_workers = valid_n_workers
+        self.dataset_train_key = dataset_train_key
+        self.dataset_valid_key = dataset_valid_key
+        self.dm = data_manager
+        self.l5_config = l5_config
+        self.rasterizer = rasterizer
+        self.train_batch_size = train_batch_size
+        self.valid_batch_size = valid_batch_size
+        self.train_set = None
+        self.valid_set = None
+
+    def setup(self, stage: Optional[str] = None) -> None:
+        train_zarr = ChunkedDataset(self.dm.require(self.dataset_train_key)).open()
+        self.train_set = AgentDataset(self.l5_config, train_zarr, self.rasterizer)
+        valid_zarr = ChunkedDataset(self.dm.require(self.dataset_valid_key)).open()
+        self.valid_set = AgentDataset(self.l5_config, valid_zarr, self.rasterizer)
+
+    def train_dataloader(self):
+        train_loader = DataLoader(
+            dataset=self.train_set,
+            shuffle=True,
+            batch_size=self.train_batch_size,
+            num_workers=self.train_n_workers,
+            drop_last=True
+        )
+        return train_loader
+
+    def val_dataloader(self):
+        val_loader = DataLoader(
+            dataset=self.valid_set,
+            shuffle=True,
+            batch_size=self.valid_batch_size,
+            num_workers=self.valid_n_workers,
+            drop_last=True
+        )
+        return val_loader
+
+
+def main_pl(config):
+    pl.seed_everything(config.seed)
+    print("\n============= New Training Run with Config =============")
+    print(config)
+    print("")
+    root_dir, log_dir, ckpt_dir, video_dir, version_key = TrainUtils.get_exp_dir(
+        exp_name=config.name,
+        output_dir=config.root_dir,
+        save_checkpoints=config.train.save.enabled,
+        auto_remove_exp_dir=True
+    )
+
+    if config.train.logging.terminal_output_to_txt:
+        # log stdout and stderr to a text file
+        logger = PrintLogger(os.path.join(log_dir, 'log.txt'))
+        sys.stdout = logger
+        sys.stderr = logger
+
+    # make sure the dataset exists
+    os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath(config.train.dataset_path)
+
+    l5_config = translate_l5kit_cfg(config)
+
+    dm = LocalDataManager(None)
+    rasterizer = build_rasterizer(l5_config, dm)
+
+    # Dataset
+    train_zarr = ChunkedDataset(dm.require(config.train.dataset_train_key)).open()
+    trainset = AgentDataset(l5_config, train_zarr, rasterizer)
+
+    train_loader = DataLoader(
+        dataset=trainset,
+        shuffle=True,
+        batch_size=config.train.training.batch_size,
+        num_workers=config.train.training.num_data_workers,
+        drop_last=True
+    )
+
+    valid_zarr = ChunkedDataset(dm.require(config.train.dataset_valid_key)).open()
+    validset = AgentDataset(l5_config, valid_zarr, rasterizer)
+    valid_loader = DataLoader(
+        dataset=validset,
+        shuffle=True,
+        batch_size=config.train.validation.batch_size,
+        num_workers=config.train.validation.num_data_workers,
+        drop_last=True
+    )
+
+    # Model
+    modality_shapes = OrderedDict(image=(rasterizer.num_channels(), 224, 224))
+    model = L5TrafficModelPL(
+        algo_config=config.algo,
+        modality_shapes=modality_shapes,
+    )
+
+    # Checkpointing
+    ckpt_interval = pl.callbacks.ModelCheckpoint(
+        dirpath=ckpt_dir,
+        filename='iter={step}_ep={epoch}_ADE={val/metrics_ADE:.2f}',
+        auto_insert_metric_name=False,
+        monitor="val/metrics_ADE",
+        save_top_k=10,
+        mode="max",
+        every_n_train_steps=config.train.save.every_n_steps,
+        verbose=True,
+    )
+
+    # Logging
+    tb_logger = TensorBoardLogger(save_dir=root_dir, version=version_key, name=None, sub_dir="logs/")
+    print("Tensorboard event will be saved at {}".format(tb_logger.log_dir))
+
+    # Environment
+
+
+    trainer = pl.Trainer(
+        default_root_dir=root_dir,
+        gpus=config.devices.num_gpus,
+        # checkpointing
+        enable_checkpointing=config.train.save.enabled,
+        callbacks=[ckpt_interval],
+        # logging
+        logger=tb_logger,
+        flush_logs_every_n_steps=config.train.logging.flush_every_n_steps,
+        log_every_n_steps=config.train.logging.log_every_n_steps,
+        # training
+        max_steps=config.train.training.num_steps,
+        # validation
+        val_check_interval=config.train.validation.every_n_steps,
+        limit_val_batches=config.train.validation.num_steps_per_epoch
+    )
+
+    trainer.fit(model=model, train_dataloader=train_loader, val_dataloaders=valid_loader)
+
 
 
 def main(config):
@@ -243,8 +272,11 @@ def main(config):
     train_num_steps = config.train.training.epoch_every_n_steps
     valid_num_steps = config.train.validation.epoch_every_n_steps
 
-    for epoch in range(1, config.train.num_epochs + 1):  # epoch numbers start at 1
-        step_log = TrainUtils.run_epoch(model=model, data_loader=train_loader, epoch=epoch, num_steps=train_num_steps)
+    train_data_iter = TrainUtils.infinite_iter(data_loader=train_loader)
+    step = 0
+    while step < config.train.num_steps:  # epoch numbers start at 1
+        step_log = TrainUtils.run_training_steps(
+            model=model, data_iter=train_data_iter, step=step, num_steps=train_num_steps)
         model.on_epoch_end(epoch)
 
         # setup checkpoint path
@@ -422,5 +454,5 @@ if __name__ == "__main__":
         config.train.dataset_path = args.dataset_path
 
     config.lock()
-    main(config)
+    main_pl(config)
 

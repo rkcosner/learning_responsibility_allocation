@@ -18,6 +18,23 @@ import torch
 import tbsim
 
 
+def infinite_iter(data_loader):
+    """
+    Get an infinite generator
+    Args:
+        data_loader (DataLoader): data loader to iterate through
+
+    """
+    c_iter = iter(data_loader)
+    while True:
+        try:
+            data = next(c_iter)
+        except StopIteration:
+            c_iter = iter(data_loader)
+            data = next(c_iter)
+        yield data
+
+
 def get_exp_dir(exp_name, output_dir, save_checkpoints=True, auto_remove_exp_dir=False):
     """
     Create experiment directory from config. If an identical experiment directory
@@ -41,7 +58,7 @@ def get_exp_dir(exp_name, output_dir, save_checkpoints=True, auto_remove_exp_dir
     """
     # timestamp for directory names
     t_now = time.time()
-    time_str = datetime.datetime.fromtimestamp(t_now).strftime('%Y%m%d%H%M%S')
+    version_str = datetime.datetime.fromtimestamp(t_now).strftime('%Y%m%d%H%M%S')
 
     # create directory for where to dump model parameters, tensorboard logs, and videos
     base_output_dir = output_dir
@@ -59,19 +76,19 @@ def get_exp_dir(exp_name, output_dir, save_checkpoints=True, auto_remove_exp_dir
             shutil.rmtree(base_output_dir)
 
     # only make model directory if model saving is enabled
-    output_dir = None
+    ckpt_dir = None
     if save_checkpoints:
-        output_dir = os.path.join(base_output_dir, time_str, "models")
-        os.makedirs(output_dir)
+        ckpt_dir = os.path.join(base_output_dir, version_str, "models")
+        os.makedirs(ckpt_dir)
 
     # tensorboard directory
-    log_dir = os.path.join(base_output_dir, time_str, "logs")
+    log_dir = os.path.join(base_output_dir, version_str, "logs")
     os.makedirs(log_dir)
 
     # video directory
-    video_dir = os.path.join(base_output_dir, time_str, "videos")
+    video_dir = os.path.join(base_output_dir, version_str, "videos")
     os.makedirs(video_dir)
-    return log_dir, output_dir, video_dir
+    return base_output_dir, log_dir, ckpt_dir, video_dir, version_str
 
 
 def should_save_from_rollout_logs(
@@ -181,50 +198,45 @@ def save_model(model, config, env_meta, shape_meta, ckpt_path, obs_normalization
     print("save checkpoint to {}".format(ckpt_path))
 
 
-def run_epoch(model, data_loader, epoch, validate=False, num_steps=None):
+def run_training_steps(model, data_iter, step, num_steps, validate=False):
     """
     Run an epoch of training or validation.
 
     Args:
         model (Algo instance): model to train
 
-        data_loader (DataLoader instance): data loader that will be used to serve batches of data
-            to the model
+        data_iter (Iterator): data iterator that returns a batch when called with next()
 
-        epoch (int): epoch number
+        step (int): number of training steps so far
+
+        num_steps (int): number of iterations expected to run (barring StopIteration exception)
 
         validate (bool): whether this is a training epoch or validation epoch. This tells the model
             whether to do gradient steps or purely do forward passes.
 
-        num_steps (int): if provided, this epoch lasts for a fixed number of batches (gradient steps),
-            otherwise the epoch is a complete pass through the training dataset
-
     Returns:
         step_log_all (dict): dictionary of logged training metrics averaged across all batches
     """
-    epoch_timestamp = time.time()
+    total_timestamp = time.time()
     if validate:
         model.set_eval()
     else:
         model.set_train()
-    if num_steps is None:
-        num_steps = len(data_loader)
+
+    assert step >= 0
 
     step_log_all = []
     timing_stats = dict(Data_Loading=[], Process_Batch=[], Train_Batch=[], Log_Info=[])
 
-    data_loader_iter = iter(data_loader)
+    step_i = 0
     for _ in LogUtils.custom_tqdm(range(num_steps)):
 
         # load next batch from data loader
         try:
             t = time.time()
-            batch = next(data_loader_iter)
+            batch = next(data_iter)
         except StopIteration:
-            # reset for next dataset pass
-            data_loader_iter = iter(data_loader)
-            t = time.time()
-            batch = next(data_loader_iter)
+            break
         timing_stats["Data_Loading"].append(time.time() - t)
 
         # process batch for training
@@ -234,7 +246,7 @@ def run_epoch(model, data_loader, epoch, validate=False, num_steps=None):
 
         # forward and backward pass
         t = time.time()
-        info = model.train_on_batch(input_batch, epoch, validate=validate)
+        info = model.train_on_batch(input_batch, step, validate=validate)
         timing_stats["Train_Batch"].append(time.time() - t)
 
         # tensorboard logging
@@ -242,6 +254,8 @@ def run_epoch(model, data_loader, epoch, validate=False, num_steps=None):
         step_log = model.log_info(info)
         step_log_all.append(step_log)
         timing_stats["Log_Info"].append(time.time() - t)
+
+        step_i += 1
 
     # flatten and take the mean of the metrics
     step_log_dict = {}
@@ -254,11 +268,10 @@ def run_epoch(model, data_loader, epoch, validate=False, num_steps=None):
 
     # add in timing stats
     for k in timing_stats:
-        # sum across all training steps, and convert from seconds to minutes
-        step_log_all["Time_{}".format(k)] = np.sum(timing_stats[k]) / 60.
-    step_log_all["Time_Epoch"] = (time.time() - epoch_timestamp) / 60.
+        step_log_all["Time/{}".format(k)] = np.sum(timing_stats[k])
+    step_log_all["Time/Step"] = (time.time() - total_timestamp) / float(step_i)
 
-    return step_log_all
+    return step_log_all, step_i
 
 
 def is_every_n_steps(interval, current_step, skip_zero=False):

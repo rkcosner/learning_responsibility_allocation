@@ -160,7 +160,7 @@ class Algo(object):
         """
         return batch
 
-    def train_on_batch(self, batch, epoch, validate=False):
+    def train_on_batch(self, batch, step, validate=False):
         """
         Training on a single batch of data.
 
@@ -168,7 +168,7 @@ class Algo(object):
             batch (dict): dictionary with torch.Tensors sampled
                 from a data loader and filtered by @process_batch_for_training
 
-            epoch (int): epoch number - required by some Algos that need
+            step (int): training step number - required by some Algos that need
                 to perform staged training and early stopping
 
             validate (bool): if True, don't perform any learning updates.
