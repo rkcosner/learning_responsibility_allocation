@@ -48,6 +48,21 @@ class L5KitEnvConfig(EnvConfig):
         # In that case visualisation will be flipped (we've removed the flip there) but the model's input will be correct.
         self.rasterizer.set_origin_to_bottom = True
 
+        #  if a tracked agent is closed than this value to ego, it will be controlled
+        self.simulation.distance_th_far = 30
+
+        #  if a new agent is closer than this value to ego, it will be controlled
+        self.simulation.distance_th_close = 15
+
+        #  whether to disable agents that are not returned at start_frame_index
+        self.simulation.disable_new_agents = True
+
+        # maximum number of simulation steps to run (0.1sec / step)
+        self.simulation.num_simulation_steps = 50
+
+        # which frame to start an simulation episode with
+        self.simulation.start_frame_index = 0
+
 
 class L5RasterizedPlanningConfig(AlgoConfig):
     def __init__(self):

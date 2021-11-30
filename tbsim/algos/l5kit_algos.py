@@ -27,9 +27,6 @@ class L5TrafficModel(pl.LightningModule):
             criterion=nn.MSELoss(reduction="none")
         )
 
-    def process_batch_for_training(self, batch):
-        return TensorUtils.to_device(TensorUtils.to_float(batch), self.device)
-
     def forward(self, obs_dict):
         return self.nets["policy"](obs_dict)["predictions"]
 
@@ -67,7 +64,7 @@ class L5TrafficModel(pl.LightningModule):
         pout = self.nets["policy"](batch)
         losses = self.nets["policy"].compute_losses(pout, batch)
         for lk, l in losses.items():
-            self.log("train/losses_" + lk, l, on_step=True, logger=True)
+            self.log("train/losses_" + lk, l)
 
         total_loss = 0.
         for v in losses.values():
@@ -75,7 +72,7 @@ class L5TrafficModel(pl.LightningModule):
 
         metrics = self._compute_metrics(pout["predictions"], batch)
         for mk, m in metrics.items():
-            self.log("train/metrics_" + mk, m, on_step=True, prog_bar=True, logger=True)
+            self.log("train/metrics_" + mk, m, prog_bar=True)
 
         return total_loss
 
@@ -102,4 +99,4 @@ class L5TrafficModel(pl.LightningModule):
         return optim
 
     def get_action(self, obs_dict):
-        pass
+        return {"agents": self(obs_dict["agents"])}

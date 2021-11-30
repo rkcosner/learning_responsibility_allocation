@@ -89,7 +89,7 @@ def batch_rmse(ground_truth: np.ndarray, pred: np.ndarray, confidences: np.ndarr
     Returns:
         np.ndarray: negative log-likelihood for this batch, an array of float numbers
     """
-    nll = neg_multi_log_likelihood(ground_truth, pred, confidences, avails)
+    nll = batch_neg_multi_log_likelihood(ground_truth, pred, confidences, avails)
     _, _, future_len, _ = pred.shape
 
     return np.sqrt(2 * nll / future_len)
