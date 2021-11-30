@@ -17,7 +17,6 @@ setup(
     ],
     install_requires=[
         "numpy>=1.13.3",
-        "robomimic",
         "l5kit",
         "torch",
         "torchvision",

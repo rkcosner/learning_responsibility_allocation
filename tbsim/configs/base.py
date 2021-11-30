@@ -1,4 +1,4 @@
-from robomimic.config import Config
+from tbsim.configs.config import Config
 
 
 class TrainConfig(Config):
@@ -9,23 +9,15 @@ class TrainConfig(Config):
         self.logging.log_every_n_steps = 10
         self.logging.flush_every_n_steps = 100
 
-        # Write all results to this directory. A new folder with the timestamp will be created
-        # in this directory, and it will contain three subfolders - "log", "models", and "videos".
-        # The "log" directory will contain tensorboard and stdout txt logs. The "models" directory
-        # will contain saved model checkpoints. The "videos" directory contains evaluation rollout
-        # videos.
 
         ## save config - if and when to save model checkpoints ##
         self.save.enabled = True                         # whether model saving should be enabled or disabled
-        self.save.every_n_seconds = None                 # save model every n seconds (set to None to disable)
-        self.save.every_n_steps = 10                    # save model every n epochs (set to None to disable)
-        self.save.on_best_validation = False             # save models that achieve best validation score
-        self.save.on_best_rollout_return = False         # save models that achieve best rollout return
-        self.save.on_best_rollout_success_rate = True    # save models that achieve best success rate
+        self.save.every_n_steps = 100                     # save model every n epochs
+        self.save.best_k = 10
 
         ## rendering config ##
-        self.render.on_screen = False                              # render on-screen or not
-        self.render.to_video = True                         # render evaluation rollouts to videos
+        self.render.on_screen = False                    # render on-screen or not
+        self.render.to_video = True                      # render evaluation rollouts to videos
 
         ## evaluation rollout config ##
         self.rollout.enabled = False                     # enable evaluation rollouts
@@ -46,9 +38,6 @@ class TrainConfig(Config):
         self.validation.num_data_workers = 0
         self.validation.every_n_steps = 1000
         self.validation.num_steps_per_epoch = 100
-
-        ## learning config ##
-
 
 
 class EnvConfig(Config):
@@ -77,7 +66,13 @@ class ExperimentConfig(Config):
         self.env = env_config
         self.algo = algo_config
 
-        self.name = "test"
+        # Write all results to this directory. A new folder with the timestamp will be created
+        # in this directory, and it will contain three subfolders - "log", "models", and "videos".
+        # The "log" directory will contain tensorboard and stdout txt logs. The "models" directory
+        # will contain saved model checkpoints. The "videos" directory contains evaluation rollout
+        # videos.
         self.root_dir = "../{}_trained_models".format(self.algo.name)
-        self.seed = 1             # seed for training (for reproducibility)
-        self.devices.num_gpus = 1         # use GPU or not
+        self.name = "test"                # name of the experiment (creates a subdirectory under root_dir)
+        self.seed = 1                     # seed for everything (for reproducibility)
+
+        self.devices.num_gpus = 1         # Set to 0 to use CPU

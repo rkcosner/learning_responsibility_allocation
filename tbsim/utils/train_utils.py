@@ -7,15 +7,13 @@ import os
 import time
 import datetime
 import shutil
-import imageio
 import numpy as np
 from copy import deepcopy
-from collections import OrderedDict
-import robomimic.utils.tensor_utils as TensorUtils
-import robomimic.utils.log_utils as LogUtils
-
 import torch
+
 import tbsim
+import tbsim.utils.tensor_utils as TensorUtils
+import tbsim.utils.log_utils as LogUtils
 
 
 def infinite_iter(data_loader):
@@ -63,7 +61,7 @@ def get_exp_dir(exp_name, output_dir, save_checkpoints=True, auto_remove_exp_dir
     # create directory for where to dump model parameters, tensorboard logs, and videos
     base_output_dir = output_dir
     if not os.path.isabs(base_output_dir):
-        # relative paths are specified relative to robomimic module location
+        # relative paths are specified relative to tbsim module location
         base_output_dir = os.path.join(tbsim.__path__[0], base_output_dir)
     base_output_dir = os.path.join(base_output_dir, exp_name)
     if os.path.exists(base_output_dir):

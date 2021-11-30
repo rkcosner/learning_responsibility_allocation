@@ -13,7 +13,7 @@ from collections import OrderedDict
 
 import torch.nn as nn
 
-import robomimic.utils.torch_utils as TorchUtils
+import tbsim.utils.torch_utils as TorchUtils
 
 
 # mapping from algo name to factory functions that map algo configs to algo class names
