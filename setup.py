@@ -18,7 +18,8 @@ setup(
     install_requires=[
         "numpy>=1.13.3",
         "l5kit",
-        "torch",
+        "pytorch-lightning",
+        "pytorch"
         "torchvision",
     ],
     eager_resources=['*'],
