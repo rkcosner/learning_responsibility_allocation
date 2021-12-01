@@ -19,7 +19,7 @@ setup(
         "numpy>=1.13.3",
         "l5kit",
         "pytorch-lightning",
-        "pytorch",
+        "torch",
         "torchvision",
     ],
     eager_resources=['*'],
