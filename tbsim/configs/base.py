@@ -22,8 +22,8 @@ class TrainConfig(Config):
         ## evaluation rollout config ##
         self.rollout.enabled = False                     # enable evaluation rollouts
         self.rollout.num_episodes = 10
-        self.rollout.every_n_steps = 2                   # do rollouts every @rate epochs
-        self.rollout.warm_start_n_steps = 1               # number of steps to wait before starting rollouts
+        self.rollout.every_n_steps = 1000                # do rollouts every @rate epochs
+        self.rollout.warm_start_n_steps = 1              # number of steps to wait before starting rollouts
 
         ## training config
         self.training.batch_size = 100

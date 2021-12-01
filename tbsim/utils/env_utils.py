@@ -1,10 +1,20 @@
 import numpy as np
 import pytorch_lightning as pl
-from tbsim.envs.env_l5kit import BatchedEnv
+from tbsim.envs.base import BatchedEnv, BaseEnv
 import tbsim.utils.tensor_utils as TensorUtils
 
 
 def rollout_episodes(env, policy, num_episodes):
+    """
+    Rollout an environment for a number of episodes
+    Args:
+        env (BaseEnv): a base simulation environment (gym-like)
+        policy: a policy that
+        num_episodes:
+
+    Returns:
+
+    """
     stats = {}
     is_batched_env = isinstance(env, BatchedEnv)
 
@@ -43,6 +53,8 @@ class RolloutCallback(pl.Callback):
         should_run = trainer.global_step >= self._warm_start_n_steps and trainer.global_step % self._every_n_steps == 0
         if should_run:
             stats = rollout_episodes(self._env, pl_module, num_episodes=self._num_episodes)
+            print("Step %i rollout: " % trainer.global_step)
             for k, v in stats.items():
                 pl_module.log("rollout/metrics_" + k, np.mean(v))
                 print("rollout/metrics_" + k, np.mean(v))
+            print("\n")

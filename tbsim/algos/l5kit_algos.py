@@ -32,18 +32,19 @@ class L5TrafficModel(pl.LightningModule):
 
     def _compute_metrics(self, predictions, batch):
         metrics = {}
-        preds = TensorUtils.to_numpy(predictions["positions"])
-        gt = TensorUtils.to_numpy(batch["target_positions"])
-        conf = np.ones((preds.shape[0], 1))
-        avail = TensorUtils.to_numpy(batch["target_availabilities"])
-
-        preds = preds[:, None]
-
-        ade = Metrics.batch_average_displacement_error(gt, preds, conf, avail, mode="oracle")
-        fde = Metrics.batch_final_displacement_error(gt, preds, conf, avail, mode="oracle")
-
-        metrics["ADE"] = np.mean(ade)
-        metrics["FDE"] = np.mean(fde)
+        # preds = # TODO
+        # gt = # TODO
+        # avail = TensorUtils.to_numpy(batch["target_availabilities"])
+        #
+        # ade = Metrics.single_mode_metrics(
+        #     Metrics.batch_average_displacement_error, gt, preds, avail
+        # )
+        # fde = Metrics.single_mode_metrics(
+        #     Metrics.batch_final_displacement_error, gt, preds, avail
+        # )
+        #
+        # metrics["ADE"] = np.mean(ade)
+        # metrics["FDE"] = np.mean(fde)
         return metrics
 
     def training_step(self, batch, batch_idx):
@@ -99,4 +100,4 @@ class L5TrafficModel(pl.LightningModule):
         return optim
 
     def get_action(self, obs_dict):
-        return {"agents": self(obs_dict["agents"])}
+        return {"ego": self(obs_dict["ego"])}

@@ -13,6 +13,10 @@ class L5KitTrainConfig(TrainConfig):
         self.training.num_data_workers = 2
         self.validation.num_data_workers = 2
         self.validation.enabled = True
+        self.rollout.enabled = True
+        self.rollout.every_n_steps = 1000
+        self.rollout.num_episodes = 30
+        self.save.every_n_steps = 1000
 
 
 class L5KitEnvConfig(EnvConfig):

@@ -149,7 +149,7 @@ def batch_time_displace(
 
 
 def batch_average_displacement_error(
-        ground_truth: np.ndarray, pred: np.ndarray, confidences: np.ndarray, avails: np.ndarray, mode: str
+        ground_truth: np.ndarray, pred: np.ndarray, confidences: np.ndarray, avails: np.ndarray, mode: str="mean"
 ) -> np.ndarray:
     """
     Returns the average displacement error (ADE), which is the average displacement over all timesteps.
@@ -185,7 +185,7 @@ def batch_average_displacement_error(
 
 
 def batch_final_displacement_error(
-        ground_truth: np.ndarray, pred: np.ndarray, confidences: np.ndarray, avails: np.ndarray, mode: str
+        ground_truth: np.ndarray, pred: np.ndarray, confidences: np.ndarray, avails: np.ndarray, mode: str="mean"
 ) -> np.ndarray:
     """
     Returns the final displacement error (FDE), which is the displacement calculated at the last timestep.
@@ -218,3 +218,22 @@ def batch_final_displacement_error(
         raise ValueError(f"mode: {mode} not valid")
 
     return error
+
+
+def single_mode_metrics(metrics_func, ground_truth: np.ndarray, pred: np.ndarray, avails: np.ndarray):
+    """
+    Run a metrics with single mode by inserting a mode dimension
+
+    Args:
+        ground_truth (np.ndarray): array of shape (batch)x(time)x(2D coords)
+        pred (np.ndarray): array of shape (batch)x(time)x(2D coords)
+        avails (np.ndarray): array of shape (batch)x(time) with the availability for each gt timestep
+        mode (str): Optional, set to None when not applicable
+            calculation mode - options are 'mean' (average over hypotheses) and 'oracle' (use best hypotheses)
+    Returns:
+        np.ndarray: metrics values
+    """
+    pred = pred[:, None]
+    conf = np.ones((pred.shape[0], 1))
+    kwargs = dict(ground_truth=ground_truth, pred=pred, confidences=conf, avails=avails)
+    return metrics_func(**kwargs)
