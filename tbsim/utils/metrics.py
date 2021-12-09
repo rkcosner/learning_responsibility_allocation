@@ -3,13 +3,9 @@ Adapted from https://github.com/lyft/l5kit/blob/master/l5kit/l5kit/evaluation/me
 """
 
 
-from enum import IntEnum
-from typing import Callable, Optional, Tuple
+from typing import Callable
 
 import numpy as np
-import torch
-
-from l5kit.planning import utils
 
 
 metric_signature = Callable[[np.ndarray, np.ndarray, np.ndarray, np.ndarray], np.ndarray]

@@ -10,10 +10,10 @@ def rollout_episodes(env, policy, num_episodes):
     Args:
         env (BaseEnv): a base simulation environment (gym-like)
         policy: a policy that
-        num_episodes:
+        num_episodes (int): number of episodes to rollout for
 
     Returns:
-
+        stats (dict): A dictionary of rollout stats for each episode (metrics, rewards, etc.)
     """
     stats = {}
     is_batched_env = isinstance(env, BatchedEnv)
