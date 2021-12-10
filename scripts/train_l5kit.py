@@ -4,23 +4,32 @@ import os
 import json
 from torch.utils.data import DataLoader
 from collections import OrderedDict
+import pdb
 
 from l5kit.data import LocalDataManager, ChunkedDataset
-from l5kit.dataset import AgentDataset, EgoDataset
+from l5kit.dataset import AgentDataset, EgoDataset, EgoDatasetVectorized
 from l5kit.rasterization import build_rasterizer
+from l5kit.vectorization.vectorizer_builder import build_vectorizer
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from tbsim.utils.log_utils import PrintLogger
 import tbsim.utils.train_utils as TrainUtils
-from tbsim.algos.l5kit_algos import L5TrafficModel
-from tbsim.configs import ExperimentConfig, L5KitEnvConfig, L5KitTrainConfig, L5RasterizedPlanningConfig
+from tbsim.algos.l5kit_algos import L5TrafficModel, L5TransformerTrafficModel
+from tbsim.configs import (
+    ExperimentConfig,
+    L5KitEnvConfig,
+    L5KitTrainConfig,
+    L5RasterizedPlanningConfig,
+    L5KitVectorizedEnvConfig,
+    L5TransformerPredConfig,
+)
 from tbsim.envs.env_l5kit import EnvL5KitSimulation
 from tbsim.utils.env_utils import RolloutCallback
 from tbsim.utils.config_utils import translate_l5kit_cfg
 
 
-def main(cfg):
+def Rasterized_main(cfg):
     pl.seed_everything(cfg.seed)
 
     print("\n============= New Training Run with Config =============")
@@ -30,12 +39,12 @@ def main(cfg):
         exp_name=cfg.name,
         output_dir=cfg.root_dir,
         save_checkpoints=cfg.train.save.enabled,
-        auto_remove_exp_dir=True
+        auto_remove_exp_dir=True,
     )
 
     if cfg.train.logging.terminal_output_to_txt:
         # log stdout and stderr to a text file
-        logger = PrintLogger(os.path.join(log_dir, 'log.txt'))
+        logger = PrintLogger(os.path.join(log_dir, "log.txt"))
         sys.stdout = logger
         sys.stderr = logger
 
@@ -43,6 +52,7 @@ def main(cfg):
 
     # Dataset
     l5_config = translate_l5kit_cfg(cfg)
+    pdb.set_trace()
 
     os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath(cfg.train.dataset_path)
     dm = LocalDataManager(None)
@@ -50,13 +60,14 @@ def main(cfg):
 
     train_zarr = ChunkedDataset(dm.require(cfg.train.dataset_train_key)).open()
     trainset = EgoDataset(l5_config, train_zarr, rasterizer)
+    pdb.set_trace()
 
     train_loader = DataLoader(
         dataset=trainset,
         shuffle=True,
         batch_size=cfg.train.training.batch_size,
         num_workers=cfg.train.training.num_data_workers,
-        drop_last=True
+        drop_last=True,
     )
     print("\n============= Training Dataset =============")
     print(trainset)
@@ -70,39 +81,46 @@ def main(cfg):
             shuffle=True,
             batch_size=cfg.train.validation.batch_size,
             num_workers=cfg.train.validation.num_data_workers,
-            drop_last=True
+            drop_last=True,
         )
         print("\n============= Validation Dataset =============")
         print(validset)
-
 
     # Environment for close-loop evaluation
     if cfg.train.rollout.enabled:
         if valid_zarr is None:
             valid_zarr = ChunkedDataset(dm.require(cfg.train.dataset_valid_key)).open()
         env_dataset = EgoDataset(l5_config, valid_zarr, rasterizer)
-        env = EnvL5KitSimulation(cfg.env, dataset=env_dataset, seed=cfg.seed, num_scenes=cfg.train.rollout.num_episodes)
+        env = EnvL5KitSimulation(
+            cfg.env,
+            dataset=env_dataset,
+            seed=cfg.seed,
+            num_scenes=cfg.train.rollout.num_episodes,
+        )
         # Run rollout at regular intervals
         rollout_callback = RolloutCallback(
             env=env,
             num_episodes=1,  # all scenes run in parallel
             every_n_steps=cfg.train.rollout.every_n_steps,
-            warm_start_n_steps=cfg.train.rollout.warm_start_n_steps
+            warm_start_n_steps=cfg.train.rollout.warm_start_n_steps,
         )
         train_callbacks.append(rollout_callback)
 
-
     # Model
-    modality_shapes = OrderedDict(image=(rasterizer.num_channels(), 224, 224))
-    model = L5TrafficModel(
+    # modality_shapes = OrderedDict(image=(rasterizer.num_channels(), 224, 224))
+    # model = L5TrafficModel(
+    #     algo_config=cfg.algo,
+    #     modality_shapes=modality_shapes,
+    # )
+
+    model = L5TransformerTrafficModel(
         algo_config=cfg.algo,
-        modality_shapes=modality_shapes,
     )
 
     # Checkpointing
     ckpt_ade_callback = pl.callbacks.ModelCheckpoint(
         dirpath=ckpt_dir,
-        filename='iter={step}_ep={epoch}_simADE={rollout/metrics_ego_ADE:.2f}',
+        filename="iter={step}_ep={epoch}_simADE={rollout/metrics_ego_ADE:.2f}",
         # explicitly spell out metric names, otherwise PL parses '/' in metric names to directories
         auto_insert_metric_name=False,
         save_top_k=cfg.train.save.best_k,  # save the best k models
@@ -114,7 +132,7 @@ def main(cfg):
 
     ckpt_loss_callback = pl.callbacks.ModelCheckpoint(
         dirpath=ckpt_dir,
-        filename='iter={step}_ep={epoch}_valLoss={val/losses_prediction_loss:.2f}',
+        filename="iter={step}_ep={epoch}_valLoss={val/losses_prediction_loss:.2f}",
         # explicitly spell out metric names, otherwise PL parses '/' in metric names to directories
         auto_insert_metric_name=False,
         save_top_k=cfg.train.save.best_k,  # save the best k models
@@ -127,7 +145,9 @@ def main(cfg):
     train_callbacks.extend([ckpt_ade_callback, ckpt_loss_callback])
 
     # Logging
-    tb_logger = TensorBoardLogger(save_dir=root_dir, version=version_key, name=None, sub_dir="logs/")
+    tb_logger = TensorBoardLogger(
+        save_dir=root_dir, version=version_key, name=None, sub_dir="logs/"
+    )
     print("Tensorboard event will be saved at {}".format(tb_logger.log_dir))
 
     # Train
@@ -149,7 +169,174 @@ def main(cfg):
         callbacks=train_callbacks,
     )
 
-    trainer.fit(model=model, train_dataloader=train_loader, val_dataloaders=valid_loader)
+    trainer.fit(
+        model=model, train_dataloader=train_loader, val_dataloaders=valid_loader
+    )
+
+
+def Vectorized_main(cfg):
+    pl.seed_everything(cfg.seed)
+
+    print("\n============= New Training Run with Config =============")
+    print(cfg)
+    print("")
+    root_dir, log_dir, ckpt_dir, video_dir, version_key = TrainUtils.get_exp_dir(
+        exp_name=cfg.name,
+        output_dir=cfg.root_dir,
+        save_checkpoints=cfg.train.save.enabled,
+        auto_remove_exp_dir=True,
+    )
+
+    if cfg.train.logging.terminal_output_to_txt:
+        # log stdout and stderr to a text file
+        logger = PrintLogger(os.path.join(log_dir, "log.txt"))
+        sys.stdout = logger
+        sys.stderr = logger
+
+    train_callbacks = []
+
+    # Dataset
+    l5_config = translate_l5kit_cfg(cfg)
+
+    os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath(cfg.train.dataset_path)
+    dm = LocalDataManager(None)
+
+    train_zarr = ChunkedDataset(dm.require(cfg.train.dataset_train_key)).open()
+    vectorizer = build_vectorizer(l5_config, dm)
+    trainset = EgoDatasetVectorized(l5_config, train_zarr, vectorizer)
+    train_loader = DataLoader(
+        dataset=trainset,
+        shuffle=True,
+        batch_size=cfg.train.training.batch_size,
+        num_workers=cfg.train.training.num_data_workers,
+        drop_last=True,
+    )
+    print("\n============= Training Dataset =============")
+    print(trainset)
+
+    valid_zarr = None
+    if cfg.train.validation.enabled:
+        valid_zarr = ChunkedDataset(dm.require(cfg.train.dataset_valid_key)).open()
+        validset = EgoDatasetVectorized(l5_config, valid_zarr, vectorizer)
+        valid_loader = DataLoader(
+            dataset=validset,
+            shuffle=True,
+            batch_size=cfg.train.validation.batch_size,
+            num_workers=cfg.train.validation.num_data_workers,
+            drop_last=True,
+        )
+        print("\n============= Validation Dataset =============")
+        print(validset)
+
+    # Environment for close-loop evaluation
+    if cfg.train.rollout.enabled:
+        if valid_zarr is None:
+            valid_zarr = ChunkedDataset(dm.require(cfg.train.dataset_valid_key)).open()
+        env_dataset = EgoDatasetVectorized(l5_config, valid_zarr, vectorizer)
+        env = EnvL5KitSimulation(
+            cfg.env,
+            dataset=env_dataset,
+            seed=cfg.seed,
+            num_scenes=cfg.train.rollout.num_episodes,
+        )
+
+        # Run rollout at regular intervals
+
+        rollout_callback = RolloutCallback(
+            env=env,
+            num_episodes=1,  # all scenes run in parallel
+            every_n_steps=cfg.train.rollout.every_n_steps,
+            warm_start_n_steps=cfg.train.rollout.warm_start_n_steps,
+        )
+        train_callbacks.append(rollout_callback)
+
+    # Model
+    cfg.algo["tgt_mask_N"] = len(train_loader)
+    model = L5TransformerTrafficModel(
+        algo_config=cfg.algo,
+    )
+
+    # Checkpointing
+    ckpt_ade_callback = pl.callbacks.ModelCheckpoint(
+        dirpath=ckpt_dir,
+        filename="iter={step}_ep={epoch}_simADE={rollout/metrics_ego_ADE:.2f}",
+        # explicitly spell out metric names, otherwise PL parses '/' in metric names to directories
+        auto_insert_metric_name=False,
+        save_top_k=cfg.train.save.best_k,  # save the best k models
+        monitor="rollout/metrics_ego_ADE",
+        mode="min",
+        every_n_train_steps=cfg.train.save.every_n_steps,
+        verbose=True,
+    )
+
+    ckpt_loss_callback = pl.callbacks.ModelCheckpoint(
+        dirpath=ckpt_dir,
+        filename="iter={step}_ep={epoch}_valLoss={val/losses_prediction_loss:.2f}",
+        # explicitly spell out metric names, otherwise PL parses '/' in metric names to directories
+        auto_insert_metric_name=False,
+        save_top_k=cfg.train.save.best_k,  # save the best k models
+        monitor="val/losses_prediction_loss",
+        mode="min",
+        every_n_train_steps=cfg.train.save.every_n_steps,
+        verbose=True,
+    )
+
+    train_callbacks.extend([ckpt_loss_callback, ckpt_ade_callback])
+
+    # Logging
+    tb_logger = TensorBoardLogger(
+        save_dir=root_dir, version=version_key, name=None, sub_dir="logs/"
+    )
+    print("Tensorboard event will be saved at {}".format(tb_logger.log_dir))
+
+    # Train
+    trainer = pl.Trainer(
+        default_root_dir=root_dir,
+        gpus=cfg.devices.num_gpus,
+        # checkpointing
+        enable_checkpointing=cfg.train.save.enabled,
+        # logging
+        logger=tb_logger,
+        flush_logs_every_n_steps=cfg.train.logging.flush_every_n_steps,
+        log_every_n_steps=cfg.train.logging.log_every_n_steps,
+        # training
+        max_steps=cfg.train.training.num_steps,
+        # validation
+        val_check_interval=cfg.train.validation.every_n_steps,
+        limit_val_batches=cfg.train.validation.num_steps_per_epoch,
+        # all callbacks
+        callbacks=train_callbacks,
+    )
+
+    trainer.fit(
+        model=model, train_dataloader=train_loader, val_dataloaders=valid_loader
+    )
+
+
+def test_Vec_l5_env(cfg):
+
+    l5_config = translate_l5kit_cfg(cfg)
+
+    os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath(cfg.train.dataset_path)
+    dm = LocalDataManager(None)
+    valid_zarr = ChunkedDataset(dm.require(cfg.train.dataset_valid_key)).open()
+    vectorizer = build_vectorizer(l5_config, dm)
+    env_dataset = EgoDatasetVectorized(l5_config, valid_zarr, vectorizer)
+
+    # rasterizer = build_rasterizer(l5_config, dm)
+    # env_dataset = EgoDataset(l5_config, valid_zarr, rasterizer)
+    env = EnvL5KitSimulation(
+        cfg.env,
+        dataset=env_dataset,
+        seed=cfg.seed,
+        num_scenes=cfg.train.rollout.num_episodes,
+    )
+
+    env.reset()
+
+    ac = {"ego": env.get_random_ego_actions()}
+    env.step(ac)
+    print(env.get_metrics())
 
 
 if __name__ == "__main__":
@@ -175,15 +362,20 @@ if __name__ == "__main__":
         "--dataset_path",
         type=str,
         default=None,
-        help="(optional) if provided, override the dataset root path"
+        help="(optional) if provided, override the dataset root path",
     )
 
     args = parser.parse_args()
 
+    # default_config = ExperimentConfig(
+    #     train_config=L5KitTrainConfig(),
+    #     env_config=L5KitEnvConfig(),
+    #     algo_config=L5RasterizedPlanningConfig(),
+    # )
     default_config = ExperimentConfig(
         train_config=L5KitTrainConfig(),
-        env_config=L5KitEnvConfig(),
-        algo_config=L5RasterizedPlanningConfig()
+        env_config=L5KitVectorizedEnvConfig(),
+        algo_config=L5TransformerPredConfig(),
     )
 
     if args.name is not None:
@@ -194,9 +386,10 @@ if __name__ == "__main__":
 
     if args.config is not None:
         # Update default config with external json file
-        ext_cfg = json.load(open(args.config, 'r'))
+        ext_cfg = json.load(open(args.config, "r"))
         default_config.update(**ext_cfg)
 
     default_config.lock()  # Make config read-only
-    main(default_config)
-
+    # Rasterized_main(default_config)
+    Vectorized_main(default_config)
+    # test_Vec_l5_env(default_config)

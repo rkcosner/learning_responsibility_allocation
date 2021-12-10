@@ -4,6 +4,7 @@ This file contains some PyTorch utilities.
 import numpy as np
 import torch
 import torch.optim as optim
+import functools
 
 
 def soft_update(source, target, tau):
@@ -16,9 +17,7 @@ def soft_update(source, target, tau):
         target (torch.nn.Module): target network to update
     """
     for target_param, param in zip(target.parameters(), source.parameters()):
-        target_param.copy_(
-            target_param * (1.0 - tau) + param * tau
-        )
+        target_param.copy_(target_param * (1.0 - tau) + param * tau)
 
 
 def hard_update(source, target):
@@ -30,7 +29,7 @@ def hard_update(source, target):
         target (torch.nn.Module): target network to update parameters for
     """
     for target_param, param in zip(target.parameters(), source.parameters()):
-            target_param.copy_(param)
+        target_param.copy_(param)
 
 
 def get_torch_device(try_to_use_cuda):
@@ -88,7 +87,7 @@ def reparameterize(mu, logvar):
 
 def optimizer_from_optim_params(net_optim_params, net):
     """
-    Helper function to return a torch Optimizer from the optim_params 
+    Helper function to return a torch Optimizer from the optim_params
     section of the config for a particular network.
 
     Args:
@@ -110,7 +109,7 @@ def optimizer_from_optim_params(net_optim_params, net):
 
 def lr_scheduler_from_optim_params(net_optim_params, net, optimizer):
     """
-    Helper function to return a LRScheduler from the optim_params 
+    Helper function to return a LRScheduler from the optim_params
     section of the config for a particular network. Returns None
     if a scheduler is not needed.
 
@@ -166,7 +165,7 @@ def backprop_for_loss(net, optim, loss, max_grad_norm=None, retain_graph=False):
         torch.nn.utils.clip_grad_norm_(net.parameters(), max_grad_norm)
 
     # compute grad norms
-    grad_norms = 0.
+    grad_norms = 0.0
     for p in net.parameters():
         # only clip gradients for parameters for which requires_grad is True
         if p.grad is not None:
@@ -178,13 +177,15 @@ def backprop_for_loss(net, optim, loss, max_grad_norm=None, retain_graph=False):
     return grad_norms
 
 
-class dummy_context_mgr():
+class dummy_context_mgr:
     """
     A dummy context manager - useful for having conditional scopes (such
     as @maybe_no_grad). Nothing happens in this scope.
     """
+
     def __enter__(self):
         return None
+
     def __exit__(self, exc_type, exc_value, traceback):
         return False
 
@@ -196,3 +197,15 @@ def maybe_no_grad(no_grad):
             it will be a dummy context
     """
     return torch.no_grad() if no_grad else dummy_context_mgr()
+
+
+def rgetattr(obj, attr, *args):
+    def _getattr(obj, attr):
+        return getattr(obj, attr, *args)
+
+    return functools.reduce(_getattr, [obj] + attr.split("."))
+
+
+def rsetattr(obj, attr, val):
+    pre, _, post = attr.rpartition(".")
+    return setattr(rgetattr(obj, pre) if pre else obj, post, val)

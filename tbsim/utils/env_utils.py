@@ -2,6 +2,7 @@ import numpy as np
 import pytorch_lightning as pl
 from tbsim.envs.base import BatchedEnv, BaseEnv
 import tbsim.utils.tensor_utils as TensorUtils
+import pdb
 
 
 def rollout_episodes(env, policy, num_episodes):
@@ -50,9 +51,14 @@ class RolloutCallback(pl.Callback):
         self._warm_start_n_steps = warm_start_n_steps
 
     def on_batch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        should_run = trainer.global_step >= self._warm_start_n_steps and trainer.global_step % self._every_n_steps == 0
+        should_run = (
+            trainer.global_step >= self._warm_start_n_steps
+            and trainer.global_step % self._every_n_steps == 0
+        )
         if should_run:
-            stats = rollout_episodes(self._env, pl_module, num_episodes=self._num_episodes)
+            stats = rollout_episodes(
+                self._env, pl_module, num_episodes=self._num_episodes
+            )
             print("Step %i rollout: " % trainer.global_step)
             for k, v in stats.items():
                 pl_module.log("rollout/metrics_" + k, np.mean(v))
