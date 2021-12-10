@@ -1,0 +1,14 @@
+Metadata-Version: 2.1
+Name: tbsim
+Version: 0.0.1
+Summary: Traffic Behavior Simulation
+Home-page: UNKNOWN
+Author: NVIDIA AV Research
+Author-email: danfeix@nvidia.com
+License: UNKNOWN
+Description: # Traffic Behavior Simulation
+        
+        
+Platform: UNKNOWN
+Requires-Python: >=3
+Description-Content-Type: text/markdown
