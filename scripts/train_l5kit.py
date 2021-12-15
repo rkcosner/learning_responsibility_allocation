@@ -87,7 +87,8 @@ def main(cfg):
             env=env,
             num_episodes=1,  # all scenes run in parallel
             every_n_steps=cfg.train.rollout.every_n_steps,
-            warm_start_n_steps=cfg.train.rollout.warm_start_n_steps
+            warm_start_n_steps=cfg.train.rollout.warm_start_n_steps,
+            verbose=False
         )
         train_callbacks.append(rollout_callback)
 
@@ -102,7 +103,7 @@ def main(cfg):
     # Checkpointing
     ckpt_ade_callback = pl.callbacks.ModelCheckpoint(
         dirpath=ckpt_dir,
-        filename='iter={step}_ep={epoch}_simADE={rollout/metrics_ego_ADE:.2f}',
+        filename="iter{step}_ep{epoch}_simADE{rollout/metrics_ego_ADE:.2f}",
         # explicitly spell out metric names, otherwise PL parses '/' in metric names to directories
         auto_insert_metric_name=False,
         save_top_k=cfg.train.save.best_k,  # save the best k models
@@ -114,7 +115,7 @@ def main(cfg):
 
     ckpt_loss_callback = pl.callbacks.ModelCheckpoint(
         dirpath=ckpt_dir,
-        filename='iter={step}_ep={epoch}_valLoss={val/losses_prediction_loss:.2f}',
+        filename="iter{step}_ep{epoch}_valLoss{val/losses_prediction_loss:.2f}",
         # explicitly spell out metric names, otherwise PL parses '/' in metric names to directories
         auto_insert_metric_name=False,
         save_top_k=cfg.train.save.best_k,  # save the best k models

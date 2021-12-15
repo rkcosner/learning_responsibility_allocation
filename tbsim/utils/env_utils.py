@@ -43,18 +43,25 @@ def rollout_episodes(env, policy, num_episodes):
 
 
 class RolloutCallback(pl.Callback):
-    def __init__(self, env, num_episodes=1, every_n_steps=100, warm_start_n_steps=1):
+    def __init__(self, env, num_episodes=1, every_n_steps=100, warm_start_n_steps=1, verbose=False):
         self._env = env
         self._num_episodes = num_episodes
         self._every_n_steps = every_n_steps
         self._warm_start_n_steps = warm_start_n_steps
+        self._verbose = verbose
+
+    def print_if_verbose(self, msg):
+        if self._verbose:
+            print(msg)
 
     def on_batch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         should_run = trainer.global_step >= self._warm_start_n_steps and trainer.global_step % self._every_n_steps == 0
         if should_run:
             stats = rollout_episodes(self._env, pl_module, num_episodes=self._num_episodes)
-            print("Step %i rollout: " % trainer.global_step)
+            self.print_if_verbose("\nStep %i rollout (%i episodes): " % (trainer.global_step, self._num_episodes))
             for k, v in stats.items():
-                pl_module.log("rollout/metrics_" + k, np.mean(v))
-                print("rollout/metrics_" + k, np.mean(v))
-            print("\n")
+                # Set on_step=True and on_epoch=False to force the logger to log stats at the step
+                # See https://github.com/PyTorchLightning/pytorch-lightning/issues/9772 for explanation
+                pl_module.log("rollout/metrics_" + k, np.mean(v), on_step=True, on_epoch=False)
+                self.print_if_verbose(("rollout/metrics_" + k, np.mean(v)))
+            self.print_if_verbose("\n")
