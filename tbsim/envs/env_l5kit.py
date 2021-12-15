@@ -1,4 +1,5 @@
 import numpy as np
+from copy import deepcopy
 from typing import List, Dict
 from torch.utils.data.dataloader import default_collate
 
@@ -73,6 +74,9 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
     @property
     def num_instances(self):
         return self._num_scenes
+
+    def get_info(self):
+        return {"l5_sim_states": self._get_l5_sim_states(), "l5_scene_indices": deepcopy(self._current_scene_indices)}
 
     def get_metrics(self):
         """
@@ -164,28 +168,30 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         agents_control = actions.get("agents", None)
 
         should_update = self._frame_index + 1 < self.horizon
-        if ego_control is not None and should_update:
-            # update the next frame's ego position and orientation using control input
-            ClosedLoopSimulator.update_ego(
-                dataset=self._current_scene_dataset,
-                frame_idx=self._frame_index + 1,
-                input_dict=obs["ego"],
-                output_dict=ego_control
-            )
+        if ego_control is not None:
+            if should_update:
+                # update the next frame's ego position and orientation using control input
+                ClosedLoopSimulator.update_ego(
+                    dataset=self._current_scene_dataset,
+                    frame_idx=self._frame_index + 1,
+                    input_dict=obs["ego"],
+                    output_dict=ego_control
+                )
 
             # record state
             ego_in_out = ClosedLoopSimulator.get_ego_in_out(obs["ego"], ego_control, keys_to_exclude=set(("image",)))
             for scene_idx in self._current_scene_indices:
                 self._ego_states[scene_idx].append(ego_in_out[scene_idx])
 
-        if agents_control is not None and should_update:
-            # update the next frame's agent positions and orientations using control input
-            ClosedLoopSimulator.update_agents(
-                dataset=self._current_scene_dataset,
-                frame_idx=self._frame_index + 1,
-                input_dict=obs["agents"],
-                output_dict=agents_control
-            )
+        if agents_control is not None:
+            if should_update:
+                # update the next frame's agent positions and orientations using control input
+                ClosedLoopSimulator.update_agents(
+                    dataset=self._current_scene_dataset,
+                    frame_idx=self._frame_index + 1,
+                    input_dict=obs["agents"],
+                    output_dict=agents_control
+                )
             agents_in_out = ClosedLoopSimulator.get_agents_in_out(obs["agents"], agents_control, keys_to_exclude=set(("image",)))
             for scene_idx in self._current_scene_indices:
                 self._agents_states[scene_idx].append(agents_in_out.get(scene_idx, []))

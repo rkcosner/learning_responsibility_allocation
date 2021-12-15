@@ -21,6 +21,10 @@ class BaseEnv(abc.ABC):
         return
 
     @abc.abstractmethod
+    def get_info(self):
+        return
+
+    @abc.abstractmethod
     def get_observation(self):
         return
 

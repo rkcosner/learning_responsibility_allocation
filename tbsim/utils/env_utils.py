@@ -14,8 +14,10 @@ def rollout_episodes(env, policy, num_episodes):
 
     Returns:
         stats (dict): A dictionary of rollout stats for each episode (metrics, rewards, etc.)
+        info (dict): A dictionary of environment info for each episode
     """
     stats = {}
+    info = {}
     is_batched_env = isinstance(env, BatchedEnv)
 
     for ei in range(num_episodes):
@@ -39,7 +41,16 @@ def rollout_episodes(env, policy, num_episodes):
             else:
                 stats[k].append(v)
 
-    return stats
+        env_info = env.get_info()
+        for k, v in env_info.items():
+            if k not in info:
+                info[k] = []
+            if is_batched_env:
+                info[k].extend(v)
+            else:
+                info[k].append(v)
+
+    return stats, info
 
 
 class RolloutCallback(pl.Callback):
@@ -57,7 +68,7 @@ class RolloutCallback(pl.Callback):
     def on_batch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         should_run = trainer.global_step >= self._warm_start_n_steps and trainer.global_step % self._every_n_steps == 0
         if should_run:
-            stats = rollout_episodes(self._env, pl_module, num_episodes=self._num_episodes)
+            stats, _ = rollout_episodes(self._env, pl_module, num_episodes=self._num_episodes)
             self.print_if_verbose("\nStep %i rollout (%i episodes): " % (trainer.global_step, self._num_episodes))
             for k, v in stats.items():
                 # Set on_step=True and on_epoch=False to force the logger to log stats at the step
