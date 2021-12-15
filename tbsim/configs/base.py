@@ -74,3 +74,4 @@ class ExperimentConfig(Config):
         self.seed = 1                     # seed for everything (for reproducibility)
 
         self.devices.num_gpus = 1         # Set to 0 to use CPU
+

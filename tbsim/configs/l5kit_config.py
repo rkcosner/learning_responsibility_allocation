@@ -16,7 +16,8 @@ class L5KitTrainConfig(TrainConfig):
         self.validation.every_n_steps = 1000
         self.rollout.enabled = True
         self.rollout.every_n_steps = 1000
-        self.rollout.num_episodes = 30
+        self.rollout.num_episodes = 4
+        self.rollout.num_scenes = 25
         self.save.every_n_steps = 2000
 
 

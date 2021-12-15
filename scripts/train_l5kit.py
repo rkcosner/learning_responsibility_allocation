@@ -18,6 +18,7 @@ from tbsim.configs import ExperimentConfig, L5KitEnvConfig, L5KitTrainConfig, L5
 from tbsim.envs.env_l5kit import EnvL5KitSimulation
 from tbsim.utils.env_utils import RolloutCallback
 from tbsim.utils.config_utils import translate_l5kit_cfg
+from l5kit.visualization.visualizer.zarr_utils import simulation_out_to_visualizer_scene
 
 
 def main(cfg):
@@ -30,7 +31,7 @@ def main(cfg):
         exp_name=cfg.name,
         output_dir=cfg.root_dir,
         save_checkpoints=cfg.train.save.enabled,
-        auto_remove_exp_dir=True
+        auto_remove_exp_dir=False
     )
 
     if cfg.train.logging.terminal_output_to_txt:
@@ -81,11 +82,11 @@ def main(cfg):
         if valid_zarr is None:
             valid_zarr = ChunkedDataset(dm.require(cfg.train.dataset_valid_key)).open()
         env_dataset = EgoDataset(l5_config, valid_zarr, rasterizer)
-        env = EnvL5KitSimulation(cfg.env, dataset=env_dataset, seed=cfg.seed, num_scenes=cfg.train.rollout.num_episodes)
+        env = EnvL5KitSimulation(cfg.env, dataset=env_dataset, seed=cfg.seed, num_scenes=cfg.train.rollout.num_scenes)
         # Run rollout at regular intervals
         rollout_callback = RolloutCallback(
             env=env,
-            num_episodes=1,  # all scenes run in parallel
+            num_episodes=cfg.train.rollout.num_episodes,
             every_n_steps=cfg.train.rollout.every_n_steps,
             warm_start_n_steps=cfg.train.rollout.warm_start_n_steps,
             verbose=False
