@@ -13,6 +13,8 @@ import pdb
 import pytorch_lightning as pl
 from collections import OrderedDict
 from tbsim.utils.torch_utils import get_torch_device
+from tbsim.utils.tensor_utils import get_box_world_coords, batch_nd_transform_points
+from tbsim.models.CNNROIMapEncoder import CNNROIMapEncoder
 
 
 def clones(module, N):
@@ -50,22 +52,24 @@ class FactorizedEncoderDecoder(nn.Module):
         src_mask,
         tgt_mask,
         dyn_type,
+        map_emb=None,
     ):
         "Take in and process masked src and target sequences."
         src_pos = self.src2pos(src, dyn_type)
         # tgt_pos = self.tgt2pos(tgt, type_index)
         return self.decode(
-            self.encode(src, src_mask, src_pos),
+            self.encode(src, src_mask, src_pos, map_emb),
             src_mask,
             tgt,
             tgt_mask,
             src_pos[:, :, -1:],
         )
 
-    def encode(self, src, src_mask, src_pos):
-        return self.encoder(self.src_embed(src), src_mask, src_pos)
+    def encode(self, src, src_mask, src_pos, map_emb):
+        return self.encoder(self.src_embed(src), src_mask, src_pos, map_emb)
 
     def decode(self, memory, src_mask, tgt, tgt_mask, pos):
+
         return self.decoder(
             self.tgt_embed(tgt),
             memory,
@@ -120,20 +124,24 @@ class Encoder(nn.Module):
 class FactorizedEncoder(nn.Module):
     def __init__(self, temporal_enc, agent_enc, temporal_pe, XY_pe):
         super(FactorizedEncoder, self).__init__()
-        self.temporal_enc = temporal_enc
-        self.agent_enc = agent_enc
+        self.temporal_encs = clones(temporal_enc, 2)
+        self.agent_encs = clones(agent_enc, 2)
         self.temporal_pe = temporal_pe
         self.XY_pe = XY_pe
 
-    def forward(self, x, src_mask, src_pos):
+    def forward(self, x, src_mask, src_pos, map_emb=None):
         "Pass the input (and mask) through each layer in turn."
         "x:[Num_agent,T,C]"
         "pos:[Num_agent,T,2]"
 
         x = self.XY_pe(x, src_pos)
-        x = self.agent_enc(x, src_mask)
+        x = self.agent_encs[0](x, src_mask)
         x = self.temporal_pe(x)
-        x = self.temporal_enc(x, src_mask)
+        x = self.temporal_encs[0](x, src_mask)
+        if map_emb is not None:
+            x += map_emb.unsqueeze(2)
+        x = self.agent_encs[1](x, src_mask)
+        x = self.temporal_encs[1](x, src_mask)
         return x
 
 
@@ -440,7 +448,7 @@ class Transformer_model(pl.LightningModule):
         algo_config,
     ):
         super(Transformer_model, self).__init__()
-        self.time_step = algo_config.time_step
+        self.step_time = algo_config.step_time
         self.algo_config = algo_config
 
         self.register_buffer(
@@ -448,7 +456,7 @@ class Transformer_model(pl.LightningModule):
         )
         self.ego_weight = algo_config.ego_weight
         self.all_other_weight = algo_config.all_other_weight
-        self.criterion = nn.MSELoss()
+        self.criterion = nn.MSELoss(reduction="none")
 
         self.dyn_list = {
             DynType.UNICYCLE: Unicycle("vehicle"),
@@ -459,7 +467,7 @@ class Transformer_model(pl.LightningModule):
             ),
         }
 
-        self.model = make_factorized_model(
+        self.Transformermodel = make_factorized_model(
             src_dim=21,
             tgt_dim=3,
             dyn_list=self.dyn_list.values(),
@@ -470,6 +478,15 @@ class Transformer_model(pl.LightningModule):
             head=algo_config.head,
             dropout=algo_config.dropout,
             step_size=algo_config.XY_step_size,
+        )
+        self.CNNmodel = CNNROIMapEncoder(
+            algo_config.map_channels,
+            algo_config.hidden_channels,
+            algo_config.ROI_outdim,
+            algo_config.output_size,
+            algo_config.kernel_size,
+            algo_config.strides,
+            algo_config.input_size,
         )
 
     @staticmethod
@@ -532,6 +549,87 @@ class Transformer_model(pl.LightningModule):
             tgt_mask[i, :, sample[i] :] = 0
         return tgt_mask
 
+    # def generate_ROIs(self, pos, yaw, centroid, raster_from_world, mask, patch_size):
+    #     """
+    #     This version generates ROI for all agents at all time instances that are available
+    #     """
+    #     bs = pos.shape[0]
+    #     s = torch.sin(yaw).unsqueeze(-1)
+    #     c = torch.cos(yaw).unsqueeze(-1)
+    #     rotM = torch.cat(
+    #         (torch.cat((c, -s), dim=-1), torch.cat((s, c), dim=-1)), dim=-2
+    #     )
+    #     world_xy = ((pos.unsqueeze(-2)) @ (rotM.transpose(-1, -2))).squeeze(-2)
+    #     world_xy += centroid.view(-1, 1, 1, 2).type(torch.float)
+    #     Mat = raster_from_world.view(-1, 1, 1, 3, 3).type(torch.float)
+    #     raster_xy = batch_nd_transform_points(world_xy, Mat)
+    #     ROI = [None] * bs
+    #     index = [None] * bs
+    #     for i in range(bs):
+    #         ii, jj = torch.where(mask[i])
+    #         index[i] = (ii, jj)
+    #         ROI[i] = torch.cat(
+    #             (
+    #                 raster_xy[i, ii, jj],
+    #                 patch_size.repeat(ii.shape[0], 1),
+    #                 yaw[i, ii, jj],
+    #             ),
+    #             dim=-1,
+    #         ).to(self.device)
+    #     return ROI, index
+
+    def generate_ROIs(self, pos, yaw, centroid, raster_from_world, mask, patch_size):
+        """
+        This version generates ROI for all agents only at most recent time step
+        """
+
+        num = torch.arange(0, mask.shape[2]).view(1, 1, -1).to(mask.device)
+        nummask = num * mask
+        last_idx, _ = torch.max(nummask, dim=2)
+
+        bs = pos.shape[0]
+        s = torch.sin(yaw).unsqueeze(-1)
+        c = torch.cos(yaw).unsqueeze(-1)
+        rotM = torch.cat(
+            (torch.cat((c, -s), dim=-1), torch.cat((s, c), dim=-1)), dim=-2
+        )
+        world_xy = ((pos.unsqueeze(-2)) @ (rotM.transpose(-1, -2))).squeeze(-2)
+        world_xy += centroid.view(-1, 1, 1, 2).type(torch.float)
+        Mat = raster_from_world.view(-1, 1, 1, 3, 3).type(torch.float)
+        raster_xy = batch_nd_transform_points(world_xy, Mat)
+
+        agent_mask = mask.any(dim=2)
+        ROI = [None] * bs
+        index = [None] * bs
+        for i in range(bs):
+            ii = torch.where(agent_mask[i])[0]
+            index[i] = ii
+            ROI[i] = torch.cat(
+                (
+                    raster_xy[i, ii, last_idx[i, ii]],
+                    patch_size.repeat(ii.shape[0], 1),
+                    yaw[i, ii, last_idx[i, ii]],
+                ),
+                dim=-1,
+            )
+        return ROI, index
+
+    @staticmethod
+    def Map2Emb(CNN_out, index, emb_size):
+        bs = len(CNN_out)
+        aux_emb = torch.zeros(emb_size).to(CNN_out[0].device)
+        if aux_emb.ndim == 3:
+            for i in range(bs):
+                aux_emb[i, index[i]] = CNN_out[i]
+        elif aux_emb.ndim == 4:
+            for i in range(bs):
+                ii, jj = index[i]
+                aux_emb[i, ii, jj] = CNN_out[i]
+        else:
+            raise ValueError("wrong dimension for the map embedding!")
+
+        return aux_emb
+
     def forward(
         self, data_batch: Dict[str, torch.Tensor], tgt_mask_p: float = 0.0
     ) -> Dict[str, torch.Tensor]:
@@ -539,6 +637,7 @@ class Transformer_model(pl.LightningModule):
             (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
             dim=1,
         ).type(torch.int64)
+
         src_pos = torch.cat(
             (
                 data_batch["history_positions"].unsqueeze(1),
@@ -567,12 +666,24 @@ class Transformer_model(pl.LightningModule):
             ),
             dim=1,
         ).bool()
+
         src_mask = torch.flip(src_mask, dims=[-1])
+
         src_vel = self.dyn_list[DynType.UNICYCLE].calculate_vel(
-            src_pos, src_yaw, self.time_step, src_mask
+            src_pos, src_yaw, self.step_time, src_mask
         )
         src, dyn_type = self.raw2feature(src_pos, src_vel, src_yaw, raw_type, src_mask)
-
+        ROI, index = self.generate_ROIs(
+            src_pos,
+            src_yaw,
+            data_batch["centroid"],
+            data_batch["raster_from_world"],
+            src_mask,
+            torch.tensor(self.algo_config.patch_size).to(self.device),
+        )
+        CNN_out = self.CNNmodel(data_batch["image"].permute(0, 3, 1, 2), ROI)
+        emb_size = (*src.shape[:-2], self.algo_config.d_model)
+        map_emb = self.Map2Emb(CNN_out, index, emb_size)
         tgt_mask = torch.cat(
             (
                 data_batch["target_availabilities"].unsqueeze(1),
@@ -581,6 +692,15 @@ class Transformer_model(pl.LightningModule):
             dim=1,
         ).bool()
         # masking part of the target and gradually increase the masked length until the whole target is masked
+        num = torch.arange(0, src_mask.shape[2]).view(1, 1, -1).to(src_mask.device)
+        nummask = num * src_mask
+        last_idx, _ = torch.max(nummask, dim=2)
+        curr_pos = torch.gather(
+            src_pos, 2, last_idx[..., None, None].repeat(1, 1, 1, 2)
+        )
+        curr_yaw = torch.gather(
+            src_yaw, 2, last_idx[..., None, None].repeat(1, 1, 1, 1)
+        )
 
         tgt_pos = torch.cat(
             (
@@ -602,34 +722,36 @@ class Transformer_model(pl.LightningModule):
             .repeat(1, tgt_yaw.size(1), tgt_yaw.size(2), 1)
         ) * tgt_mask.unsqueeze(-1)
         # tgt_vel = self.dyn_list[DynType.UNICYCLE].calculate_vel(
-        #     tgt_pos, tgt_yaw, self.time_step, tgt_mask
+        #     tgt_pos, tgt_yaw, self.step_time, tgt_mask
         # )
         # tgt, _ = self.raw2feature(tgt_pos, tgt_vel, tgt_yaw, raw_type, tgt_mask)
         tgt = torch.cat((tgt_pos, tgt_yaw), dim=-1)
-        curr_state = torch.cat((src_pos[..., -1:, :], src_yaw[..., -1:, :]), dim=-1)
-        # tgt_y = tgt[...,1:,:]
-        tgt = torch.cat((curr_state, tgt[..., :-1, :]), dim=2)
+        curr_state = torch.cat((curr_pos, curr_yaw), dim=-1)
+
+        # tgt_y = tgt[...,1:,:]-curr_state
+        tgt = torch.cat((curr_state, tgt[..., :-1, :]), dim=2) - curr_state
         tgt_mask_agent = (
             tgt_mask.any(dim=-1).unsqueeze(-1).repeat(1, 1, tgt_mask.size(-1))
         )
 
-        tgt_mask = self.tgt_temporal_mask(tgt_mask_p, tgt_mask.clone())
-        tgt_mask = torch.cat((src_mask[..., -1:], tgt_mask[..., :-1]), dim=-1)
-        tgt = tgt * tgt_mask.unsqueeze(-1)
+        tgt_mask_hint = self.tgt_temporal_mask(tgt_mask_p, tgt_mask.clone())
+        tgt_mask_hint = torch.cat((src_mask[..., -1:], tgt_mask_hint[..., :-1]), dim=-1)
+        tgt = tgt * tgt_mask_hint.unsqueeze(-1)
 
         # seq_mask = subsequent_mask(tgt_mask.size(-1)).to(self.device)
         # tgt_mask = tgt_mask.unsqueeze(-1).repeat(
         #     1, 1, 1, tgt.size(-2)
         # ) * seq_mask.unsqueeze(0)
 
-        out = self.model.forward(
-            src.to(self.device),
-            tgt.to(self.device),
-            src_mask.to(self.device),
-            tgt_mask_agent.to(self.device),
-            dyn_type.to(self.device),
+        out = self.Transformermodel.forward(
+            src,
+            tgt,
+            src_mask,
+            tgt_mask_agent,
+            dyn_type,
+            map_emb,
         )
-        tgt_y_gen = self.model.generator(out)
+        tgt_y_gen = self.Transformermodel.generator(out)
         ego_pred_positions = tgt_y_gen[:, 0, ..., 0:2]
         ego_pred_yaws = tgt_y_gen[:, 0, ..., 2:]
         all_other_pred_positions = tgt_y_gen[:, 1:, ..., 0:2]
@@ -642,6 +764,7 @@ class Transformer_model(pl.LightningModule):
                 "all_other_positions": all_other_pred_positions,
                 "all_other_yaws": all_other_pred_yaws,
             },
+            "curr_state": curr_state,
         }
         return out_dict
 
@@ -649,13 +772,16 @@ class Transformer_model(pl.LightningModule):
         if self.criterion is None:
             raise NotImplementedError("Loss function is undefined.")
 
+        curr_state = pred_batch["curr_state"]
         batch_size = data_batch["target_positions"].shape[0]
         # [batch_size, num_steps * 2]
         ego_targets = (
             torch.cat(
                 (data_batch["target_positions"], data_batch["target_yaws"]), dim=-1
             )
-        ).view(batch_size, -1) * self.ego_weight
+            - curr_state[:, 0]
+        ).view(batch_size, -1)
+
         # [batch_size, num_steps]
         ego_weights = (
             data_batch["target_availabilities"].unsqueeze(-1) * self.weights_scaling
@@ -677,6 +803,7 @@ class Transformer_model(pl.LightningModule):
                 ),
                 dim=-1,
             )
+            - curr_state[:, 1:]
         ).view(batch_size, -1)
         all_other_pred = (
             torch.cat(

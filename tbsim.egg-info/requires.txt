@@ -1,5 +1,0 @@
-numpy>=1.13.3
-l5kit
-pytorch-lightning
-torch
-torchvision

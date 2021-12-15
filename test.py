@@ -10,10 +10,11 @@ from tempfile import gettempdir
 
 from l5kit.configs import load_config_data
 from l5kit.data import ChunkedDataset, LocalDataManager
-from l5kit.dataset import EgoDatasetVectorized
+from l5kit.dataset import EgoDatasetVectorized, EgoDatasetMixed
 from l5kit.planning.vectorized.closed_loop_model import VectorizedUnrollModel
 from l5kit.planning.vectorized.open_loop_model import VectorizedModel
 from l5kit.vectorization.vectorizer_builder import build_vectorizer
+from l5kit.rasterization import build_rasterizer
 import pdb
 import os
 
@@ -27,7 +28,8 @@ cfg = load_config_data("./config.yaml")
 train_zarr = ChunkedDataset(dm.require(cfg["train_data_loader"]["key"])).open()
 
 vectorizer = build_vectorizer(cfg, dm)
-train_dataset = EgoDatasetVectorized(cfg, train_zarr, vectorizer)
+rasterizer = build_rasterizer(cfg, dm)
+train_dataset = EgoDatasetMixed(cfg, train_zarr, vectorizer, rasterizer)
 
 from tbsim.algos.l5kit_algos import L5TrafficModel, L5TransformerTrafficModel
 from tbsim.configs import (
@@ -59,3 +61,4 @@ optimizer = optim.Adam(model.parameters(), lr=1e-3)
 tr_it = iter(train_dataloader)
 data = next(tr_it)
 out_dict = model.forward(data)
+loss = model.compute_losses(out_dict, data)
