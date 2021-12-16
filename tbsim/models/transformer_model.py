@@ -1,20 +1,21 @@
 import numpy as np
-from tbsim.dynamics.base import DynType
 import torch
+import pdb
+import math, copy, time
+from typing import Dict, List
+from collections import OrderedDict
+
 import torch.nn as nn
 import torch.nn.functional as F
-import math, copy, time
-from torch.autograd import Variable
-import matplotlib.pyplot as plt
-from tbsim.dynamics import *
-import tbsim.dynamics as dyn
-from typing import Dict, List
-import pdb
 import pytorch_lightning as pl
-from collections import OrderedDict
+from torch.autograd import Variable
+
+from tbsim.dynamics import *
+from tbsim.dynamics.base import DynType
+import tbsim.dynamics as dyn
 from tbsim.utils.torch_utils import get_torch_device
-from tbsim.utils.tensor_utils import get_box_world_coords, batch_nd_transform_points
-from tbsim.models.CNNROIMapEncoder import CNNROIMapEncoder
+from tbsim.utils.geometry_utils import get_box_world_coords, batch_nd_transform_points
+from tbsim.models.cnn_roi_encoder import CNNROIMapEncoder
 
 
 def clones(module, N):
@@ -24,11 +25,19 @@ def clones(module, N):
 
 class FactorizedEncoderDecoder(nn.Module):
     """
-    A standard Encoder-Decoder architecture. Base for this and many
-    other models.
+    A encoder-decoder transformer model with Factorized encoder and decoder
     """
 
     def __init__(self, encoder, decoder, src_embed, tgt_embed, generator, src2posfun):
+        """
+        Args:
+            encoder: FactorizedEncoder
+            decoder: FactorizedDecoder
+            src_embed: source embedding network
+            tgt_embed: target embedding network
+            generator: network used to generate output from target
+            src2posfun: extract positional info from the src
+        """
         super(FactorizedEncoderDecoder, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
@@ -38,6 +47,7 @@ class FactorizedEncoderDecoder(nn.Module):
         self.src2posfun = src2posfun
 
     def src2pos(self, src, dyn_type):
+        "extract positional info from src for all datatypes, e.g., for vehicles, the first two dimensions are x and y"
 
         pos = torch.zeros([*src.shape[:-1], 2]).to(src.device)
         for dt, fun in self.src2posfun.items():
@@ -57,6 +67,7 @@ class FactorizedEncoderDecoder(nn.Module):
         "Take in and process masked src and target sequences."
         src_pos = self.src2pos(src, dyn_type)
         # tgt_pos = self.tgt2pos(tgt, type_index)
+        "for decoders, we only use position at the last time step of the src"
         return self.decode(
             self.encode(src, src_mask, src_pos, map_emb),
             src_mask,
@@ -80,7 +91,7 @@ class FactorizedEncoderDecoder(nn.Module):
 
 
 class DynamicGenerator(nn.Module):
-    "Define standard linear + softmax generation step."
+    "Incorporating dynamics to the generator to generate dynamically feasible output, not used yet"
 
     def __init__(self, d_model, dt, dyns, state2feature, feature2state):
         super(DynamicGenerator, self).__init__()
@@ -123,6 +134,14 @@ class Encoder(nn.Module):
 
 class FactorizedEncoder(nn.Module):
     def __init__(self, temporal_enc, agent_enc, temporal_pe, XY_pe):
+        """
+        Factorized encoder and agent axis
+        Args:
+            temporal_enc: encoder with attention over temporal axis
+            agent_enc: encoder with attention over agent axis
+            temporal_pe: positional encoding over time
+            XY_pe: positional encoding over XY coordinates
+        """
         super(FactorizedEncoder, self).__init__()
         self.temporal_encs = clones(temporal_enc, 2)
         self.agent_encs = clones(agent_enc, 2)
@@ -130,10 +149,15 @@ class FactorizedEncoder(nn.Module):
         self.XY_pe = XY_pe
 
     def forward(self, x, src_mask, src_pos, map_emb=None):
-        "Pass the input (and mask) through each layer in turn."
-        "x:[Num_agent,T,C]"
-        "pos:[Num_agent,T,2]"
-
+        """Pass the input (and mask) through each layer in turn.
+        Args:
+            x:[B,Num_agent,T,d_model]
+            src_mask:[B,Num_agent,T]
+            src_pos:[B,Num_agent,T,2]
+            map_emb: [B,Num_agent,1,d_model] output of the CNN ROI map encoder
+        Returns:
+            embedding of size [B,Num_agent,T,d_model]
+        """
         x = self.XY_pe(x, src_pos)
         x = self.agent_encs[0](x, src_mask)
         x = self.temporal_pe(x)
@@ -146,7 +170,7 @@ class FactorizedEncoder(nn.Module):
 
 
 class LayerNorm(nn.Module):
-    "Construct a layernorm module (See citation for details)."
+    "Construct a layernorm module"
 
     def __init__(self, features, eps=1e-6):
         super(LayerNorm, self).__init__()
@@ -177,7 +201,7 @@ class SublayerConnection(nn.Module):
 
 
 class EncoderLayer(nn.Module):
-    "Encoder is made up of self-attn and feed forward (defined below)"
+    "Encoder is made up of self-attn and feed forward"
 
     def __init__(self, size, self_attn, feed_forward, dropout):
         super(EncoderLayer, self).__init__()
@@ -187,7 +211,7 @@ class EncoderLayer(nn.Module):
         self.size = size
 
     def forward(self, x, mask):
-        "Follow Figure 1 (left) for connections."
+        "self attention followed by feedforward, residual and batch norm in between layers"
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, mask))
         return self.sublayer[1](x, self.feed_forward)
 
@@ -201,12 +225,21 @@ class Decoder(nn.Module):
         self.norm = LayerNorm(layer.size)
 
     def forward(self, x, memory, src_mask, tgt_mask):
+        "cross attention to the embedding generated by the encoder"
         for layer in self.layers:
             x = layer(x, memory, src_mask, tgt_mask)
         return self.norm(x)
 
 
 class FactorizedDecoder(nn.Module):
+    """
+    Args:
+        temporal_dec: decoder with attention over temporal axis
+        agent_enc: decoder with attention over agent axis
+        temporal_pe: positional encoding for time axis
+        XY_pe: positional encoding for XY axis
+    """
+
     def __init__(self, temporal_dec, agent_enc, temporal_pe, XY_pe):
         super(FactorizedDecoder, self).__init__()
         self.temporal_dec = temporal_dec
@@ -216,8 +249,15 @@ class FactorizedDecoder(nn.Module):
 
     def forward(self, x, memory, src_mask, tgt_mask, pos):
         "Pass the input (and mask) through each layer in turn."
-        "x:[batch,Num_agent,T,C]"
-        "pos:[batch,Num_agent,1,2]"
+        """
+        Args:
+            x:[batch,Num_agent,T,d_model]
+            memory:[batch,Num_agent,T,d_model]
+            src_mask: [batch,Num_agent,T]
+            tgt_mask:[batch,Num_agent,1]
+            pos:[batch,Num_agent,1,2]
+        """
+
         T = x.size(-2)
         tgt_pos = pos.repeat([1, 1, T, 1])
         x = self.XY_pe(x, tgt_pos)
@@ -241,7 +281,8 @@ class DecoderLayer(nn.Module):
         self.sublayer = clones(SublayerConnection(size, dropout), 3)
 
     def forward(self, x, memory, src_mask, tgt_mask):
-        "Follow Figure 1 (right) for connections."
+        "self attention followed by cross attention with the encoder output"
+
         m = memory
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, tgt_mask))
         x = self.sublayer[1](x, lambda x: self.src_attn(x, m, m, src_mask))
@@ -365,7 +406,12 @@ class PositionalEncoding(nn.Module):
 
 
 class PositionalEncodingNd(nn.Module):
+    "extension of the PE function, works for N dimensional position input"
+
     def __init__(self, d_model, dropout, step_size=[1]):
+        """
+        step_size: scale of each dimension, pos/step_size = phase for the sinusoidal PE
+        """
         super(PositionalEncodingNd, self).__init__()
         assert d_model % 2 == 0
         self.dropout = nn.Dropout(p=dropout)
@@ -411,6 +457,7 @@ def make_factorized_model(
     dropout=0.1,
     step_size=[0.1, 0.1],
 ):
+    "first generate the building blocks, attn networks, encoders, decoders, PEs and Feedforward nets"
     c = copy.deepcopy
     temporal_attn = MultiHeadedAttention(head, d_model)
     agent_attn = MultiHeadedAttention(head, d_model, pooling_dim=1)
@@ -422,6 +469,7 @@ def make_factorized_model(
     temporal_dec = Decoder(
         DecoderLayer(d_model, c(temporal_attn), c(temporal_attn), c(ff), dropout), N_t
     )
+    "gather src2posfun from all agent types"
     src2posfun = {D.type(): D.state2pos for D in dyn_list}
 
     Factorized_Encoder = FactorizedEncoder(
@@ -430,6 +478,7 @@ def make_factorized_model(
     Factorized_Decoder = FactorizedDecoder(
         temporal_dec, c(agent_enc), temporal_pe, XY_pe
     )
+    "use a simple nn.Linear as the generator as our output is continuous"
     model = FactorizedEncoderDecoder(
         Factorized_Encoder,
         Factorized_Decoder,
@@ -457,7 +506,7 @@ class Transformer_model(pl.LightningModule):
         self.ego_weight = algo_config.ego_weight
         self.all_other_weight = algo_config.all_other_weight
         self.criterion = nn.MSELoss(reduction="none")
-
+        "unicycle for vehicles and double integrators for pedestrians"
         self.dyn_list = {
             DynType.UNICYCLE: Unicycle("vehicle"),
             DynType.DI: DoubleIntegrator(
@@ -467,6 +516,8 @@ class Transformer_model(pl.LightningModule):
             ),
         }
 
+        "src_dim:x,y,v,sin(yaw),cos(yaw)+16-dim type encoding"
+        "tgt_dim:x,y,yaw"
         self.Transformermodel = make_factorized_model(
             src_dim=21,
             tgt_dim=3,
@@ -479,6 +530,7 @@ class Transformer_model(pl.LightningModule):
             dropout=algo_config.dropout,
             step_size=algo_config.XY_step_size,
         )
+        "CNN for map encoding"
         self.CNNmodel = CNNROIMapEncoder(
             algo_config.map_channels,
             algo_config.hidden_channels,
@@ -491,6 +543,8 @@ class Transformer_model(pl.LightningModule):
 
     @staticmethod
     def raw2feature(pos, vel, yaw, raw_type, mask):
+        "map raw src into features of dim 21"
+
         """
         PERCEPTION_LABELS = [
         "PERCEPTION_LABEL_NOT_SET",
@@ -528,10 +582,8 @@ class Transformer_model(pl.LightningModule):
         feature = feature_veh * veh_mask.view(
             [*raw_type.shape, 1, 1]
         ) + ped_feature * ped_mask.view([*raw_type.shape, 1, 1])
-        try:
-            type_embedding = F.one_hot(raw_type, 16)
-        except:
-            pdb.set_trace()
+
+        type_embedding = F.one_hot(raw_type, 16)
 
         feature = torch.cat(
             (feature, type_embedding.unsqueeze(-2).repeat(1, 1, feature.size(2), 1)),
@@ -542,6 +594,7 @@ class Transformer_model(pl.LightningModule):
 
     @staticmethod
     def tgt_temporal_mask(p, tgt_mask):
+        "use a binomial distribution with parameter p to mask out the first k steps of the tgt"
         nbatches = tgt_mask.size(0)
         T = tgt_mask.size(2)
         sample = np.random.binomial(T, p, nbatches)
@@ -597,7 +650,6 @@ class Transformer_model(pl.LightningModule):
         world_xy += centroid.view(-1, 1, 1, 2).type(torch.float)
         Mat = raster_from_world.view(-1, 1, 1, 3, 3).type(torch.float)
         raster_xy = batch_nd_transform_points(world_xy, Mat)
-
         agent_mask = mask.any(dim=2)
         ROI = [None] * bs
         index = [None] * bs
@@ -616,19 +668,20 @@ class Transformer_model(pl.LightningModule):
 
     @staticmethod
     def Map2Emb(CNN_out, index, emb_size):
+        "put the lists of ROI align result into embedding tensor with the help of index"
         bs = len(CNN_out)
-        aux_emb = torch.zeros(emb_size).to(CNN_out[0].device)
-        if aux_emb.ndim == 3:
+        map_emb = torch.zeros(emb_size).to(CNN_out[0].device)
+        if map_emb.ndim == 3:
             for i in range(bs):
-                aux_emb[i, index[i]] = CNN_out[i]
-        elif aux_emb.ndim == 4:
+                map_emb[i, index[i]] = CNN_out[i]
+        elif map_emb.ndim == 4:
             for i in range(bs):
                 ii, jj = index[i]
-                aux_emb[i, ii, jj] = CNN_out[i]
+                map_emb[i, ii, jj] = CNN_out[i]
         else:
             raise ValueError("wrong dimension for the map embedding!")
 
-        return aux_emb
+        return map_emb
 
     def forward(
         self, data_batch: Dict[str, torch.Tensor], tgt_mask_p: float = 0.0
@@ -645,6 +698,7 @@ class Transformer_model(pl.LightningModule):
             ),
             dim=1,
         )
+        "history position and yaw need to be flipped so that they go from past to recent"
         src_pos = torch.flip(src_pos, dims=[-2])
         src_yaw = torch.cat(
             (
@@ -654,11 +708,11 @@ class Transformer_model(pl.LightningModule):
             dim=1,
         )
         src_yaw = torch.flip(src_yaw, dims=[-2])
-        src_yaw += (
+        src_world_yaw = src_yaw + (
             data_batch["yaw"]
             .view(-1, 1, 1, 1)
             .repeat(1, src_yaw.size(1), src_yaw.size(2), 1)
-        )
+        ).type(torch.float)
         src_mask = torch.cat(
             (
                 data_batch["history_availabilities"].unsqueeze(1),
@@ -668,14 +722,16 @@ class Transformer_model(pl.LightningModule):
         ).bool()
 
         src_mask = torch.flip(src_mask, dims=[-1])
-
+        "estimate velocity"
         src_vel = self.dyn_list[DynType.UNICYCLE].calculate_vel(
             src_pos, src_yaw, self.step_time, src_mask
         )
         src, dyn_type = self.raw2feature(src_pos, src_vel, src_yaw, raw_type, src_mask)
+
+        "generate ROI based on the rasterized position"
         ROI, index = self.generate_ROIs(
             src_pos,
-            src_yaw,
+            src_world_yaw,
             data_batch["centroid"],
             data_batch["raster_from_world"],
             src_mask,
@@ -683,6 +739,8 @@ class Transformer_model(pl.LightningModule):
         )
         CNN_out = self.CNNmodel(data_batch["image"].permute(0, 3, 1, 2), ROI)
         emb_size = (*src.shape[:-2], self.algo_config.d_model)
+
+        "put the CNN output in the right location of the embedding"
         map_emb = self.Map2Emb(CNN_out, index, emb_size)
         tgt_mask = torch.cat(
             (
@@ -716,15 +774,7 @@ class Transformer_model(pl.LightningModule):
             ),
             dim=1,
         )
-        tgt_yaw += (
-            data_batch["yaw"]
-            .view(-1, 1, 1, 1)
-            .repeat(1, tgt_yaw.size(1), tgt_yaw.size(2), 1)
-        ) * tgt_mask.unsqueeze(-1)
-        # tgt_vel = self.dyn_list[DynType.UNICYCLE].calculate_vel(
-        #     tgt_pos, tgt_yaw, self.step_time, tgt_mask
-        # )
-        # tgt, _ = self.raw2feature(tgt_pos, tgt_vel, tgt_yaw, raw_type, tgt_mask)
+
         tgt = torch.cat((tgt_pos, tgt_yaw), dim=-1)
         curr_state = torch.cat((curr_pos, curr_yaw), dim=-1)
 
@@ -742,7 +792,6 @@ class Transformer_model(pl.LightningModule):
         # tgt_mask = tgt_mask.unsqueeze(-1).repeat(
         #     1, 1, 1, tgt.size(-2)
         # ) * seq_mask.unsqueeze(0)
-
         out = self.Transformermodel.forward(
             src,
             tgt,
@@ -751,7 +800,7 @@ class Transformer_model(pl.LightningModule):
             dyn_type,
             map_emb,
         )
-        tgt_y_gen = self.Transformermodel.generator(out)
+        tgt_y_gen = self.Transformermodel.generator(out) + curr_state
         ego_pred_positions = tgt_y_gen[:, 0, ..., 0:2]
         ego_pred_yaws = tgt_y_gen[:, 0, ..., 2:]
         all_other_pred_positions = tgt_y_gen[:, 1:, ..., 0:2]
@@ -772,14 +821,12 @@ class Transformer_model(pl.LightningModule):
         if self.criterion is None:
             raise NotImplementedError("Loss function is undefined.")
 
-        curr_state = pred_batch["curr_state"]
         batch_size = data_batch["target_positions"].shape[0]
         # [batch_size, num_steps * 2]
         ego_targets = (
             torch.cat(
                 (data_batch["target_positions"], data_batch["target_yaws"]), dim=-1
             )
-            - curr_state[:, 0]
         ).view(batch_size, -1)
 
         # [batch_size, num_steps]
@@ -803,7 +850,6 @@ class Transformer_model(pl.LightningModule):
                 ),
                 dim=-1,
             )
-            - curr_state[:, 1:]
         ).view(batch_size, -1)
         all_other_pred = (
             torch.cat(

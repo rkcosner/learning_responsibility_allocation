@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pdb
 
 
 class CNNROIMapEncoder(nn.Module):
@@ -15,8 +14,16 @@ class CNNROIMapEncoder(nn.Module):
         strides,
         input_size,
     ):
+
+        """
+        multi-layer CNN with ROI align for the output
+        ROI_outdim: ROI points along each dim total interpolating points: ROI_outdim x ROI_outdim
+        input_size: map size
+        output_size: output feature size
+        """
         super(CNNROIMapEncoder, self).__init__()
         self.convs = nn.ModuleList()
+        self.bns = nn.ModuleList()
         self.num_channel_last = hidden_channels[-1]
         self.ROI_outdim = ROI_outdim
         x_dummy = torch.ones([map_channels, *input_size]).unsqueeze(0) * torch.tensor(
@@ -33,15 +40,18 @@ class CNNROIMapEncoder(nn.Module):
                     padding=int((kernel_size[i] - 1) / 2),
                 )
             )
+            self.bns.append(nn.BatchNorm2d(hidden_size))
             x_dummy = self.convs[i](x_dummy)
 
+        "fully connected layer after ROI align"
         self.fc = nn.Linear(
             ROI_outdim * ROI_outdim * self.num_channel_last, output_size
         )
 
     def forward(self, x, ROI):
-        for conv in self.convs:
+        for conv, bn in zip(self.convs, self.bns):
             x = F.leaky_relu(conv(x), 0.2)
+            x = bn(x)
 
         x = ROI_align(x, ROI, self.ROI_outdim)
         out = [None] * len(x)
@@ -150,12 +160,12 @@ def bilinear_interpolate(img, x, y, floattype=torch.float):
 
 
 def ROI_align(features, ROI, outdim):
-    """Given feature layers and scaled proposals return bilinear interpolated
+    """Given feature layers and proposals return bilinear interpolated
     points in feature layer
 
     Args:
         features (torch.Tensor): Tensor of shape channels x width x height
-        scaled_proposal (list of torch.Tensor): x0,y0,W1,W2,H1,H2,psi
+        proposal (list of torch.Tensor): x0,y0,W1,W2,H1,H2,psi
     """
 
     bs, num_channels, h, w = features.shape

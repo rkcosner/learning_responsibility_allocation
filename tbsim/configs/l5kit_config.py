@@ -12,20 +12,20 @@ class L5KitTrainConfig(TrainConfig):
 
         self.validation.enabled = True
         self.rollout.enabled = True
-        self.rollout.every_n_steps = 2000
+        self.rollout.every_n_steps = 5000
         self.rollout.num_episodes = 5
-        self.save.every_n_steps = 5000
+        self.save.every_n_steps = 10000
 
         ## training config
         self.training.batch_size = 12
-        self.training.num_steps = 100000
-        self.training.num_data_workers = 2
+        self.training.num_steps = 2000000
+        self.training.num_data_workers = 4
 
         ## validation config
         self.validation.enabled = True
         self.validation.batch_size = 12
-        self.validation.num_data_workers = 2
-        self.validation.every_n_steps = 1000
+        self.validation.num_data_workers = 4
+        self.validation.every_n_steps = 2000
         self.validation.num_steps_per_epoch = 100
 
 
@@ -218,7 +218,7 @@ class L5TransformerPredConfig(AlgoConfig):
         self.history_num_frames_agents = 8
         self.future_num_frames = 10
         self.step_time = 0.2
-        self.N_t = 6
+        self.N_t = 4
         self.N_a = 3
         self.d_model = 512
         self.d_ff = 2048

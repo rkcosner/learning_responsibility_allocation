@@ -32,6 +32,10 @@ class BaseEnv(abc.ABC):
     def is_done(self):
         return
 
+    @abc.abstractmethod
+    def get_info(self):
+        return
+
 
 class BatchedEnv(abc.ABC):
     @abc.abstractmethod

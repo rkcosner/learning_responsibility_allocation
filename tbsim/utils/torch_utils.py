@@ -200,6 +200,8 @@ def maybe_no_grad(no_grad):
 
 
 def rgetattr(obj, attr, *args):
+    "recursively get attributes"
+
     def _getattr(obj, attr):
         return getattr(obj, attr, *args)
 
@@ -207,5 +209,6 @@ def rgetattr(obj, attr, *args):
 
 
 def rsetattr(obj, attr, val):
+    "recursively set attributes"
     pre, _, post = attr.rpartition(".")
     return setattr(rgetattr(obj, pre) if pre else obj, post, val)

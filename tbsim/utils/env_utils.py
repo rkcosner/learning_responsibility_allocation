@@ -14,9 +14,11 @@ def rollout_episodes(env, policy, num_episodes):
         num_episodes:
 
     Returns:
-
+        stats (dict): A dictionary of rollout stats for each episode (metrics, rewards, etc.)
+        info (dict): A dictionary of environment info for each episode
     """
     stats = {}
+    info = {}
     is_batched_env = isinstance(env, BatchedEnv)
 
     for ei in range(num_episodes):
@@ -39,8 +41,16 @@ def rollout_episodes(env, policy, num_episodes):
                 stats[k] = np.concatenate([stats[k], v], axis=0)
             else:
                 stats[k].append(v)
+        env_info = env.get_info()
+        for k, v in env_info.items():
+            if k not in info:
+                info[k] = []
+            if is_batched_env:
+                info[k].extend(v)
+            else:
+                info[k].append(v)
 
-    return stats
+    return stats, info
 
 
 class RolloutCallback(pl.Callback):
@@ -56,7 +66,7 @@ class RolloutCallback(pl.Callback):
             and trainer.global_step % self._every_n_steps == 0
         )
         if should_run:
-            stats = rollout_episodes(
+            stats, _ = rollout_episodes(
                 self._env, pl_module, num_episodes=self._num_episodes
             )
             print("Step %i rollout: " % trainer.global_step)

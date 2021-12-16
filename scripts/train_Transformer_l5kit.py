@@ -113,7 +113,7 @@ def main(cfg):
         train_callbacks.append(rollout_callback)
 
     # Model
-    cfg.algo["tgt_mask_N"] = len(train_loader)
+    cfg.algo["tgt_mask_N"] = 0.5 * len(train_loader)
     model = L5TransformerTrafficModel(
         algo_config=cfg.algo,
     )

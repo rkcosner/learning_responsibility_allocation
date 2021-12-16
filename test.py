@@ -60,5 +60,7 @@ optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
 tr_it = iter(train_dataloader)
 data = next(tr_it)
+for key, obj in data.items():
+    data[key] = obj.to(device)
 out_dict = model.forward(data)
 loss = model.compute_losses(out_dict, data)
