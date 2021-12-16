@@ -27,15 +27,15 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             distance_th_close=env_config.simulation.distance_th_close,
             num_simulation_steps=env_config.simulation.num_simulation_steps,
             start_frame_index=env_config.simulation.start_frame_index,
-            show_info=True
+            show_info=True,
         )
 
         self._npr = np.random.RandomState(seed=seed)
         self.dataset = dataset
         self._num_scenes = num_scenes
 
-        self._current_scene_indices = None   # indices of the scenes (in dataset) that are being used for simulation
-        self._current_scene_dataset = None   # corresponding dataset of the scenes
+        self._current_scene_indices = None  # indices of the scenes (in dataset) that are being used for simulation
+        self._current_scene_dataset = None  # corresponding dataset of the scenes
 
         self._frame_index = 0
         self._cached_observation = None
@@ -44,7 +44,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self._ego_states = dict()
         self._agents_states = dict()
 
-    def reset(self, scene_indices: List=None):
+    def reset(self, scene_indices: List = None):
         """
         Reset the previous simulation episode. Randomly sample a batch of new scenes unless specified in @scene_indices
 
@@ -54,12 +54,16 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         if scene_indices is None:
             # randomly sample a batch of scenes for close-loop rollouts
             all_indices = np.arange(self.num_instances)
-            scene_indices = self._npr.choice(all_indices, size=(self.num_instances,), replace=False)
+            scene_indices = self._npr.choice(
+                all_indices, size=(self.num_instances,), replace=False
+            )
         assert len(scene_indices) == self._num_scenes
         assert np.max(scene_indices) < self.num_instances and np.min(scene_indices) >= 0
 
         self._current_scene_indices = scene_indices
-        self._current_scene_dataset = SimulationDataset.from_dataset_indices(self.dataset, scene_indices, self._sim_cfg)
+        self._current_scene_dataset = SimulationDataset.from_dataset_indices(
+            self.dataset, scene_indices, self._sim_cfg
+        )
         self._frame_index = 0
         self._cached_observation = None
         self._done = False
@@ -76,7 +80,10 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         return self._num_scenes
 
     def get_info(self):
-        return {"l5_sim_states": self._get_l5_sim_states(), "l5_scene_indices": deepcopy(self._current_scene_indices)}
+        return {
+            "l5_sim_states": self._get_l5_sim_states(),
+            "l5_scene_indices": deepcopy(self._current_scene_indices),
+        }
 
     def get_metrics(self):
         """
@@ -119,7 +126,9 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         agent_obs = self._current_scene_dataset.rasterise_agents_frame_batch(self._frame_index)
         ego_obs = self._current_scene_dataset.rasterise_frame_batch(self._frame_index)
-        agent_obs = default_collate(list(agent_obs.values()))
+        if len(agent_obs) > 0:
+            agent_obs = default_collate(list(agent_obs.values()))
+
         ego_obs = default_collate(ego_obs)
         self._cached_observation = TensorUtils.to_numpy({"agents": agent_obs, "ego": ego_obs})
         return self._cached_observation
@@ -138,7 +147,12 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         simulated_outputs: List[SimulationOutput] = []
         for scene_idx in self._current_scene_indices:
             simulated_outputs.append(
-                SimulationOutput(scene_idx, self._current_scene_dataset, self._ego_states, self._agents_states)
+                SimulationOutput(
+                    scene_idx,
+                    self._current_scene_dataset,
+                    self._ego_states,
+                    self._agents_states,
+                )
             )
         return simulated_outputs
 
@@ -175,11 +189,13 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                     dataset=self._current_scene_dataset,
                     frame_idx=self._frame_index + 1,
                     input_dict=obs["ego"],
-                    output_dict=ego_control
+                    output_dict=ego_control,
                 )
 
             # record state
-            ego_in_out = ClosedLoopSimulator.get_ego_in_out(obs["ego"], ego_control, keys_to_exclude=set(("image",)))
+            ego_in_out = ClosedLoopSimulator.get_ego_in_out(
+                obs["ego"], ego_control, keys_to_exclude=set(("image",))
+            )
             for scene_idx in self._current_scene_indices:
                 self._ego_states[scene_idx].append(ego_in_out[scene_idx])
 
@@ -190,9 +206,11 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                     dataset=self._current_scene_dataset,
                     frame_idx=self._frame_index + 1,
                     input_dict=obs["agents"],
-                    output_dict=agents_control
+                    output_dict=agents_control,
                 )
-            agents_in_out = ClosedLoopSimulator.get_agents_in_out(obs["agents"], agents_control, keys_to_exclude=set(("image",)))
+            agents_in_out = ClosedLoopSimulator.get_agents_in_out(
+                obs["agents"], agents_control, keys_to_exclude=set(("image",))
+            )
             for scene_idx in self._current_scene_indices:
                 self._agents_states[scene_idx].append(agents_in_out.get(scene_idx, []))
 

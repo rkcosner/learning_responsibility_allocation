@@ -66,7 +66,10 @@ class RolloutCallback(pl.Callback):
             print(msg)
 
     def on_batch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        should_run = trainer.global_step >= self._warm_start_n_steps and trainer.global_step % self._every_n_steps == 0
+        should_run = (
+            trainer.global_step >= self._warm_start_n_steps
+            and trainer.global_step % self._every_n_steps == 0
+        )
         if should_run:
             stats, _ = rollout_episodes(self._env, pl_module, num_episodes=self._num_episodes)
             self.print_if_verbose("\nStep %i rollout (%i episodes): " % (trainer.global_step, self._num_episodes))
