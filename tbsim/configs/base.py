@@ -69,7 +69,7 @@ class ExperimentConfig(Config):
         # The "log" directory will contain tensorboard and stdout txt logs. The "models" directory
         # will contain saved model checkpoints. The "videos" directory contains evaluation rollout
         # videos.
-        self.root_dir = "../{}_trained_models".format(self.algo.name)
+        self.root_dir = "{}_trained_models/".format(self.algo.name)
         self.name = "test"                # name of the experiment (creates a subdirectory under root_dir)
         self.seed = 1                     # seed for everything (for reproducibility)
 
