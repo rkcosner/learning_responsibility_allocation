@@ -9,11 +9,10 @@ class TrainConfig(Config):
         self.logging.log_every_n_steps = 10
         self.logging.flush_every_n_steps = 100
 
-
         ## save config - if and when to save model checkpoints ##
         self.save.enabled = True                         # whether model saving should be enabled or disabled
         self.save.every_n_steps = 100                     # save model every n epochs
-        self.save.best_k = 10
+        self.save.best_k = 5
 
         ## rendering config ##
         self.render.on_screen = False                    # render on-screen or not

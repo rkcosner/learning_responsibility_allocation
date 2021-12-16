@@ -5,7 +5,7 @@ class L5KitTrainConfig(TrainConfig):
     def __init__(self):
         super(L5KitTrainConfig, self).__init__()
 
-        self.dataset_path = "/home/danfeix/workspace/lfs/lyft/lyft_prediction/"
+        self.dataset_path = "YOUR-DATASET-PATH"
         self.dataset_valid_key = "scenes/validate.zarr"
         self.dataset_train_key = "scenes/train.zarr"
         self.dataset_meta_key = "meta.json"
