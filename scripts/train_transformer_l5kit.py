@@ -3,13 +3,9 @@ import sys
 import os
 import json
 from torch.utils.data import DataLoader
-from collections import OrderedDict
-import pdb
 
 from l5kit.data import LocalDataManager, ChunkedDataset
-from l5kit.dataset import (
-    AgentDataset,
-    EgoDataset,
+from tbsim.external.l5_ego_dataset import (
     EgoDatasetVectorized,
     EgoDatasetMixed,
 )
