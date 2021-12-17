@@ -1,11 +1,5 @@
 {
     "registered_name": "l5_mixed_transformer_plan",
-    "root_dir": "{}_trained_models/",
-    "name": "test",
-    "seed": 1,
-    "devices": {
-        "num_gpus": 1
-    },
     "train": {
         "logging": {
             "terminal_output_to_txt": true,
@@ -44,7 +38,8 @@
         "dataset_path": "YOUR-DATASET-PATH",
         "dataset_valid_key": "scenes/validate.zarr",
         "dataset_train_key": "scenes/train.zarr",
-        "dataset_meta_key": "meta.json"
+        "dataset_meta_key": "meta.json",
+        "datamodule_class": "L5MixedDataModule"
     },
     "env": {
         "name": "my_env",
@@ -161,5 +156,11 @@
                 }
             }
         }
+    },
+    "name": "test",
+    "root_dir": "TransformerPred_trained_models/",
+    "seed": 1,
+    "devices": {
+        "num_gpus": 1
     }
 }
