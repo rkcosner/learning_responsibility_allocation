@@ -4,10 +4,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
-import pdb
 
 from tbsim.models.l5kit_models import RasterizedPlanningModel
-from tbsim.models.Transformer_model import Transformer_model
+from tbsim.models.transformer_model import TransformerModel
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.torch_utils as TorchUtils
 import tbsim.utils.metrics as Metrics
@@ -114,7 +113,7 @@ class L5TransformerTrafficModel(pl.LightningModule):
         super(L5TransformerTrafficModel, self).__init__()
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
-        self.nets["policy"] = Transformer_model(algo_config)
+        self.nets["policy"] = TransformerModel(algo_config)
         device = TorchUtils.get_torch_device(algo_config.try_to_use_cuda)
         self.nets["policy"].to(device)
 

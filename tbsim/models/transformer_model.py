@@ -1,26 +1,22 @@
 import numpy as np
 import torch
-import pdb
-import math, copy, time
-from typing import Dict, List
+import math, copy
+from typing import Dict
 from collections import OrderedDict
 
 import torch.nn as nn
 import torch.nn.functional as F
-import pytorch_lightning as pl
 from torch.autograd import Variable
 
-from tbsim.dynamics import *
+from tbsim.dynamics import Unicycle, DoubleIntegrator
 from tbsim.dynamics.base import DynType
-import tbsim.dynamics as dyn
-from tbsim.utils.torch_utils import get_torch_device
-from tbsim.utils.geometry_utils import get_box_world_coords, batch_nd_transform_points
+from tbsim.utils.geometry_utils import batch_nd_transform_points
 from tbsim.models.cnn_roi_encoder import CNNROIMapEncoder
 
 
-def clones(module, N):
+def clones(module, n):
     "Produce N identical layers."
-    return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
+    return nn.ModuleList([copy.deepcopy(module) for _ in range(n)])
 
 
 class FactorizedEncoderDecoder(nn.Module):
@@ -491,12 +487,12 @@ def make_factorized_model(
     return model
 
 
-class Transformer_model(pl.LightningModule):
+class TransformerModel(nn.Module):
     def __init__(
         self,
         algo_config,
     ):
-        super(Transformer_model, self).__init__()
+        super(TransformerModel, self).__init__()
         self.step_time = algo_config.step_time
         self.algo_config = algo_config
 

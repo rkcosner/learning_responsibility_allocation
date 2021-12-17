@@ -20,7 +20,8 @@ class TrainConfig(Config):
 
         ## evaluation rollout config ##
         self.rollout.enabled = False                     # enable evaluation rollouts
-        self.rollout.num_episodes = 10
+        self.rollout.num_episodes = 10                   # number of evaluation episodes to run
+        self.rollout.num_scenes = 25                     # number of parallel scenes to run (if applicable)
         self.rollout.every_n_steps = 1000                # do rollouts every @rate epochs
         self.rollout.warm_start_n_steps = 1              # number of steps to wait before starting rollouts
 

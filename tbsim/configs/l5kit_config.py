@@ -11,12 +11,12 @@ class L5KitTrainConfig(TrainConfig):
         self.dataset_meta_key = "meta.json"
 
         self.rollout.enabled = True
-        self.rollout.every_n_steps = 5000
+        self.rollout.every_n_steps = 1000
         self.rollout.num_episodes = 4
         self.rollout.num_scenes = 25
 
         ## training config
-        self.training.batch_size = 12
+        self.training.batch_size = 100
         self.training.num_steps = 2000000
         self.training.num_data_workers = 4
 
@@ -24,7 +24,7 @@ class L5KitTrainConfig(TrainConfig):
 
         ## validation config
         self.validation.enabled = True
-        self.validation.batch_size = 12
+        self.validation.batch_size = 100
         self.validation.num_data_workers = 4
         self.validation.every_n_steps = 2000
         self.validation.num_steps_per_epoch = 100

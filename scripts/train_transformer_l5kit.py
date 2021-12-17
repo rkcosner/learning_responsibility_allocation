@@ -35,7 +35,7 @@ from tbsim.utils.env_utils import RolloutCallback
 from tbsim.utils.config_utils import translate_l5kit_cfg
 
 
-def main(cfg):
+def main(cfg, auto_remove_exp_dir=False):
     pl.seed_everything(cfg.seed)
 
     print("\n============= New Training Run with Config =============")
@@ -45,7 +45,7 @@ def main(cfg):
         exp_name=cfg.name,
         output_dir=cfg.root_dir,
         save_checkpoints=cfg.train.save.enabled,
-        auto_remove_exp_dir=True,
+        auto_remove_exp_dir=auto_remove_exp_dir,
     )
 
     if cfg.train.logging.terminal_output_to_txt:
@@ -77,6 +77,7 @@ def main(cfg):
     print(trainset)
 
     valid_zarr = None
+    valid_loader = None
     if cfg.train.validation.enabled:
         valid_zarr = ChunkedDataset(dm.require(cfg.train.dataset_valid_key)).open()
         validset = EgoDatasetMixed(l5_config, valid_zarr, vectorizer, rasterizer)
@@ -99,14 +100,13 @@ def main(cfg):
             cfg.env,
             dataset=env_dataset,
             seed=cfg.seed,
-            num_scenes=cfg.train.rollout.num_episodes,
+            num_scenes=cfg.train.rollout.num_scenes,
         )
 
         # Run rollout at regular intervals
-
         rollout_callback = RolloutCallback(
             env=env,
-            num_episodes=1,  # all scenes run in parallel
+            num_episodes=cfg.train.rollout.num_episodes,  # all scenes run in parallel
             every_n_steps=cfg.train.rollout.every_n_steps,
             warm_start_n_steps=cfg.train.rollout.warm_start_n_steps,
         )
@@ -227,6 +227,20 @@ if __name__ == "__main__":
         help="(optional) if provided, override the dataset root path",
     )
 
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=None,
+        help="Root directory of training output (checkpoints, visualization, tensorboard log, etc.)"
+    )
+
+    parser.add_argument(
+        "--remove_exp_dir",
+        action="store_true",
+        help="Whether to automatically remove existing experiment directory of the same name (remember to set this to "
+             "True to avoid unexpected stall when launching cloud experiments)."
+    )
+
     args = parser.parse_args()
 
     default_config = ExperimentConfig(
@@ -246,7 +260,8 @@ if __name__ == "__main__":
         ext_cfg = json.load(open(args.config, "r"))
         default_config.update(**ext_cfg)
 
+    if args.output_dir is not None:
+        default_config.root_dir = os.path.abspath(args.output_dir)
+
     default_config.lock()  # Make config read-only
-    # Rasterized_main(default_config)
-    main(default_config)
-    # test_Vec_l5_env(default_config)
+    main(default_config, auto_remove_exp_dir=args.remove_exp_dir)
