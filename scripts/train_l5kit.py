@@ -2,12 +2,9 @@ import argparse
 import sys
 import os
 import json
-from torch.utils.data import DataLoader
 from collections import OrderedDict
 
-from l5kit.data import LocalDataManager, ChunkedDataset
 from l5kit.dataset import EgoDataset
-from l5kit.rasterization import build_rasterizer
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 
@@ -23,6 +20,7 @@ from tbsim.configs import (
 from tbsim.envs.env_l5kit import EnvL5KitSimulation
 from tbsim.utils.env_utils import RolloutCallback
 from tbsim.utils.config_utils import translate_l5kit_cfg
+from tbsim.datasets.l5kit_datasets import L5RasterizedDatasetModule
 
 
 def main(cfg, auto_remove_exp_dir=False):
@@ -48,45 +46,16 @@ def main(cfg, auto_remove_exp_dir=False):
 
     # Dataset
     l5_config = translate_l5kit_cfg(cfg)
-
-    os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath(cfg.train.dataset_path)
-    dm = LocalDataManager(None)
-    rasterizer = build_rasterizer(l5_config, dm)
-
-    train_zarr = ChunkedDataset(dm.require(cfg.train.dataset_train_key)).open()
-    trainset = EgoDataset(l5_config, train_zarr, rasterizer)
-
-    train_loader = DataLoader(
-        dataset=trainset,
-        shuffle=True,
-        batch_size=cfg.train.training.batch_size,
-        num_workers=cfg.train.training.num_data_workers,
-        drop_last=True,
-    )
-    print("\n============= Training Dataset =============")
-    print(trainset)
-
-    valid_zarr = None
-    valid_loader = None
-    if cfg.train.validation.enabled:
-        valid_zarr = ChunkedDataset(dm.require(cfg.train.dataset_valid_key)).open()
-        validset = EgoDataset(l5_config, valid_zarr, rasterizer)
-        valid_loader = DataLoader(
-            dataset=validset,
-            shuffle=True,
-            batch_size=cfg.train.validation.batch_size,
-            num_workers=cfg.train.validation.num_data_workers,
-            drop_last=True,
-        )
-        print("\n============= Validation Dataset =============")
-        print(validset)
+    datamodule = L5RasterizedDatasetModule(l5_config=l5_config, train_config=cfg.train, mode="ego")
 
     # Environment for close-loop evaluation
     if cfg.train.rollout.enabled:
-        if valid_zarr is None:
-            valid_zarr = ChunkedDataset(dm.require(cfg.train.dataset_valid_key)).open()
-        env_dataset = EgoDataset(l5_config, valid_zarr, rasterizer)
-        env = EnvL5KitSimulation(cfg.env, dataset=env_dataset, seed=cfg.seed, num_scenes=cfg.train.rollout.num_scenes)
+        env = EnvL5KitSimulation(
+            cfg.env,
+            dataset=datamodule.ego_validset,
+            seed=cfg.seed,
+            num_scenes=cfg.train.rollout.num_scenes
+        )
         # Run rollout at regular intervals
         rollout_callback = RolloutCallback(
             env=env,
@@ -98,7 +67,7 @@ def main(cfg, auto_remove_exp_dir=False):
         train_callbacks.append(rollout_callback)
 
     # Model
-    modality_shapes = OrderedDict(image=(rasterizer.num_channels(), 224, 224))
+    modality_shapes = OrderedDict(image=(datamodule.rasterizer.num_channels(), 224, 224))
     model = L5TrafficModel(
         algo_config=cfg.algo,
         modality_shapes=modality_shapes,
@@ -156,7 +125,7 @@ def main(cfg, auto_remove_exp_dir=False):
         callbacks=train_callbacks,
     )
 
-    trainer.fit(model=model, train_dataloader=train_loader, val_dataloaders=valid_loader)
+    trainer.fit(model=model, datamodule=datamodule)
 
 
 if __name__ == "__main__":
