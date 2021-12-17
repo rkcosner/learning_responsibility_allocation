@@ -2,25 +2,17 @@ import argparse
 import sys
 import os
 import json
-from collections import OrderedDict
 
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from tbsim.utils.log_utils import PrintLogger
 import tbsim.utils.train_utils as TrainUtils
-from tbsim.algos.l5kit_algos import L5TrafficModel
-from tbsim.configs import (
-    ExperimentConfig,
-    L5KitEnvConfig,
-    L5KitTrainConfig,
-    L5RasterizedPlanningConfig,
-)
 from tbsim.envs.env_l5kit import EnvL5KitSimulation
 from tbsim.utils.env_utils import RolloutCallback
-from tbsim.utils.config_utils import translate_l5kit_cfg
-from tbsim.datasets.l5kit_datasets import L5RasterizedDatasetModule
-from tbsim.configs.registry import experiment_config_from_name
+from tbsim.configs.registry import get_registered_experiment_config
+from tbsim.datasets.factory import datamodule_factory
+from tbsim.algos.factory import algo_factory
 
 
 def main(cfg, auto_remove_exp_dir=False):
@@ -45,9 +37,9 @@ def main(cfg, auto_remove_exp_dir=False):
     train_callbacks = []
 
     # Dataset
-    l5_config = translate_l5kit_cfg(cfg)
-    datamodule = L5RasterizedDatasetModule(l5_config=l5_config, train_config=cfg.train, mode="ego")
+    datamodule = datamodule_factory(cls_name=cfg.train.datamodule_class, config=cfg, mode="ego")
     datamodule.setup()
+
     # Environment for close-loop evaluation
     if cfg.train.rollout.enabled:
         env = EnvL5KitSimulation(
@@ -67,11 +59,8 @@ def main(cfg, auto_remove_exp_dir=False):
         train_callbacks.append(rollout_callback)
 
     # Model
-    modality_shapes = OrderedDict(image=(datamodule.rasterizer.num_channels(), 224, 224))
-    model = L5TrafficModel(
-        algo_config=cfg.algo,
-        modality_shapes=modality_shapes,
-    )
+    model_kwargs = {"tgt_mask_N": 0.5 * len(datamodule.train_dataloader())}
+    model = algo_factory(algo_config=cfg.algo, modality_shapes=datamodule.modality_shapes, **model_kwargs)
 
     # Checkpointing
     ckpt_ade_callback = pl.callbacks.ModelCheckpoint(
@@ -178,11 +167,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.config_name is not None:
-        default_config = experiment_config_from_name(args.config_name)
+        default_config = get_registered_experiment_config(args.config_name)
     elif args.config_file is not None:
         # Update default config with external json file
         ext_cfg = json.load(open(args.config_file, "r"))
-        default_config = experiment_config_from_name(ext_cfg["registered_name"])
+        default_config = get_registered_experiment_config(ext_cfg["registered_name"])
         default_config.update(**ext_cfg)
     else:
         raise Exception("Need either a config name or a json file to create experiment config")

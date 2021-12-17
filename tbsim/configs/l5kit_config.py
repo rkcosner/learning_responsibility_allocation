@@ -9,6 +9,7 @@ class L5KitTrainConfig(TrainConfig):
         self.dataset_valid_key = "scenes/validate.zarr"
         self.dataset_train_key = "scenes/train.zarr"
         self.dataset_meta_key = "meta.json"
+        self.datamodule_class = "L5RasterizedDataModule"
 
         self.rollout.enabled = True
         self.rollout.every_n_steps = 1000
@@ -28,6 +29,12 @@ class L5KitTrainConfig(TrainConfig):
         self.validation.num_data_workers = 4
         self.validation.every_n_steps = 2000
         self.validation.num_steps_per_epoch = 100
+
+
+class L5KitMixedTrainConfig(L5KitTrainConfig):
+    def __init__(self):
+        super(L5KitMixedTrainConfig, self).__init__()
+        self.datamodule_class = "L5MixedDataModule"
 
 
 class L5KitEnvConfig(EnvConfig):

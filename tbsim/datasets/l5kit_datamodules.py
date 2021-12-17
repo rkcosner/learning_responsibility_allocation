@@ -1,4 +1,7 @@
 """Functions and classes for dataset I/O"""
+import abc
+from collections import OrderedDict
+
 from typing import Optional
 import os
 import pytorch_lightning as pl
@@ -15,7 +18,12 @@ from tbsim.external.l5_ego_dataset import (
     EgoDatasetMixed,
 )
 
-class L5RasterizedDatasetModule(pl.LightningDataModule):
+
+class L5BaseDatasetModule(abc.ABC):
+    pass
+
+
+class L5RasterizedDataModule(pl.LightningDataModule, L5BaseDatasetModule):
     def __init__(
             self,
             l5_config,
@@ -31,6 +39,10 @@ class L5RasterizedDatasetModule(pl.LightningDataModule):
 
         assert mode in ["ego", "agents"]
         self._mode = mode
+
+    @property
+    def modality_shapes(self):
+        return OrderedDict(image=(self.rasterizer.num_channels(), 224, 224))
 
     def setup(self, stage: Optional[str] = None):
         os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath(self._train_config.dataset_path)
@@ -75,14 +87,14 @@ class L5RasterizedDatasetModule(pl.LightningDataModule):
         pass
 
 
-class L5MixedDatasetModule(L5RasterizedDatasetModule):
+class L5MixedDataModule(L5RasterizedDataModule):
     def __init__(
             self,
             l5_config,
             train_config: TrainConfig,
             mode: str
     ):
-        super(L5MixedDatasetModule, self).__init__(
+        super(L5MixedDataModule, self).__init__(
             l5_config=l5_config, train_config=train_config, mode=mode)
         self.vectorizer = None
 

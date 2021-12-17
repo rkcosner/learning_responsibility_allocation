@@ -664,7 +664,7 @@ class TransformerModel(nn.Module):
 
     @staticmethod
     def Map2Emb(CNN_out, index, emb_size):
-        "put the lists of ROI align result into embedding tensor with the help of index"
+        """put the lists of ROI align result into embedding tensor with the help of index"""
         bs = len(CNN_out)
         map_emb = torch.zeros(emb_size).to(CNN_out[0].device)
         if map_emb.ndim == 3:
@@ -682,6 +682,7 @@ class TransformerModel(nn.Module):
     def forward(
         self, data_batch: Dict[str, torch.Tensor], tgt_mask_p: float = 0.0
     ) -> Dict[str, torch.Tensor]:
+        device = data_batch["history_positions"]
         raw_type = torch.cat(
             (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
             dim=1,
@@ -718,25 +719,25 @@ class TransformerModel(nn.Module):
         ).bool()
 
         src_mask = torch.flip(src_mask, dims=[-1])
-        "estimate velocity"
+        # estimate velocity
         src_vel = self.dyn_list[DynType.UNICYCLE].calculate_vel(
             src_pos, src_yaw, self.step_time, src_mask
         )
         src, dyn_type = self.raw2feature(src_pos, src_vel, src_yaw, raw_type, src_mask)
 
-        "generate ROI based on the rasterized position"
+        # generate ROI based on the rasterized position
         ROI, index = self.generate_ROIs(
             src_pos,
             src_world_yaw,
             data_batch["centroid"],
             data_batch["raster_from_world"],
             src_mask,
-            torch.tensor(self.algo_config.patch_size).to(self.device),
+            torch.tensor(self.algo_config.patch_size).to(device),
         )
         CNN_out = self.CNNmodel(data_batch["image"].permute(0, 3, 1, 2), ROI)
         emb_size = (*src.shape[:-2], self.algo_config.d_model)
 
-        "put the CNN output in the right location of the embedding"
+        # put the CNN output in the right location of the embedding
         map_emb = self.Map2Emb(CNN_out, index, emb_size)
         tgt_mask = torch.cat(
             (

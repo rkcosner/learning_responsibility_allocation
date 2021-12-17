@@ -69,17 +69,17 @@ class ExperimentConfig(Config):
         super(ExperimentConfig, self).__init__()
         self.registered_name = registered_name
 
+        self.train = train_config
+        self.env = env_config
+        self.algo = algo_config
         # Write all results to this directory. A new folder with the timestamp will be created
         # in this directory, and it will contain three subfolders - "log", "models", and "videos".
         # The "log" directory will contain tensorboard and stdout txt logs. The "models" directory
         # will contain saved model checkpoints. The "videos" directory contains evaluation rollout
         # videos.
-        self.root_dir = "{}_trained_models/".format(self.algo.name)
         self.name = "test"                # name of the experiment (creates a subdirectory under root_dir)
+
+        self.root_dir = "{}_trained_models/".format(self.algo.name)
         self.seed = 1                     # seed for everything (for reproducibility)
 
         self.devices.num_gpus = 1         # Set to 0 to use CPU
-
-        self.train = train_config
-        self.env = env_config
-        self.algo = algo_config
