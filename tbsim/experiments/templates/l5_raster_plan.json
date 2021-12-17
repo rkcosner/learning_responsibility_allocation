@@ -1,0 +1,99 @@
+{
+    "registered_name": "l5_raster_plan",
+    "root_dir": "{}_trained_models/",
+    "name": "test",
+    "seed": 1,
+    "devices": {
+        "num_gpus": 1
+    },
+    "train": {
+        "logging": {
+            "terminal_output_to_txt": true,
+            "log_tb": true,
+            "log_every_n_steps": 10,
+            "flush_every_n_steps": 100
+        },
+        "save": {
+            "enabled": true,
+            "every_n_steps": 10000,
+            "best_k": 5
+        },
+        "render": {
+            "on_screen": false,
+            "to_video": true
+        },
+        "rollout": {
+            "enabled": true,
+            "num_episodes": 4,
+            "num_scenes": 25,
+            "every_n_steps": 1000,
+            "warm_start_n_steps": 1
+        },
+        "training": {
+            "batch_size": 100,
+            "num_steps": 2000000,
+            "num_data_workers": 4
+        },
+        "validation": {
+            "enabled": true,
+            "batch_size": 100,
+            "num_data_workers": 4,
+            "every_n_steps": 2000,
+            "num_steps_per_epoch": 100
+        },
+        "dataset_path": "YOUR-DATASET-PATH",
+        "dataset_valid_key": "scenes/validate.zarr",
+        "dataset_train_key": "scenes/train.zarr",
+        "dataset_meta_key": "meta.json"
+    },
+    "env": {
+        "name": "my_env",
+        "rasterizer": {
+            "raster_size": [
+                224,
+                224
+            ],
+            "pixel_size": [
+                0.5,
+                0.5
+            ],
+            "ego_center": [
+                0.25,
+                0.5
+            ],
+            "map_type": "py_semantic",
+            "satellite_map_key": "aerial_map/aerial_map.png",
+            "semantic_map_key": "semantic_map/semantic_map.pb",
+            "filter_agents_threshold": 0.5,
+            "disable_traffic_light_faces": false,
+            "set_origin_to_bottom": true
+        },
+        "simulation": {
+            "distance_th_far": 30,
+            "distance_th_close": 15,
+            "disable_new_agents": true,
+            "num_simulation_steps": 50,
+            "start_frame_index": 0
+        }
+    },
+    "algo": {
+        "name": "l5_rasterized",
+        "model_architecture": "resnet50",
+        "history_num_frames": 5,
+        "future_num_frames": 50,
+        "step_time": 0.1,
+        "render_ego_history": false,
+        "optim_params": {
+            "policy": {
+                "learning_rate": {
+                    "initial": 0.001,
+                    "decay_factor": 0.1,
+                    "epoch_schedule": []
+                },
+                "regularization": {
+                    "L2": 0.0
+                }
+            }
+        }
+    }
+}

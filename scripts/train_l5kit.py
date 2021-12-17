@@ -4,7 +4,6 @@ import os
 import json
 from collections import OrderedDict
 
-from l5kit.dataset import EgoDataset
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 
@@ -21,6 +20,7 @@ from tbsim.envs.env_l5kit import EnvL5KitSimulation
 from tbsim.utils.env_utils import RolloutCallback
 from tbsim.utils.config_utils import translate_l5kit_cfg
 from tbsim.datasets.l5kit_datasets import L5RasterizedDatasetModule
+from tbsim.configs.registry import experiment_config_from_name
 
 
 def main(cfg, auto_remove_exp_dir=False):
@@ -47,7 +47,7 @@ def main(cfg, auto_remove_exp_dir=False):
     # Dataset
     l5_config = translate_l5kit_cfg(cfg)
     datamodule = L5RasterizedDatasetModule(l5_config=l5_config, train_config=cfg.train, mode="ego")
-
+    datamodule.setup()
     # Environment for close-loop evaluation
     if cfg.train.rollout.enabled:
         env = EnvL5KitSimulation(
@@ -133,11 +133,18 @@ if __name__ == "__main__":
 
     # External config file that overwrites default config
     parser.add_argument(
-        "--config",
+        "--config_file",
         type=str,
         default=None,
         help="(optional) path to a config json that will be used to override the default settings. \
             If omitted, default settings are used. This is the preferred way to run experiments.",
+    )
+
+    parser.add_argument(
+        "--config_name",
+        type=str,
+        default=None,
+        help="(optional) create experiment config from a preregistered name (see configs/registry.py)"
     )
     # Experiment Name (for tensorboard, saving models, etc.)
     parser.add_argument(
@@ -170,22 +177,21 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    default_config = ExperimentConfig(
-        train_config=L5KitTrainConfig(),
-        env_config=L5KitEnvConfig(),
-        algo_config=L5RasterizedPlanningConfig(),
-    )
+    if args.config_name is not None:
+        default_config = experiment_config_from_name(args.config_name)
+    elif args.config_file is not None:
+        # Update default config with external json file
+        ext_cfg = json.load(open(args.config_file, "r"))
+        default_config = experiment_config_from_name(ext_cfg["registered_name"])
+        default_config.update(**ext_cfg)
+    else:
+        raise Exception("Need either a config name or a json file to create experiment config")
 
     if args.name is not None:
         default_config.name = args.name
 
     if args.dataset_path is not None:
         default_config.train.dataset_path = args.dataset_path
-
-    if args.config is not None:
-        # Update default config with external json file
-        ext_cfg = json.load(open(args.config, "r"))
-        default_config.update(**ext_cfg)
 
     if args.output_dir is not None:
         default_config.root_dir = os.path.abspath(args.output_dir)

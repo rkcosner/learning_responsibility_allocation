@@ -51,18 +51,23 @@ class AlgoConfig(Config):
 
 
 class ExperimentConfig(Config):
-    def __init__(self, train_config: TrainConfig, env_config: EnvConfig, algo_config: AlgoConfig):
+    def __init__(
+            self,
+            train_config: TrainConfig,
+            env_config: EnvConfig,
+            algo_config: AlgoConfig,
+            registered_name: str = None
+    ):
         """
 
         Args:
             train_config (TrainConfig): training config
             env_config (EnvConfig): environment config
             algo_config (AlgoConfig): algorithm config
+            registered_name (str): name of the experiment config object in the global config registry
         """
         super(ExperimentConfig, self).__init__()
-        self.train = train_config
-        self.env = env_config
-        self.algo = algo_config
+        self.registered_name = registered_name
 
         # Write all results to this directory. A new folder with the timestamp will be created
         # in this directory, and it will contain three subfolders - "log", "models", and "videos".
@@ -75,3 +80,6 @@ class ExperimentConfig(Config):
 
         self.devices.num_gpus = 1         # Set to 0 to use CPU
 
+        self.train = train_config
+        self.env = env_config
+        self.algo = algo_config
