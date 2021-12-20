@@ -34,19 +34,19 @@ class L5TrafficModel(pl.LightningModule):
 
     def _compute_metrics(self, predictions, batch):
         metrics = {}
-        # preds = # TODO
-        # gt = # TODO
-        # avail = TensorUtils.to_numpy(batch["target_availabilities"])
-        #
-        # ade = Metrics.single_mode_metrics(
-        #     Metrics.batch_average_displacement_error, gt, preds, avail
-        # )
-        # fde = Metrics.single_mode_metrics(
-        #     Metrics.batch_final_displacement_error, gt, preds, avail
-        # )
-        #
-        # metrics["ADE"] = np.mean(ade)
-        # metrics["FDE"] = np.mean(fde)
+        preds = TensorUtils.to_numpy(predictions["positions"])
+        gt = TensorUtils.to_numpy(batch["target_positions"])
+        avail = TensorUtils.to_numpy(batch["target_availabilities"])
+
+        ade = Metrics.single_mode_metrics(
+            Metrics.batch_average_displacement_error, gt, preds, avail
+        )
+        fde = Metrics.single_mode_metrics(
+            Metrics.batch_final_displacement_error, gt, preds, avail
+        )
+
+        metrics["ego_ADE"] = np.mean(ade)
+        metrics["ego_FDE"] = np.mean(fde)
         return metrics
 
     def training_step(self, batch, batch_idx):
@@ -73,9 +73,9 @@ class L5TrafficModel(pl.LightningModule):
         for v in losses.values():
             total_loss += v
 
-        # metrics = self._compute_metrics(pout["predictions"], batch)
-        # for mk, m in metrics.items():
-        #     self.log("train/metrics_" + mk, m, prog_bar=True)
+        metrics = self._compute_metrics(pout["predictions"], batch)
+        for mk, m in metrics.items():
+            self.log("train/metrics_" + mk, m, prog_bar=True)
 
         return total_loss
 
@@ -119,23 +119,6 @@ class L5TransformerTrafficModel(pl.LightningModule):
 
     def forward(self, obs_dict):
         return self.nets["policy"](obs_dict)["predictions"]
-
-    def _compute_metrics(self, predictions, batch):
-        metrics = {}
-        preds = TensorUtils.to_numpy(predictions["positions"])
-        gt = TensorUtils.to_numpy(batch["target_positions"])
-        avail = TensorUtils.to_numpy(batch["target_availabilities"])
-
-        ade = Metrics.single_mode_metrics(
-            Metrics.batch_average_displacement_error, gt, preds, avail
-        )
-        fde = Metrics.single_mode_metrics(
-            Metrics.batch_final_displacement_error, gt, preds, avail
-        )
-
-        metrics["ego_ADE"] = np.mean(ade)
-        metrics["ego_FDE"] = np.mean(fde)
-        return metrics
 
     def training_step(self, batch, batch_idx):
         """
