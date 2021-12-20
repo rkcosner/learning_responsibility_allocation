@@ -53,9 +53,7 @@ class L5RasterizedDataModule(pl.LightningDataModule, L5BaseDatasetModule):
         valid_zarr = ChunkedDataset(dm.require(self._train_config.dataset_valid_key)).open()
         self.ego_trainset = EgoDataset(self._l5_config, train_zarr, self.rasterizer)
         self.ego_validset = EgoDataset(self._l5_config, valid_zarr, self.rasterizer)
-        # TODO: figure out why ngc doesn't like it
-        # train_zarr = ChunkedDataset(dm.require(self._train_config.dataset_train_key)).open()
-        # valid_zarr = ChunkedDataset(dm.require(self._train_config.dataset_valid_key)).open()
+        # TODO: Fix NGC issue (see gitlab issue page)
         # self.agents_trainset = AgentDataset(self._l5_config, train_zarr, self.rasterizer)
         # self.agents_validset = AgentDataset(self._l5_config, valid_zarr, self.rasterizer)
 
