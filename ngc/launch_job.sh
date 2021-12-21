@@ -8,7 +8,7 @@ DS_MOUNT_POINT=/workspace/lyft_prediction/
 RESULT_DIR=/workspace/result/
 CMD="cd $WS_MOUNT_POINT/tbsim; pip install -e .; pip install numpy==1.21.4;\
 python scripts/train_l5kit.py --output_dir $RESULT_DIR --name $NAME --config_name l5_raster_plan \
---dataset $DS_MOUNT_POINT/lyft_prediction --remove_exp_dir \
+--dataset_path $DS_MOUNT_POINT/lyft_prediction --remove_exp_dir \
 & tensorboard --logdir $RESULT_DIR --bind_all"
 
 ngc batch run \
