@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 from torchvision.models.resnet import resnet18, resnet50
 
+from tbsim.models.base_models import SplitMLP, MLP
 
 class RasterizedPlanningModel(nn.Module):
     """Raster-based model for planning.
@@ -79,3 +80,117 @@ class RasterizedPlanningModel(nn.Module):
         loss = torch.mean(self.criterion(pred_batch["raw_outputs"], targets) * target_weights)
         losses = OrderedDict(prediction_loss=loss)
         return losses
+
+
+class RasterizedMapEncoder(nn.Module):
+    def __init__(
+            self,
+            model_arch: str,
+            num_input_channels: int = 3,  # C
+            visual_feature_size: int = 128,
+    ) -> None:
+        super().__init__()
+        self.model_arch = model_arch
+        self.num_input_channels = num_input_channels
+        self._visual_feature_size = visual_feature_size
+
+        if model_arch == "resnet18":
+            self.map_model = resnet18()
+            self.map_model.fc = nn.Linear(in_features=512, out_features=visual_feature_size)
+        elif model_arch == "resnet50":
+            self.map_model = resnet50()
+            self.map_model.fc = nn.Linear(in_features=2048, out_features=visual_feature_size)
+        else:
+            raise NotImplementedError(f"Model arch {model_arch} unknown")
+
+        if self.num_input_channels != 3:
+            self.map_model.conv1 = nn.Conv2d(
+                self.num_input_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False
+            )
+
+    def output_shape(self, input_shape=None):
+        return [self._visual_feature_size]
+
+    def forward(self, map_inputs):
+        return self.map_model(map_inputs)
+
+
+class PosteriorEncoder(nn.Module):
+    """Posterior Encoder (x, c -> q) for CVAE"""
+    def __init__(
+            self,
+            map_encoder: nn.Module,
+            trajectory_shape: tuple,  # [T, D]
+            output_shapes: dict,
+            mlp_layer_dims : tuple = (128, 128),
+            rnn_hidden_size : int = 100
+    ) -> None:
+        super(PosteriorEncoder, self).__init__()
+        self.map_encoder = map_encoder
+        self.trajectory_shape = trajectory_shape
+
+        # TODO: history encoder
+        self.traj_lstm = nn.LSTM(trajectory_shape[-1], hidden_size=rnn_hidden_size, batch_first=True)
+        visual_feature_size = self.map_encoder.output_shape()[0]
+        self.mlp = SplitMLP(
+            input_dim=(visual_feature_size + rnn_hidden_size),
+            output_shapes=output_shapes,
+            layer_dims=mlp_layer_dims,
+            output_activation=nn.ReLU
+        )
+
+    def forward(self, inputs, condition_inputs) -> Dict[str, torch.Tensor]:
+        map_feat = self.map_encoder(condition_inputs["image"])
+        traj = torch.concat((inputs["target_positions"], inputs["target_yaws"]), dim=-1)
+        traj_feat = self.traj_lstm(traj)[0][:, -1, :]
+        feat = torch.cat((map_feat, traj_feat), dim=-1)
+        return self.mlp(feat)
+
+
+class ConditionEncoder(nn.Module):
+    """Condition Encoder (x -> c) for CVAE"""
+    def __init__(
+            self,
+            map_encoder: nn.Module,
+            trajectory_shape: tuple,  # [T, D]
+            condition_dim: int,
+            mlp_layer_dims : tuple = (128, 128),
+            rnn_hidden_size : int = 100
+    ) -> None:
+        super(ConditionEncoder, self).__init__()
+        self.map_encoder = map_encoder
+        self.trajectory_shape = trajectory_shape
+
+        # TODO: history encoder
+        # self.hist_lstm = nn.LSTM(trajectory_shape[-1], hidden_size=rnn_hidden_size, batch_first=True)
+        visual_feature_size = self.map_encoder.output_shape()[0]
+        self.mlp = MLP(
+            input_dim=visual_feature_size,
+            output_dim=condition_dim,
+            layer_dims=mlp_layer_dims,
+            output_activation=nn.ReLU
+        )
+
+    def forward(self, condition_inputs):
+        map_feat = self.map_encoder(condition_inputs["image"])
+        return self.mlp(map_feat)
+    
+    
+class ConditionFlatDecoder(nn.Module):
+    """Decoding (z, c) -> x' using a flat MLP"""
+    def __init__(
+            self,
+            condition_dim: int,
+            latent_dim: int,
+            output_shapes: dict,
+            mlp_layer_dims : tuple = (128, 128),
+    ):
+        super(ConditionFlatDecoder, self).__init__()
+        self.mlp = SplitMLP(
+            input_dim=(condition_dim + latent_dim),
+            output_shapes=output_shapes,
+            layer_dims=mlp_layer_dims
+        )
+
+    def forward(self, latents, conditions):
+        return self.mlp(torch.cat((latents, conditions), dim=-1))

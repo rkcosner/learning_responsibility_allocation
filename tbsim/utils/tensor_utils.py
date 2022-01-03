@@ -237,6 +237,28 @@ def unsqueeze(x, dim):
     )
 
 
+def squeeze(x, dim):
+    """
+    Reduce dimension of size 1 at dimension @dim in all torch tensors and numpy arrays
+    in nested dictionary or list or tuple and returns a new nested structure.
+
+    Args:
+        x (dict or list or tuple): a possibly nested dictionary or list or tuple
+        dim (int): dimension
+
+    Returns:
+        y (dict or list or tuple): new nested dict-list-tuple
+    """
+    return recursive_dict_list_tuple_apply(
+        x,
+        {
+            torch.Tensor: lambda x: x.squeeze(dim=dim),
+            np.ndarray: lambda x: np.squeeze(x, axis=dim),
+            type(None): lambda x: x,
+        },
+    )
+
+
 def contiguous(x):
     """
     Makes all torch tensors and numpy arrays contiguous in nested dictionary or
@@ -496,16 +518,16 @@ def reshape_dimensions_single(x, begin_axis, end_axis, target_dims):
     Returns:
         y (torch.Tensor): reshaped tensor
     """
-    assert begin_axis <= end_axis
+    assert begin_axis < end_axis
     assert begin_axis >= 0
-    assert end_axis < len(x.shape)
+    assert end_axis <= len(x.shape)
     assert isinstance(target_dims, (tuple, list))
     s = x.shape
     final_s = []
     for i in range(len(s)):
         if i == begin_axis:
             final_s.extend(target_dims)
-        elif i < begin_axis or i > end_axis:
+        elif i < begin_axis or i >= end_axis:
             final_s.append(s[i])
     return x.reshape(*final_s)
 
@@ -518,7 +540,7 @@ def reshape_dimensions(x, begin_axis, end_axis, target_dims):
     Args:
         x (dict or list or tuple): a possibly nested dictionary or list or tuple
         begin_axis (int): begin dimension
-        end_axis (int): end dimension
+        end_axis (int): end dimension (excluding the dimension)
         target_dims (tuple or list): target shape for the range of dimensions
             (@begin_axis, @end_axis)
 
@@ -547,7 +569,7 @@ def join_dimensions(x, begin_axis, end_axis):
     Args:
         x (dict or list or tuple): a possibly nested dictionary or list or tuple
         begin_axis (int): begin dimension
-        end_axis (int): end dimension
+        end_axis (int): end dimension (excluding the dimension)
 
     Returns:
         y (dict or list or tuple): new nested dict-list-tuple
@@ -630,7 +652,7 @@ def repeat_by_expand_at(x, repeats, dim):
         y (dict or list or tuple): new nested dict-list-tuple
     """
     x = unsqueeze_expand_at(x, repeats, dim + 1)
-    return join_dimensions(x, dim, dim + 1)
+    return join_dimensions(x, dim, dim + 2)
 
 
 def named_reduce_single(x, reduction, dim):
@@ -969,7 +991,7 @@ def time_distributed(
         outputs (dict or list or tuple): new nested dict-list-tuple with tensors of leading dimension [B, T].
     """
     batch_size, seq_len = flatten_nested_dict_list(inputs)[0][1].shape[:2]
-    inputs = join_dimensions(inputs, 0, 1)
+    inputs = join_dimensions(inputs, 0, 2)
     if inputs_as_kwargs:
         outputs = op(**inputs, **kwargs)
     elif inputs_as_args:
@@ -980,6 +1002,6 @@ def time_distributed(
     if activation is not None:
         outputs = map_tensor(outputs, activation)
     outputs = reshape_dimensions(
-        outputs, begin_axis=0, end_axis=0, target_dims=(batch_size, seq_len)
+        outputs, begin_axis=0, end_axis=1, target_dims=(batch_size, seq_len)
     )
     return outputs
