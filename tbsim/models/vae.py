@@ -151,12 +151,12 @@ class CVAE(nn.Module):
         Returns:
             dictionary of batched samples (x')
         """
-        c0 = self.c_encoder(condition_inputs)  # [B, ...]
-        z = self.prior.sample(n=n, inputs=c0)  # z of shape [B (from c0), N, ...]
+        c = self.c_encoder(condition_inputs)  # [B, ...]
+        z = self.prior.sample(n=n, inputs=c)  # z of shape [B (from c), N, ...]
         z_samples = TensorUtils.join_dimensions(z, begin_axis=0, end_axis=2)  # [B * N, ...]
-        c0_samples = TensorUtils.repeat_by_expand_at(c0, repeats=n, dim=0)  # [B * N, ...]
-        x_out = self.decoder(latents=z_samples, conditions=c0_samples)
-        x_out = TensorUtils.reshape_dimensions(x_out, begin_axis=0, end_axis=1, target_dims=(c0.shape[0], n))
+        c_samples = TensorUtils.repeat_by_expand_at(c, repeats=n, dim=0)  # [B * N, ...]
+        x_out = self.decoder(latents=z_samples, conditions=c_samples)
+        x_out = TensorUtils.reshape_dimensions(x_out, begin_axis=0, end_axis=1, target_dims=(c.shape[0], n))
         return x_out
 
     def forward(self, inputs, condition_inputs):
@@ -171,9 +171,9 @@ class CVAE(nn.Module):
         """
         q_params = self.q_encoder(inputs=inputs, condition_inputs=condition_inputs)
         z = self.prior.sample_posterior(q_params, n=1).squeeze(dim=1)
-        c0 = self.c_encoder(condition_inputs)  # [B, ...]
-        x_out = self.decoder(latents=z, conditions=c0)
-        return {"x_recons": x_out, "q_params": q_params, "z": z}
+        c = self.c_encoder(condition_inputs)  # [B, ...]
+        x_out = self.decoder(latents=z, conditions=c)
+        return {"x_recons": x_out, "q_params": q_params, "z": z, "c": c}
 
     def compute_losses(self, inputs, condition_inputs, targets, target_weights=None, kl_weight: float = 1.0):
         """
@@ -199,7 +199,7 @@ class CVAE(nn.Module):
             element_loss = self.target_criterion(outputs["x_recons"][k], targets[k]) * w
             recon_loss += torch.mean(element_loss)  # TODO: sum up last dimension instead of averaging all?
 
-        kld_loss = self.prior.kl_loss(outputs["q_params"], inputs=condition_inputs)
+        kld_loss = self.prior.kl_loss(outputs["q_params"], inputs=outputs["c"])
 
         total_loss = recon_loss + kl_weight * kld_loss
 
