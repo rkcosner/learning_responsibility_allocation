@@ -1,38 +1,76 @@
 import numpy as np
+from collections import OrderedDict
 
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 
-from tbsim.models.l5kit_models import RasterizedPlanningModel
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.torch_utils as TorchUtils
 import tbsim.utils.metrics as Metrics
+import tbsim.models.l5kit_models as l5m
+import tbsim.models.vaes as vaes
 
 
-class L5TrafficCVAE(pl.LightningModule):
+class L5TrafficVAE(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):
         """
         Creates networks and places them into @self.nets.
         """
-        super(L5TrafficCVAE, self).__init__()
+        super(L5TrafficVAE, self).__init__()
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
-        self.nets["policy"] = RasterizedPlanningModel(
-            model_arch=self.algo_config.model_architecture,
-            num_input_channels=modality_shapes["image"][0],  # [C, H, W]
-            num_targets=3
-                        * self.algo_config.future_num_frames,  # X, Y, Yaw * number of future states,
-            weights_scaling=[1.0, 1.0, 1.0],
-            criterion=nn.MSELoss(reduction="none"),
+        trajectory_shape = (self.algo_config.future_num_frames, 3)
+
+        prior = vaes.FixedGaussianPrior(latent_dim=algo_config.vae.latent_dim)
+
+        map_encoder = l5m.RasterizedMapEncoder(
+            model_arch=algo_config.model_architecture,
+            num_input_channels=modality_shapes["image"][0],
+            visual_feature_dim=algo_config.visual_feature_dim
         )
 
-    def forward(self, obs_dict):
-        return self.nets["policy"](obs_dict)["predictions"]
+        q_encoder = l5m.PosteriorEncoder(
+            map_encoder=map_encoder,
+            trajectory_shape=trajectory_shape,
+            output_shapes=prior.posterior_param_shapes
+        )
 
-    def _compute_metrics(self, predictions, batch):
+        c_encoder = l5m.ConditionEncoder(
+            map_encoder=map_encoder,
+            trajectory_shape=trajectory_shape,
+            condition_dim=algo_config.vae.condition_dim
+        )
+
+        decoder = l5m.ConditionFlatDecoder(
+            condition_dim=algo_config.vae.condition_dim,
+            latent_dim=algo_config.vae.latent_dim,
+            output_shapes=OrderedDict(trajectories=trajectory_shape)
+        )
+
+        model = vaes.CVAE(
+            q_encoder=q_encoder,
+            c_encoder=c_encoder,
+            decoder=decoder,
+            prior=prior,
+            target_criterion=nn.MSELoss(reduction="none")
+        )
+
+        self.nets["policy"] = model
+
+    def forward(self, batch_inputs: dict):
+        trajectories = torch.cat((batch_inputs["target_positions"], batch_inputs["target_yaws"]), dim=-1)
+        inputs = OrderedDict(trajectories=trajectories)
+        condition_inputs = OrderedDict(image=batch_inputs["image"])
+        return self.nets["policy"](inputs=inputs, condition_inputs=condition_inputs)
+
+    def sample(self, batch_inputs: dict, n: int):
+        condition_inputs = OrderedDict(image=batch_inputs["image"])
+        return self.nets["policy"].sample(condition_inputs=condition_inputs, n=n)
+
+    def _compute_metrics(self, outputs, batch):
         metrics = {}
-        preds = TensorUtils.to_numpy(predictions["positions"])
+        preds = TensorUtils.to_numpy(outputs["x_recons"]["trajectories"][..., :2])
         gt = TensorUtils.to_numpy(batch["target_positions"])
         avail = TensorUtils.to_numpy(batch["target_availabilities"])
 
@@ -53,7 +91,6 @@ class L5TrafficCVAE(pl.LightningModule):
 
         Args:
             batch (dict): dictionary with torch.Tensors sampled
-                from a data loader and filtered by @process_batch_for_training
 
             batch_idx (int): training step number - required by some Algos that need
                 to perform staged training and early stopping
@@ -62,26 +99,44 @@ class L5TrafficCVAE(pl.LightningModule):
             info (dict): dictionary of relevant inputs, outputs, and losses
                 that might be relevant for logging
         """
-        pout = self.nets["policy"](batch)
-        losses = self.nets["policy"].compute_losses(pout, batch)
-        for lk, l in losses.items():
-            self.log("train/losses_" + lk, l)
+        pout = self.forward(batch_inputs=batch)
+        avails = batch["target_availabilities"].unsqueeze(2)   # [B, T, 1]
+        trajectories = torch.cat((batch["target_positions"], batch["target_yaws"]), dim=-1)
+        target_weights = OrderedDict(trajectories=torch.ones_like(trajectories) * avails)
+        targets = OrderedDict(trajectories=trajectories)
 
+        losses = self.nets["policy"].compute_losses(
+            outputs=pout,
+            targets=targets,
+            target_weights=target_weights,
+            kl_weight=self.algo_config.vae.kl_weight
+        )
         total_loss = 0.0
-        for v in losses.values():
-            total_loss += v
+        for lk, l in losses.items():
+            self.log("train/losses_" + lk, l, prog_bar=True)
+            total_loss += l
 
-        metrics = self._compute_metrics(pout["predictions"], batch)
+        metrics = self._compute_metrics(pout, batch)
         for mk, m in metrics.items():
-            self.log("train/metrics_" + mk, m, prog_bar=True)
+            self.log("train/metrics_" + mk, m)
 
         return total_loss
 
     def validation_step(self, batch, batch_idx):
-        pout = self.nets["policy"](batch)
-        losses = TensorUtils.detach(self.nets["policy"].compute_losses(pout, batch))
-        metrics = self._compute_metrics(pout["predictions"], batch)
-        return {"losses": losses, "metrics": metrics}
+        pout = self.forward(batch_inputs=batch)
+        avails = batch["target_availabilities"].unsqueeze(2)   # [B, T, 1]
+        trajectories = torch.cat((batch["target_positions"], batch["target_yaws"]), dim=-1)
+        target_weights = OrderedDict(trajectories=torch.ones_like(trajectories) * avails)
+        targets = OrderedDict(trajectories=trajectories)
+
+        losses = self.nets["policy"].compute_losses(
+            outputs=pout,
+            targets=targets,
+            target_weights=target_weights,
+            kl_weight=self.algo_config.vae.kl_weight
+        )
+        metrics = self._compute_metrics(pout, batch)
+        return {"losses": TensorUtils.detach(losses), "metrics": metrics}
 
     def validation_epoch_end(self, outputs) -> None:
         for k in outputs[0]["losses"]:
@@ -100,4 +155,9 @@ class L5TrafficCVAE(pl.LightningModule):
         return optim
 
     def get_action(self, obs_dict):
-        return {"ego": self(obs_dict["ego"])}
+        preds = self.sample(obs_dict["ego"], n=1)  # [B, 1, T, 3]
+        actions = dict(
+            positions=preds["trajectories"][:, 0, :, :2],
+            yaws=preds["trajectories"][:, 0, :, 2:3]
+        )
+        return {"ego": actions}

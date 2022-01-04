@@ -22,27 +22,68 @@ class Prior(nn.Module):
         self._input_dim = input_dim
         self._net = None
         self._device = device
-        self._create_networks()
 
-    def _create_networks(self):
-        """Create networks for the prior module"""
-        pass
+    def forward(self, inputs: torch.Tensor = None):
+        """
+        Get a batch of prior parameters.
 
-    def forward(self, inputs=None):
-        """Get prior parameters."""
+        Args:
+            inputs (torch.Tensor): (Optional) A feature vector for priors that are input-conditional.
+
+        Returns:
+            params (dict): A dictionary of prior parameters with the same batch size as the inputs (1 if inputs is None)
+        """
         raise NotImplementedError
 
-    def sample(self, n, inputs=None):
-        """Take samples from the prior distribution."""
-        raise NotImplementedError
+    def sample(self, n: int, inputs: torch.Tensor = None):
+        """
+        Take samples with the prior distribution
+
+        Args:
+            n (int): number of samples to take
+            inputs (torch.Tensor): (Optional) A feature vector for priors that are input-conditional.
+
+        Returns:
+            samples (torch.Tensor): a batch of latent samples with shape [input_batch_size, n, latent_dim]
+        """
+        prior_params = self.forward(inputs=inputs)
+        return self.sample_with_parameters(prior_params, n=n)
 
     @staticmethod
-    def sample_posterior(posterior_params, n: int):
-        """Take samples using posterior distribution (q) parameters using reparameterization trick"""
+    def sample_with_parameters(params: dict, n: int):
+        """
+        Take samples using given a batch of distribution parameters, e.g., mean and logvar of a unit Gaussian
+
+        Args:
+            params (dict): a batch of distribution parameters
+            n (int): number of samples to take
+
+        Returns:
+            samples (torch.Tensor): a batch of latent samples with shape [param_batch_size, n, latent_dim]
+        """
         raise NotImplementedError
 
-    def kl_loss(self, posterior_params, inputs=None):
-        """Compute kl loss between the prior and the posteriors """
+    def kl_loss(self, posterior_params: dict, inputs: torch.Tensor = None) -> torch.Tensor:
+        """
+        Compute kl loss between the prior and the posterior distributions.
+
+        Args:
+            posterior_params (dict): a batch of distribution parameters
+            inputs (torch.Tensor): (Optional) A feature vector for priors that are input-conditional.
+
+        Returns:
+            kl_loss (torch.Tensor): kl divergence value
+        """
+        raise NotImplementedError
+
+    @property
+    def posterior_param_shapes(self) -> dict:
+        """
+        Shape of the posterior parameters
+
+        Returns:
+            shapes (dict): a dictionary of parameter shapes
+        """
         raise NotImplementedError
 
 
@@ -51,38 +92,57 @@ class FixedGaussianPrior(Prior):
     def __init__(self, latent_dim, input_dim=None, device=None):
         super(FixedGaussianPrior, self).__init__(
             latent_dim=latent_dim, input_dim=input_dim, device=device)
-        self._params = {
+        self._params = nn.ParameterDict({
             "mu": nn.Parameter(data=torch.zeros(self._latent_dim), requires_grad=False),
             "logvar": nn.Parameter(data=torch.zeros(self._latent_dim), requires_grad=False)
-        }
+        })
 
-    def forward(self, inputs=None):
-        return TensorUtils.clone(self._params)
+    def forward(self, inputs: torch.Tensor = None):
+        """
+        Get a batch of prior parameters.
 
-    def sample(self, n, inputs=None):
-        batch_size = 1
-        if inputs is not None:
-            assert isinstance(inputs, torch.Tensor)
-            batch_size = inputs.shape[0]
-        bs = batch_size * n
-        mu = TensorUtils.unsqueeze_expand_at(self._params["mu"], size=bs, dim=0)
-        logvar = TensorUtils.unsqueeze_expand_at(self._params["logvar"], size=bs, dim=0)
-        samples = reparameterize(mu=mu, logvar=logvar)
-        samples = TensorUtils.reshape_dimensions(samples, 0, 1, target_dims=(batch_size, n))
-        return samples
+        Args:
+            inputs (torch.Tensor): (Optional) A feature vector for priors that are input-conditional.
+
+        Returns:
+            params (dict): A dictionary of prior parameters with the same batch size as the inputs (1 if inputs is None)
+        """
+
+        batch_size = 1 if inputs is None else inputs.shape[0]
+        params = TensorUtils.unsqueeze_expand_at(self._params, size=batch_size, dim=0)
+        return params
 
     @staticmethod
-    def sample_posterior(posterior_params, n: int):
-        """Take samples using posterior distribution (q) parameters using reparameterization trick"""
-        mu = posterior_params["mu"]
-        batch_size = mu.shape[0]
-        mu = TensorUtils.repeat_by_expand_at(mu, repeats=n, dim=0)
-        logvar = TensorUtils.repeat_by_expand_at(posterior_params["logvar"], repeats=n, dim=0)
-        samples = reparameterize(mu, logvar)
+    def sample_with_parameters(params, n: int):
+        """
+        Take samples using given a batch of distribution parameters, e.g., mean and logvar of a unit Gaussian
+
+        Args:
+            params (dict): a batch of distribution parameters
+            n (int): number of samples to take
+
+        Returns:
+            samples (torch.Tensor): a batch of latent samples with shape [param_batch_size, n, latent_dim]
+        """
+
+        batch_size = params["mu"].shape[0]
+        params_tiled = TensorUtils.repeat_by_expand_at(params, repeats=n, dim=0)
+        samples = reparameterize(params_tiled["mu"], params_tiled["logvar"])
         samples = TensorUtils.reshape_dimensions(samples, begin_axis=0, end_axis=1, target_dims=(batch_size, n))
         return samples
 
     def kl_loss(self, posterior_params, inputs=None):
+        """
+        Compute kl loss between the prior and the posterior distributions.
+
+        Args:
+            posterior_params (dict): a batch of distribution parameters
+            inputs (torch.Tensor): (Optional) A feature vector for priors that are input-conditional.
+
+        Returns:
+            kl_loss (torch.Tensor): kl divergence value
+        """
+
         assert posterior_params["mu"].shape[1] == self._latent_dim
         assert posterior_params["logvar"].shape[1] == self._latent_dim
         return KLD_0_1_loss(
@@ -90,29 +150,43 @@ class FixedGaussianPrior(Prior):
             logvar=posterior_params["logvar"]
         )
 
+    @property
+    def posterior_param_shapes(self) -> OrderedDict:
+        return OrderedDict(mu=(self._latent_dim,), logvar=(self._latent_dim,))
+
 
 class LearnedGaussianPrior(FixedGaussianPrior):
     """A Gaussian prior with learnable parameters"""
     def __init__(self, latent_dim, input_dim=None, device=None):
         super(LearnedGaussianPrior, self).__init__(
             latent_dim=latent_dim, input_dim=input_dim, device=device)
-        self._params = {
+        self._params = nn.ParameterDict({
             "mu": nn.Parameter(data=torch.zeros(self._latent_dim), requires_grad=True),
             "logvar": nn.Parameter(data=torch.zeros(self._latent_dim), requires_grad=True)
-        }
+        })
 
     def kl_loss(self, posterior_params, inputs=None):
-        """Compute KL Divergence between two Gaussian distributions"""
+        """
+        Compute kl loss between the prior and the posterior distributions.
+
+        Args:
+            posterior_params (dict): a batch of distribution parameters
+            inputs (torch.Tensor): (Optional) A feature vector for priors that are input-conditional.
+
+        Returns:
+            kl_loss (torch.Tensor): kl divergence value
+        """
+
+        assert posterior_params["mu"].shape[1] == self._latent_dim
+        assert posterior_params["logvar"].shape[1] == self._latent_dim
+
         batch_size = posterior_params["mu"].shape[0]
-        mu = TensorUtils.unsqueeze_expand_at(self._params["mu"], size=batch_size, dim=0)
-        logvar = TensorUtils.unsqueeze_expand_at(self._params["logvar"], size=batch_size, dim=0)
-        assert posterior_params["mu"].shape[1] == self._input_dim
-        assert posterior_params["logvar"].shape[1] == self._input_dim
+        prior_params = TensorUtils.unsqueeze_expand_at(self._params, size=batch_size, dim=0)
         return KLD_gaussian_loss(
             mu_1=posterior_params["mu"],
             logvar_1=posterior_params["logvar"],
-            mu_2=mu,
-            logvar_2=logvar
+            mu_2=prior_params["mu"],
+            logvar_2=prior_params["logvar"]
         )
 
 
@@ -143,13 +217,14 @@ class CVAE(nn.Module):
 
     def sample(self, condition_inputs: dict, n: int):
         """
-        Draw data samples (x') given a condition inputs (x_c) and the VAE prior
+        Draw data samples (x') given a batch of condition inputs (x_c) and the VAE prior.
+
         Args:
             condition_inputs (dict): condition inputs - a dictionary of named tensors (x_c)
             n (int): number of samples to draw
 
         Returns:
-            dictionary of batched samples (x')
+            dictionary of batched samples (x') of size [B, n, ...]
         """
         c = self.c_encoder(condition_inputs)  # [B, ...]
         z = self.prior.sample(n=n, inputs=c)  # z of shape [B (from c), N, ...]
@@ -170,18 +245,17 @@ class CVAE(nn.Module):
             dictionary of batched samples (x')
         """
         q_params = self.q_encoder(inputs=inputs, condition_inputs=condition_inputs)
-        z = self.prior.sample_posterior(q_params, n=1).squeeze(dim=1)
+        z = self.prior.sample_with_parameters(q_params, n=1).squeeze(dim=1)
         c = self.c_encoder(condition_inputs)  # [B, ...]
         x_out = self.decoder(latents=z, conditions=c)
         return {"x_recons": x_out, "q_params": q_params, "z": z, "c": c}
 
-    def compute_losses(self, inputs, condition_inputs, targets, target_weights=None, kl_weight: float = 1.0):
+    def compute_losses(self, outputs, targets, target_weights=None, kl_weight: float = 1.0):
         """
         Compute VAE losses
 
         Args:
-            inputs (dict): encoder inputs (x)
-            condition_inputs (dict): condition inputs - a dictionary of named tensors (x_c)
+            outputs (dict): outputs of the self.forward() call
             targets (dict): reconstruction targets (x')
             target_weights (dict): (Optional) a dictionary of floats for weighing loss for reconstructing individual
                                     elements in the target, must be the same shape as the target.
@@ -190,20 +264,18 @@ class CVAE(nn.Module):
         Returns:
             a dictionary of loss values
         """
-        outputs = self.forward(inputs=inputs, condition_inputs=condition_inputs)
         recon_loss = 0
         if target_weights is None:
             target_weights = dict()
-        for k, v in targets.items():
+        x_recons = outputs["x_recons"]
+        for k, v in x_recons.items():
             w = target_weights[k] if k in target_weights else torch.ones_like(targets[k])
-            element_loss = self.target_criterion(outputs["x_recons"][k], targets[k]) * w
+            element_loss = self.target_criterion(x_recons[k], targets[k]) * w
             recon_loss += torch.mean(element_loss)  # TODO: sum up last dimension instead of averaging all?
 
-        kld_loss = self.prior.kl_loss(outputs["q_params"], inputs=outputs["c"])
+        kld_loss = self.prior.kl_loss(outputs["q_params"], inputs=outputs["c"]) * kl_weight
 
-        total_loss = recon_loss + kl_weight * kld_loss
-
-        return {"vae_loss": total_loss, "recon_loss": recon_loss, "kl_loss": kld_loss * kl_weight}
+        return {"recon_loss": recon_loss, "kl_loss": kld_loss}
 
 
 def main():
@@ -213,7 +285,7 @@ def main():
     map_encoder = l5m.RasterizedMapEncoder(
         model_arch="resnet18",
         num_input_channels=3,
-        visual_feature_size=128
+        visual_feature_dim=128
     )
 
     q_encoder = l5m.PosteriorEncoder(
@@ -229,7 +301,7 @@ def main():
     decoder = l5m.ConditionFlatDecoder(
         condition_dim=16,
         latent_dim=16,
-        output_shapes=OrderedDict(target_positions=(50, 2), target_yaws=(50, 1))
+        output_shapes=OrderedDict(trajectories=(50, 3))
     )
 
     model = CVAE(
@@ -240,12 +312,14 @@ def main():
         target_criterion=nn.MSELoss(reduction="none")
     )
 
-    inputs = OrderedDict(target_positions=torch.randn(10, 50, 2), target_yaws=torch.randn(10, 50, 1))
+    inputs = OrderedDict(trajectories=torch.randn(10, 50, 3))
     conditions = OrderedDict(image=torch.randn(10, 3, 224, 224))
 
-    losses = model.compute_losses(inputs=inputs, condition_inputs=conditions, targets=inputs)
+    outputs = model(inputs=inputs, condition_inputs=conditions)
+    losses = model.compute_losses(outputs=outputs, targets=inputs)
     samples = model.sample(condition_inputs=conditions, n=10)
     print()
+
 
 if __name__ == "__main__":
     main()

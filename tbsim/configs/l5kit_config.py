@@ -41,6 +41,8 @@ class L5KitEnvConfig(EnvConfig):
     def __init__(self):
         super(L5KitEnvConfig, self).__init__()
 
+        self.name = "l5_rasterized"
+
         # raster image size [pixels]
         self.rasterizer.raster_size = (224, 224)
 
@@ -89,6 +91,7 @@ class L5KitEnvConfig(EnvConfig):
 class L5KitVectorizedEnvConfig(EnvConfig):
     def __init__(self):
         super(L5KitVectorizedEnvConfig, self).__init__()
+        self.name = "l5_vectorized"
 
         # the keys are relative to the dataset environment variable
         self.rasterizer.semantic_map_key = "semantic_map/semantic_map.pb"
@@ -130,6 +133,7 @@ class L5KitMixedEnvConfig(EnvConfig):
     """Vectorized Scene Component + Rasterized Map"""
     def __init__(self):
         super(L5KitMixedEnvConfig, self).__init__()
+        self.name = "l5_mixed"
 
         # the keys are relative to the dataset environment variable
         self.rasterizer.semantic_map_key = "semantic_map/semantic_map.pb"
@@ -205,6 +209,31 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.future_num_frames = 50
         self.step_time = 0.1
         self.render_ego_history = False
+
+        self.optim_params.policy.learning_rate.initial = 1e-3  # policy learning rate
+        self.optim_params.policy.learning_rate.decay_factor = (
+            0.1  # factor to decay LR by (if epoch schedule non-empty)
+        )
+        self.optim_params.policy.learning_rate.epoch_schedule = (
+            []
+        )  # epochs where LR decay occurs
+        self.optim_params.policy.regularization.L2 = 0.00  # L2 regularization strength
+
+
+class L5RasterizedVAEConfig(AlgoConfig):
+    def __init__(self):
+        super(L5RasterizedVAEConfig, self).__init__()
+        self.name = "l5_rasterized_vae"
+        self.model_architecture = "resnet50"
+        self.history_num_frames = 5
+        self.future_num_frames = 50
+        self.step_time = 0.1
+        self.render_ego_history = False
+
+        self.visual_feature_dim = 128
+        self.vae.latent_dim = 16
+        self.vae.condition_dim = 16
+        self.vae.kl_weight = 1e-4
 
         self.optim_params.policy.learning_rate.initial = 1e-3  # policy learning rate
         self.optim_params.policy.learning_rate.decay_factor = (

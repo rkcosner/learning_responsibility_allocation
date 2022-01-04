@@ -5,6 +5,7 @@ of numpy arrays and torch tensors.
 import collections
 import numpy as np
 import torch
+import torch.nn as nn
 
 
 def recursive_dict_list_tuple_apply(x, type_func_dict):
@@ -23,8 +24,10 @@ def recursive_dict_list_tuple_apply(x, type_func_dict):
     assert list not in type_func_dict
     assert tuple not in type_func_dict
     assert dict not in type_func_dict
+    assert nn.ParameterDict not in type_func_dict
+    assert nn.ParameterList not in type_func_dict
 
-    if isinstance(x, (dict, collections.OrderedDict)):
+    if isinstance(x, (dict, collections.OrderedDict, nn.ParameterDict)):
         new_x = (
             collections.OrderedDict()
             if isinstance(x, collections.OrderedDict)
@@ -33,7 +36,7 @@ def recursive_dict_list_tuple_apply(x, type_func_dict):
         for k, v in x.items():
             new_x[k] = recursive_dict_list_tuple_apply(v, type_func_dict)
         return new_x
-    elif isinstance(x, (list, tuple)):
+    elif isinstance(x, (list, tuple, nn.ParameterList)):
         ret = [recursive_dict_list_tuple_apply(v, type_func_dict) for v in x]
         if isinstance(x, tuple):
             ret = tuple(ret)

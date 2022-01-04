@@ -8,6 +8,7 @@ from torchvision.models.resnet import resnet18, resnet50
 
 from tbsim.models.base_models import SplitMLP, MLP
 
+
 class RasterizedPlanningModel(nn.Module):
     """Raster-based model for planning.
     """
@@ -83,23 +84,24 @@ class RasterizedPlanningModel(nn.Module):
 
 
 class RasterizedMapEncoder(nn.Module):
+    """A basic image-based rasterized map encoder"""
     def __init__(
             self,
             model_arch: str,
             num_input_channels: int = 3,  # C
-            visual_feature_size: int = 128,
+            visual_feature_dim: int = 128,
     ) -> None:
         super().__init__()
         self.model_arch = model_arch
         self.num_input_channels = num_input_channels
-        self._visual_feature_size = visual_feature_size
+        self._visual_feature_dim = visual_feature_dim
 
         if model_arch == "resnet18":
             self.map_model = resnet18()
-            self.map_model.fc = nn.Linear(in_features=512, out_features=visual_feature_size)
+            self.map_model.fc = nn.Linear(in_features=512, out_features=visual_feature_dim)
         elif model_arch == "resnet50":
             self.map_model = resnet50()
-            self.map_model.fc = nn.Linear(in_features=2048, out_features=visual_feature_size)
+            self.map_model.fc = nn.Linear(in_features=2048, out_features=visual_feature_dim)
         else:
             raise NotImplementedError(f"Model arch {model_arch} unknown")
 
@@ -109,7 +111,7 @@ class RasterizedMapEncoder(nn.Module):
             )
 
     def output_shape(self, input_shape=None):
-        return [self._visual_feature_size]
+        return [self._visual_feature_dim]
 
     def forward(self, map_inputs):
         return self.map_model(map_inputs)
@@ -122,8 +124,8 @@ class PosteriorEncoder(nn.Module):
             map_encoder: nn.Module,
             trajectory_shape: tuple,  # [T, D]
             output_shapes: dict,
-            mlp_layer_dims : tuple = (128, 128),
-            rnn_hidden_size : int = 100
+            mlp_layer_dims: tuple = (128, 128),
+            rnn_hidden_size: int = 100
     ) -> None:
         super(PosteriorEncoder, self).__init__()
         self.map_encoder = map_encoder
@@ -141,8 +143,7 @@ class PosteriorEncoder(nn.Module):
 
     def forward(self, inputs, condition_inputs) -> Dict[str, torch.Tensor]:
         map_feat = self.map_encoder(condition_inputs["image"])
-        traj = torch.concat((inputs["target_positions"], inputs["target_yaws"]), dim=-1)
-        traj_feat = self.traj_lstm(traj)[0][:, -1, :]
+        traj_feat = self.traj_lstm(inputs["trajectories"])[0][:, -1, :]
         feat = torch.cat((map_feat, traj_feat), dim=-1)
         return self.mlp(feat)
 
@@ -154,8 +155,8 @@ class ConditionEncoder(nn.Module):
             map_encoder: nn.Module,
             trajectory_shape: tuple,  # [T, D]
             condition_dim: int,
-            mlp_layer_dims : tuple = (128, 128),
-            rnn_hidden_size : int = 100
+            mlp_layer_dims: tuple = (128, 128),
+            rnn_hidden_size: int = 100
     ) -> None:
         super(ConditionEncoder, self).__init__()
         self.map_encoder = map_encoder
