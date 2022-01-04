@@ -98,8 +98,10 @@ def main(cfg, auto_remove_exp_dir=False):
     elif cfg.train.logging.log_wandb:
         assert "WANDB_APIKEY" in os.environ, "Set api key by `export WANDB_APIKEY=<your-apikey>`"
         apikey = os.environ["WANDB_APIKEY"]
-        logger = WandbLogger(name=cfg.name, project=cfg.train.logging.wandb_project_name)
         wandb.login(key=apikey)
+        logger = WandbLogger(name=cfg.name, project=cfg.train.logging.wandb_project_name)
+        # record the entire config on wandb
+        logger.experiment.config.update(cfg.to_dict())
         logger.watch(model=model)
     else:
         logger = None
@@ -154,6 +156,13 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--wandb_project_name",
+        type=str,
+        default=None,
+        help="(optional) if provided, override the wandb project name defined in the config",
+    )
+
+    parser.add_argument(
         "--dataset_path",
         type=str,
         default=None,
@@ -194,6 +203,9 @@ if __name__ == "__main__":
 
     if args.output_dir is not None:
         default_config.root_dir = os.path.abspath(args.output_dir)
+
+    if args.wandb_project_name is not None:
+        default_config.train.logging.wandb_project_name = args.wandb_project_name
 
     default_config.lock()  # Make config read-only
     main(default_config, auto_remove_exp_dir=args.remove_exp_dir)
