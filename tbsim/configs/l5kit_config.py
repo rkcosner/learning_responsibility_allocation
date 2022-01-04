@@ -220,29 +220,18 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.optim_params.policy.regularization.L2 = 0.00  # L2 regularization strength
 
 
-class L5RasterizedVAEConfig(AlgoConfig):
+class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(L5RasterizedVAEConfig, self).__init__()
         self.name = "l5_rasterized_vae"
-        self.model_architecture = "resnet50"
-        self.history_num_frames = 5
-        self.future_num_frames = 50
-        self.step_time = 0.1
-        self.render_ego_history = False
-
-        self.visual_feature_dim = 128
+        self.visual_feature_dim = 256
         self.vae.latent_dim = 16
         self.vae.condition_dim = 16
         self.vae.kl_weight = 1e-4
-
-        self.optim_params.policy.learning_rate.initial = 1e-3  # policy learning rate
-        self.optim_params.policy.learning_rate.decay_factor = (
-            0.1  # factor to decay LR by (if epoch schedule non-empty)
-        )
-        self.optim_params.policy.learning_rate.epoch_schedule = (
-            []
-        )  # epochs where LR decay occurs
-        self.optim_params.policy.regularization.L2 = 0.00  # L2 regularization strength
+        self.vae.encoder.rnn_hidden_size = 100
+        self.vae.encoder.mlp_layer_dims = (128, 128)
+        self.vae.decoder.rnn_hidden_size = 100
+        self.vae.decoder.mlp_layer_dims = (128, 128)
 
 
 class L5TransformerPredConfig(AlgoConfig):

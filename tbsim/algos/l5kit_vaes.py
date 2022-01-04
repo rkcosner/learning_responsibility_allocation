@@ -33,19 +33,24 @@ class L5TrafficVAE(pl.LightningModule):
         q_encoder = l5m.PosteriorEncoder(
             map_encoder=map_encoder,
             trajectory_shape=trajectory_shape,
-            output_shapes=prior.posterior_param_shapes
+            output_shapes=prior.posterior_param_shapes,
+            mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
+            rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
         )
 
         c_encoder = l5m.ConditionEncoder(
             map_encoder=map_encoder,
             trajectory_shape=trajectory_shape,
-            condition_dim=algo_config.vae.condition_dim
+            condition_dim=algo_config.vae.condition_dim,
+            mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
+            rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
         )
 
         decoder = l5m.ConditionFlatDecoder(
             condition_dim=algo_config.vae.condition_dim,
             latent_dim=algo_config.vae.latent_dim,
-            output_shapes=OrderedDict(trajectories=trajectory_shape)
+            output_shapes=OrderedDict(trajectories=trajectory_shape),
+            mlp_layer_dims=algo_config.vae.decoder.mlp_layer_dims
         )
 
         model = vaes.CVAE(
