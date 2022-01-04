@@ -1,9 +1,11 @@
 {
-    "registered_name": "l5_mixed_transformer_plan",
+    "registered_name": "l5_rasterized_plan",
     "train": {
         "logging": {
             "terminal_output_to_txt": true,
-            "log_tb": true,
+            "log_tb": false,
+            "log_wandb": true,
+            "wandb_project_name": "tbsim",
             "log_every_n_steps": 10,
             "flush_every_n_steps": 100
         },
@@ -39,15 +41,11 @@
         "dataset_valid_key": "scenes/validate.zarr",
         "dataset_train_key": "scenes/train.zarr",
         "dataset_meta_key": "meta.json",
-        "datamodule_class": "L5MixedDataModule"
+        "datamodule_class": "L5RasterizedDataModule"
     },
     "env": {
-        "name": "my_env",
+        "name": "l5_rasterized",
         "rasterizer": {
-            "semantic_map_key": "semantic_map/semantic_map.pb",
-            "dataset_meta_key": "meta.json",
-            "filter_agents_threshold": 0.5,
-            "disable_traffic_light_faces": false,
             "raster_size": [
                 224,
                 224
@@ -60,20 +58,12 @@
                 0.25,
                 0.5
             ],
-            "map_type": "semantic_debug",
+            "map_type": "py_semantic",
             "satellite_map_key": "aerial_map/aerial_map.png",
+            "semantic_map_key": "semantic_map/semantic_map.pb",
+            "filter_agents_threshold": 0.5,
+            "disable_traffic_light_faces": false,
             "set_origin_to_bottom": true
-        },
-        "data_generation_params": {
-            "other_agents_num": 20,
-            "max_agents_distance": 50,
-            "lane_params": {
-                "max_num_lanes": 15,
-                "max_points_per_lane": 5,
-                "max_points_per_crosswalk": 5,
-                "max_retrieval_distance_m": 35,
-                "max_num_crosswalks": 20
-            }
         },
         "simulation": {
             "distance_th_far": 30,
@@ -84,65 +74,11 @@
         }
     },
     "algo": {
-        "name": "TransformerPred",
-        "model_architecture": "Factorized",
-        "history_num_frames": 8,
-        "history_num_frames_ego": 8,
-        "history_num_frames_agents": 8,
-        "future_num_frames": 10,
-        "step_time": 0.2,
-        "N_t": 4,
-        "N_a": 3,
-        "d_model": 512,
-        "d_ff": 2048,
-        "head": 8,
-        "dropout": 0.1,
-        "XY_step_size": [
-            0.1,
-            0.1
-        ],
-        "weights_scaling": [
-            1.0,
-            1.0,
-            1.0
-        ],
-        "ego_weight": 1.0,
-        "all_other_weight": 0.5,
-        "disable_other_agents": false,
-        "disable_map": false,
-        "global_head_dropout": 0.0,
-        "map_channels": 3,
-        "hidden_channels": [
-            10,
-            20,
-            10,
-            3
-        ],
-        "ROI_outdim": 12,
-        "output_size": 512,
-        "patch_size": [
-            15,
-            35,
-            25,
-            25
-        ],
-        "kernel_size": [
-            5,
-            5,
-            5,
-            3
-        ],
-        "strides": [
-            1,
-            1,
-            1,
-            1
-        ],
-        "input_size": [
-            224,
-            224
-        ],
-        "try_to_use_cuda": true,
+        "name": "l5_rasterized",
+        "model_architecture": "resnet50",
+        "history_num_frames": 5,
+        "future_num_frames": 50,
+        "step_time": 0.1,
         "render_ego_history": false,
         "optim_params": {
             "policy": {
@@ -158,7 +94,7 @@
         }
     },
     "name": "test",
-    "root_dir": "TransformerPred_trained_models/",
+    "root_dir": "l5_rasterized_trained_models/",
     "seed": 1,
     "devices": {
         "num_gpus": 1

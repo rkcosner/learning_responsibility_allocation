@@ -1,9 +1,11 @@
 {
-    "registered_name": "l5_raster_plan",
+    "registered_name": "l5_rasterized_vae_plan",
     "train": {
         "logging": {
             "terminal_output_to_txt": true,
-            "log_tb": true,
+            "log_tb": false,
+            "log_wandb": true,
+            "wandb_project_name": "tbsim",
             "log_every_n_steps": 10,
             "flush_every_n_steps": 100
         },
@@ -42,7 +44,7 @@
         "datamodule_class": "L5RasterizedDataModule"
     },
     "env": {
-        "name": "my_env",
+        "name": "l5_rasterized",
         "rasterizer": {
             "raster_size": [
                 224,
@@ -72,7 +74,7 @@
         }
     },
     "algo": {
-        "name": "l5_rasterized",
+        "name": "l5_rasterized_vae",
         "model_architecture": "resnet50",
         "history_num_frames": 5,
         "future_num_frames": 50,
@@ -89,10 +91,30 @@
                     "L2": 0.0
                 }
             }
+        },
+        "visual_feature_dim": 256,
+        "vae": {
+            "latent_dim": 16,
+            "condition_dim": 16,
+            "kl_weight": 0.0001,
+            "encoder": {
+                "rnn_hidden_size": 100,
+                "mlp_layer_dims": [
+                    128,
+                    128
+                ]
+            },
+            "decoder": {
+                "rnn_hidden_size": 100,
+                "mlp_layer_dims": [
+                    128,
+                    128
+                ]
+            }
         }
     },
     "name": "test",
-    "root_dir": "l5_rasterized_trained_models/",
+    "root_dir": "l5_rasterized_vae_trained_models/",
     "seed": 1,
     "devices": {
         "num_gpus": 1
