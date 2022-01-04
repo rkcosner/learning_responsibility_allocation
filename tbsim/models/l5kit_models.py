@@ -1,12 +1,14 @@
 import warnings
 from typing import Dict, List
 from collections import OrderedDict
+from copy import deepcopy
 
 import torch
 import torch.nn as nn
 from torchvision.models.resnet import resnet18, resnet50
 
-from tbsim.models.base_models import SplitMLP, MLP
+from tbsim.models.base_models import SplitMLP, MLP, MIMOMLP
+import tbsim.utils.tensor_utils as TensorUtils
 
 
 class RasterizedPlanningModel(nn.Module):
@@ -89,19 +91,21 @@ class RasterizedMapEncoder(nn.Module):
             self,
             model_arch: str,
             num_input_channels: int = 3,  # C
-            visual_feature_dim: int = 128,
+            feature_dim: int = 128,
+            output_activation = nn.ReLU
     ) -> None:
         super().__init__()
         self.model_arch = model_arch
         self.num_input_channels = num_input_channels
-        self._visual_feature_dim = visual_feature_dim
+        self._feature_dim = feature_dim
+        self._output_activation = output_activation
 
         if model_arch == "resnet18":
             self.map_model = resnet18()
-            self.map_model.fc = nn.Linear(in_features=512, out_features=visual_feature_dim)
+            self.map_model.fc = nn.Linear(in_features=512, out_features=feature_dim)
         elif model_arch == "resnet50":
             self.map_model = resnet50()
-            self.map_model.fc = nn.Linear(in_features=2048, out_features=visual_feature_dim)
+            self.map_model.fc = nn.Linear(in_features=2048, out_features=feature_dim)
         else:
             raise NotImplementedError(f"Model arch {model_arch} unknown")
 
@@ -111,40 +115,70 @@ class RasterizedMapEncoder(nn.Module):
             )
 
     def output_shape(self, input_shape=None):
-        return [self._visual_feature_dim]
+        return [self._feature_dim]
 
     def forward(self, map_inputs):
-        return self.map_model(map_inputs)
+        feat = self.map_model(map_inputs)
+        if self._output_activation is not None:
+            feat = self._output_activation()(feat)
+        return feat
+
+
+class RNNTrajectoryEncoder(nn.Module):
+    def __init__(self, trajectory_dim, rnn_hidden_size, feature_dim=None, mlp_layer_dims: tuple = ()):
+        super(RNNTrajectoryEncoder, self).__init__()
+        self.lstm = nn.LSTM(trajectory_dim, hidden_size=rnn_hidden_size, batch_first=True)
+        if feature_dim is not None:
+            self.mlp = MLP(
+                input_dim=rnn_hidden_size,
+                output_dim=feature_dim,
+                layer_dims=mlp_layer_dims,
+                output_activation=nn.ReLU
+            )
+            self._feature_dim = feature_dim
+        else:
+            self.mlp = None
+            self._feature_dim = rnn_hidden_size
+
+    def output_shape(self, input_shape=None):
+        num_frame = 1 if input_shape is None else input_shape[0]
+        return [num_frame, self._feature_dim]
+
+    def forward(self, input_trajectory):
+        traj_feat = self.lstm(input_trajectory)[0][:, -1, :]
+        if self.mlp is not None:
+            traj_feat = TensorUtils.time_distributed(traj_feat, op=self.mlp)
+        return traj_feat
 
 
 class PosteriorEncoder(nn.Module):
-    """Posterior Encoder (x, c -> q) for CVAE"""
+    """Posterior Encoder (x, x_c -> q) for CVAE"""
     def __init__(
             self,
-            map_encoder: nn.Module,
+            condition_dim: int,
             trajectory_shape: tuple,  # [T, D]
-            output_shapes: dict,
+            output_shapes: OrderedDict,
             mlp_layer_dims: tuple = (128, 128),
             rnn_hidden_size: int = 100
     ) -> None:
         super(PosteriorEncoder, self).__init__()
-        self.map_encoder = map_encoder
         self.trajectory_shape = trajectory_shape
 
         # TODO: history encoder
-        self.traj_lstm = nn.LSTM(trajectory_shape[-1], hidden_size=rnn_hidden_size, batch_first=True)
-        visual_feature_size = self.map_encoder.output_shape()[0]
+        self.traj_encoder = RNNTrajectoryEncoder(
+            trajectory_dim=trajectory_shape[-1],
+            rnn_hidden_size=rnn_hidden_size
+        )
         self.mlp = SplitMLP(
-            input_dim=(visual_feature_size + rnn_hidden_size),
+            input_dim=(rnn_hidden_size + condition_dim),
             output_shapes=output_shapes,
             layer_dims=mlp_layer_dims,
             output_activation=nn.ReLU
         )
 
-    def forward(self, inputs, condition_inputs) -> Dict[str, torch.Tensor]:
-        map_feat = self.map_encoder(condition_inputs["image"])
-        traj_feat = self.traj_lstm(inputs["trajectories"])[0][:, -1, :]
-        feat = torch.cat((map_feat, traj_feat), dim=-1)
+    def forward(self, inputs, condition_features) -> Dict[str, torch.Tensor]:
+        traj_feat = self.traj_encoder(inputs["trajectories"])
+        feat = torch.cat((traj_feat, condition_features), dim=-1)
         return self.mlp(feat)
 
 
@@ -175,15 +209,58 @@ class ConditionEncoder(nn.Module):
     def forward(self, condition_inputs):
         map_feat = self.map_encoder(condition_inputs["image"])
         return self.mlp(map_feat)
-    
-    
+
+
+class PosteriorNet(nn.Module):
+    def __init__(
+            self,
+            input_shapes: OrderedDict,
+            condition_dim: int,
+            param_shapes: OrderedDict,
+            mlp_layer_dims: tuple=()
+    ):
+        super(PosteriorNet, self).__init__()
+        all_shapes = deepcopy(input_shapes)
+        all_shapes["condition_features"] = (condition_dim,)
+        self.mlp = MIMOMLP(
+            input_shapes=all_shapes,
+            output_shapes=param_shapes,
+            layer_dims=mlp_layer_dims,
+            output_activation=None
+        )
+
+    def forward(self, inputs: dict, condition_features: torch.Tensor):
+        all_inputs = dict(inputs)
+        all_inputs["condition_features"] = condition_features
+        return self.mlp(all_inputs)
+
+
+class ConditionNet(nn.Module):
+    def __init__(
+            self,
+            condition_input_shapes: OrderedDict,
+            condition_dim: int,
+            mlp_layer_dims: tuple=()
+    ):
+        super(ConditionNet, self).__init__()
+        self.mlp = MIMOMLP(
+            input_shapes=condition_input_shapes,
+            output_shapes=OrderedDict(feat=(condition_dim,)),
+            layer_dims=mlp_layer_dims,
+            output_activation=nn.ReLU
+        )
+
+    def forward(self, inputs: dict):
+        return self.mlp(inputs)["feat"]
+
+
 class ConditionFlatDecoder(nn.Module):
     """Decoding (z, c) -> x' using a flat MLP"""
     def __init__(
             self,
             condition_dim: int,
             latent_dim: int,
-            output_shapes: dict,
+            output_shapes: OrderedDict,
             mlp_layer_dims : tuple = (128, 128),
     ):
         super(ConditionFlatDecoder, self).__init__()
@@ -193,5 +270,5 @@ class ConditionFlatDecoder(nn.Module):
             layer_dims=mlp_layer_dims
         )
 
-    def forward(self, latents, conditions):
-        return self.mlp(torch.cat((latents, conditions), dim=-1))
+    def forward(self, latents, condition_features):
+        return self.mlp(torch.cat((latents, condition_features), dim=-1))

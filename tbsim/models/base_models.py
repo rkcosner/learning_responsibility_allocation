@@ -1,9 +1,11 @@
 import numpy as np
 import textwrap
 from collections import OrderedDict
+
+import torch
 import torch.nn as nn
 
-from tbsim.utils.tensor_utils import reshape_dimensions
+from tbsim.utils.tensor_utils import reshape_dimensions, flatten
 
 
 class MLP(nn.Module):
@@ -12,9 +14,9 @@ class MLP(nn.Module):
     """
     def __init__(
             self,
-            input_dim,
-            output_dim,
-            layer_dims=(),
+            input_dim: int,
+            output_dim: int,
+            layer_dims: tuple=(),
             layer_func=nn.Linear,
             layer_func_kwargs=None,
             activation=nn.ReLU,
@@ -100,13 +102,13 @@ class MLP(nn.Module):
 
 class SplitMLP(MLP):
     """
-    A multi-headed MLP network
+    A multi-output MLP network: The model split and reshapes the output layer to the desired output shapes
     """
     def __init__(
             self,
-            input_dim,
-            output_shapes=None,
-            layer_dims=(),
+            input_dim: int,
+            output_shapes: OrderedDict,
+            layer_dims: tuple=(),
             layer_func=nn.Linear,
             layer_func_kwargs=None,
             activation=nn.ReLU,
@@ -158,3 +160,58 @@ class SplitMLP(MLP):
             out_dict[k] = reshape_dimensions(outs[:, ind: ind + v_dim], begin_axis=1, end_axis=2, target_dims=v)
             ind += v_dim
         return out_dict
+
+
+class MIMOMLP(SplitMLP):
+    """
+    A multi-input, multi-output MLP: The model flattens and concatenate the input before feeding into an MLP
+    """
+    def __init__(
+            self,
+            input_shapes: OrderedDict,
+            output_shapes: OrderedDict,
+            layer_dims: tuple=(),
+            layer_func=nn.Linear,
+            layer_func_kwargs=None,
+            activation=nn.ReLU,
+            dropouts=None,
+            normalization=False,
+            output_activation=None,
+    ):
+        """
+        Args:
+            input_shapes (OrderedDict): named dictionary of input shapes
+            output_shapes (OrderedDict): named dictionary of output shapes
+            layer_dims ([int]): sequence of integers for the hidden layers sizes
+            layer_func: mapping per layer - defaults to Linear
+            layer_func_kwargs (dict): kwargs for @layer_func
+            activation: non-linearity per layer - defaults to ReLU
+            dropouts ([float]): if not None, adds dropout layers with the corresponding probabilities
+                after every layer. Must be same size as @layer_dims.
+            normalization (bool): if True, apply layer normalization after each layer
+            output_activation: if provided, applies the provided non-linearity to the output layer
+        """
+        assert isinstance(input_shapes, OrderedDict)
+        input_dim = 0
+        for v in input_shapes.values():
+            input_dim += np.prod(v)
+
+        self._input_shapes = input_shapes
+
+        super(MIMOMLP, self).__init__(
+            input_dim=input_dim,
+            output_shapes=output_shapes,
+            layer_dims=layer_dims,
+            layer_func=layer_func,
+            layer_func_kwargs=layer_func_kwargs,
+            activation=activation,
+            dropouts=dropouts,
+            normalization=normalization,
+            output_activation=output_activation
+        )
+
+    def forward(self, inputs):
+        flat_inputs = []
+        for k in self._input_shapes.keys():
+            flat_inputs.append(flatten(inputs[k]))
+        return super(MIMOMLP, self).forward(torch.cat(flat_inputs, dim=1))

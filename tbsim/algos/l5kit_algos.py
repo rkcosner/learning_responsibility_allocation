@@ -3,6 +3,7 @@ import numpy as np
 
 import torch
 import torch.nn as nn
+import torch.optim as optim
 import pytorch_lightning as pl
 
 from tbsim.models.l5kit_models import RasterizedPlanningModel
@@ -95,11 +96,12 @@ class L5TrafficModel(pl.LightningModule):
             self.log("val/metrics_" + k, m)
 
     def configure_optimizers(self):
-        optim_params = self.algo_config.optim_params
-        optim = TorchUtils.optimizer_from_optim_params(
-            net_optim_params=optim_params["policy"], net=self.nets["policy"]
+        optim_params = self.algo_config.optim_params["policy"]
+        return optim.Adam(
+            params=self.parameters(),
+            lr=optim_params["learning_rate"]["initial"],
+            weight_decay=optim_params["regularization"]["L2"],
         )
-        return optim
 
     def get_action(self, obs_dict):
         return {"ego": self(obs_dict["ego"])}
@@ -167,11 +169,12 @@ class L5TransformerTrafficModel(pl.LightningModule):
             self.log("val/metrics_" + k, m)
 
     def configure_optimizers(self):
-        optim_params = self.algo_config.optim_params
-        optim = TorchUtils.optimizer_from_optim_params(
-            net_optim_params=optim_params["policy"], net=self.nets["policy"]
+        optim_params = self.algo_config.optim_params["policy"]
+        return optim.Adam(
+            params=self.parameters(),
+            lr=optim_params["learning_rate"]["initial"],
+            weight_decay=optim_params["regularization"]["L2"],
         )
-        return optim
 
     def get_action(self, obs_dict):
         return {"ego": self(obs_dict["ego"])}

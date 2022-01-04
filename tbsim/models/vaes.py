@@ -86,6 +86,16 @@ class Prior(nn.Module):
         """
         raise NotImplementedError
 
+    @property
+    def latent_dim(self):
+        """
+        Shape of the latent code
+
+        Returns:
+            latent_dim (int)
+        """
+        return self._latent_dim
+
 
 class FixedGaussianPrior(Prior):
     """An unassuming unit Gaussian Prior"""
@@ -193,44 +203,45 @@ class LearnedGaussianPrior(FixedGaussianPrior):
 class CVAE(nn.Module):
     def __init__(
             self,
-            q_encoder: nn.Module,
-            c_encoder: nn.Module,
+            q_net: nn.Module,
+            c_net: nn.Module,
             decoder: nn.Module,
             prior: Prior,
             target_criterion: nn.Module
     ):
         """
         A basic Conditional Variational Autoencoder Network (C-VAE)
+
         Args:
-            q_encoder (nn.Module): a model that encodes data (x) and condition inputs (x_c) to posterior (q) parameters
-            c_encoder (nn.Module): a model that encodes condition inputs (x_c) into condition feature (c)
+            q_net (nn.Module): a model that encodes data (x) and condition inputs (x_c) to posterior (q) parameters
+            c_net (nn.Module): a model that encodes condition inputs (x_c) into condition feature (c)
             decoder (nn.Module): a model that decodes latent (z) and condition feature (c) to data (x')
             prior (nn.Module): a model containing information about distribution prior (kl-loss, prior params, etc.)
             target_criterion (nn.Module): a loss function for target reconstruction
         """
         super(CVAE, self).__init__()
-        self.q_encoder = q_encoder
-        self.c_encoder = c_encoder
+        self.q_net = q_net
+        self.c_net = c_net
         self.decoder = decoder
         self.prior = prior
         self.target_criterion = target_criterion
 
-    def sample(self, condition_inputs: dict, n: int):
+    def sample(self, condition_inputs, n: int):
         """
         Draw data samples (x') given a batch of condition inputs (x_c) and the VAE prior.
 
         Args:
-            condition_inputs (dict): condition inputs - a dictionary of named tensors (x_c)
+            condition_inputs (dict, torch.Tensor): condition inputs (x_c)
             n (int): number of samples to draw
 
         Returns:
             dictionary of batched samples (x') of size [B, n, ...]
         """
-        c = self.c_encoder(condition_inputs)  # [B, ...]
+        c = self.c_net(condition_inputs)  # [B, ...]
         z = self.prior.sample(n=n, inputs=c)  # z of shape [B (from c), N, ...]
         z_samples = TensorUtils.join_dimensions(z, begin_axis=0, end_axis=2)  # [B * N, ...]
         c_samples = TensorUtils.repeat_by_expand_at(c, repeats=n, dim=0)  # [B * N, ...]
-        x_out = self.decoder(latents=z_samples, conditions=c_samples)
+        x_out = self.decoder(latents=z_samples, condition_features=c_samples)
         x_out = TensorUtils.reshape_dimensions(x_out, begin_axis=0, end_axis=1, target_dims=(c.shape[0], n))
         return x_out
 
@@ -238,19 +249,19 @@ class CVAE(nn.Module):
         """
         Pass the input through encoder and decoder (using posterior parameters)
         Args:
-            inputs (dict): encoder inputs (x)
-            condition_inputs (dict): condition inputs - a dictionary of named tensors (x_c)
+            inputs (dict, torch.Tensor): encoder inputs (x)
+            condition_inputs (dict, torch.Tensor): condition inputs - (x_c)
 
         Returns:
             dictionary of batched samples (x')
         """
-        q_params = self.q_encoder(inputs=inputs, condition_inputs=condition_inputs)
+        c = self.c_net(condition_inputs)  # [B, ...]
+        q_params = self.q_net(inputs=inputs, condition_features=c)
         z = self.prior.sample_with_parameters(q_params, n=1).squeeze(dim=1)
-        c = self.c_encoder(condition_inputs)  # [B, ...]
-        x_out = self.decoder(latents=z, conditions=c)
+        x_out = self.decoder(latents=z, condition_features=c)
         return {"x_recons": x_out, "q_params": q_params, "z": z, "c": c}
 
-    def compute_losses(self, outputs, targets, target_weights=None, kl_weight: float = 1.0):
+    def compute_losses(self, outputs: dict, targets: dict, target_weights=None, kl_weight: float = 1.0):
         """
         Compute VAE losses
 
@@ -275,51 +286,93 @@ class CVAE(nn.Module):
 
         kld_loss = self.prior.kl_loss(outputs["q_params"], inputs=outputs["c"]) * kl_weight
 
-        return {"recon_loss": recon_loss, "kl_loss": kld_loss}
+        return {"prediction_loss": recon_loss, "kl_loss": kld_loss}
 
 
 def main():
     import tbsim.models.l5kit_models as l5m
-    prior = FixedGaussianPrior(latent_dim=16)
+
+    inputs = OrderedDict(trajectories=torch.randn(10, 50, 3))
+    condition_inputs = OrderedDict(image=torch.randn(10, 3, 224, 224))
+
+    condition_dim = 16
+    latent_dim = 4
+
+    prior = FixedGaussianPrior(latent_dim=4)
 
     map_encoder = l5m.RasterizedMapEncoder(
         model_arch="resnet18",
         num_input_channels=3,
-        visual_feature_dim=128
+        feature_dim=128
     )
 
     q_encoder = l5m.PosteriorEncoder(
-        map_encoder=map_encoder,
+        condition_dim=condition_dim,
         trajectory_shape=(50, 3),
-        output_shapes=OrderedDict(mu=(16,), logvar=(16,))
+        output_shapes=OrderedDict(mu=(latent_dim,), logvar=(latent_dim,))
     )
     c_encoder = l5m.ConditionEncoder(
         map_encoder=map_encoder,
         trajectory_shape=(50, 3),
-        condition_dim=16
+        condition_dim=condition_dim
     )
     decoder = l5m.ConditionFlatDecoder(
-        condition_dim=16,
-        latent_dim=16,
+        condition_dim=condition_dim,
+        latent_dim=latent_dim,
         output_shapes=OrderedDict(trajectories=(50, 3))
     )
 
     model = CVAE(
-        q_encoder=q_encoder,
-        c_encoder=c_encoder,
+        q_net=q_encoder,
+        c_net=c_encoder,
         decoder=decoder,
         prior=prior,
         target_criterion=nn.MSELoss(reduction="none")
     )
 
-    inputs = OrderedDict(trajectories=torch.randn(10, 50, 3))
-    conditions = OrderedDict(image=torch.randn(10, 3, 224, 224))
 
-    outputs = model(inputs=inputs, condition_inputs=conditions)
+    outputs = model(inputs=inputs, condition_inputs=condition_inputs)
     losses = model.compute_losses(outputs=outputs, targets=inputs)
-    samples = model.sample(condition_inputs=conditions, n=10)
+    samples = model.sample(condition_inputs=condition_inputs, n=10)
     print()
 
+    traj_encoder = l5m.RNNTrajectoryEncoder(
+        trajectory_dim=3,
+        rnn_hidden_size=100
+    )
+
+    c_net = l5m.ConditionNet(
+        condition_input_shapes=OrderedDict(
+            map_feature=(map_encoder.output_shape()[-1],)
+        ),
+        condition_dim=condition_dim,
+    )
+
+    q_net = l5m.PosteriorNet(
+        input_shapes=OrderedDict(
+            traj_feature=(traj_encoder.output_shape()[-1],)
+        ),
+        condition_dim=condition_dim,
+        param_shapes=prior.posterior_param_shapes,
+    )
+
+    lean_model = CVAE(
+        q_net=q_net,
+        c_net=c_net,
+        decoder=decoder,
+        prior=prior,
+        target_criterion=nn.MSELoss(reduction="none")
+    )
+
+    map_feats = map_encoder(condition_inputs["image"])
+    traj_feats = traj_encoder(inputs["trajectories"])
+    input_feats = dict(traj_feature=traj_feats)
+    condition_feats = dict(map_feature=map_feats)
+
+    outputs = lean_model(inputs=input_feats, condition_inputs=condition_feats)
+    losses = lean_model.compute_losses(outputs=outputs, targets=inputs)
+    samples = lean_model.sample(condition_inputs=condition_feats, n=10)
+    print()
 
 if __name__ == "__main__":
     main()

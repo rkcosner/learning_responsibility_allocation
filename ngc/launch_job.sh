@@ -1,6 +1,6 @@
 #!/bin/bash
 
-CONFIG_FILE=vae_kl1e-4
+CONFIG_FILE=vae_kl1e-5
 WANDB_PROJECT_NAME=vae-sweep
 
 RUNTIME=24h

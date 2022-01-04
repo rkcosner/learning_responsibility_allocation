@@ -3,10 +3,10 @@ from collections import OrderedDict
 
 import torch
 import torch.nn as nn
+import torch.optim as optim
 import pytorch_lightning as pl
 
 import tbsim.utils.tensor_utils as TensorUtils
-import tbsim.utils.torch_utils as TorchUtils
 import tbsim.utils.metrics as Metrics
 import tbsim.models.l5kit_models as l5m
 import tbsim.models.vaes as vaes
@@ -14,9 +14,6 @@ import tbsim.models.vaes as vaes
 
 class L5TrafficVAE(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):
-        """
-        Creates networks and places them into @self.nets.
-        """
         super(L5TrafficVAE, self).__init__()
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
@@ -27,15 +24,7 @@ class L5TrafficVAE(pl.LightningModule):
         map_encoder = l5m.RasterizedMapEncoder(
             model_arch=algo_config.model_architecture,
             num_input_channels=modality_shapes["image"][0],
-            visual_feature_dim=algo_config.visual_feature_dim
-        )
-
-        q_encoder = l5m.PosteriorEncoder(
-            map_encoder=map_encoder,
-            trajectory_shape=trajectory_shape,
-            output_shapes=prior.posterior_param_shapes,
-            mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
-            rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
+            feature_dim=algo_config.visual_feature_dim
         )
 
         c_encoder = l5m.ConditionEncoder(
@@ -46,32 +35,40 @@ class L5TrafficVAE(pl.LightningModule):
             rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
         )
 
+        q_encoder = l5m.PosteriorEncoder(
+            condition_dim=algo_config.vae.condition_dim,
+            trajectory_shape=trajectory_shape,
+            output_shapes=prior.posterior_param_shapes,
+            mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
+            rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
+        )
+
         decoder = l5m.ConditionFlatDecoder(
             condition_dim=algo_config.vae.condition_dim,
-            latent_dim=algo_config.vae.latent_dim,
+            latent_dim=prior.latent_dim,
             output_shapes=OrderedDict(trajectories=trajectory_shape),
             mlp_layer_dims=algo_config.vae.decoder.mlp_layer_dims
         )
 
         model = vaes.CVAE(
-            q_encoder=q_encoder,
-            c_encoder=c_encoder,
+            q_net=q_encoder,
+            c_net=c_encoder,
             decoder=decoder,
             prior=prior,
             target_criterion=nn.MSELoss(reduction="none")
         )
 
-        self.nets["policy"] = model
+        self.nets["cvae"] = model
 
     def forward(self, batch_inputs: dict):
         trajectories = torch.cat((batch_inputs["target_positions"], batch_inputs["target_yaws"]), dim=-1)
         inputs = OrderedDict(trajectories=trajectories)
         condition_inputs = OrderedDict(image=batch_inputs["image"])
-        return self.nets["policy"](inputs=inputs, condition_inputs=condition_inputs)
+        return self.nets["cvae"](inputs=inputs, condition_inputs=condition_inputs)
 
     def sample(self, batch_inputs: dict, n: int):
         condition_inputs = OrderedDict(image=batch_inputs["image"])
-        return self.nets["policy"].sample(condition_inputs=condition_inputs, n=n)
+        return self.nets["cvae"].sample(condition_inputs=condition_inputs, n=n)
 
     def _compute_metrics(self, outputs, batch):
         metrics = {}
@@ -110,7 +107,7 @@ class L5TrafficVAE(pl.LightningModule):
         target_weights = OrderedDict(trajectories=torch.ones_like(trajectories) * avails)
         targets = OrderedDict(trajectories=trajectories)
 
-        losses = self.nets["policy"].compute_losses(
+        losses = self.nets["cvae"].compute_losses(
             outputs=pout,
             targets=targets,
             target_weights=target_weights,
@@ -134,7 +131,7 @@ class L5TrafficVAE(pl.LightningModule):
         target_weights = OrderedDict(trajectories=torch.ones_like(trajectories) * avails)
         targets = OrderedDict(trajectories=trajectories)
 
-        losses = self.nets["policy"].compute_losses(
+        losses = self.nets["cvae"].compute_losses(
             outputs=pout,
             targets=targets,
             target_weights=target_weights,
@@ -153,11 +150,12 @@ class L5TrafficVAE(pl.LightningModule):
             self.log("val/metrics_" + k, m)
 
     def configure_optimizers(self):
-        optim_params = self.algo_config.optim_params
-        optim = TorchUtils.optimizer_from_optim_params(
-            net_optim_params=optim_params["policy"], net=self.nets["policy"]
+        optim_params = self.algo_config.optim_params["policy"]
+        return optim.Adam(
+            params=self.parameters(),
+            lr=optim_params["learning_rate"]["initial"],
+            weight_decay=optim_params["regularization"]["L2"],
         )
-        return optim
 
     def get_action(self, obs_dict):
         preds = self.sample(obs_dict["ego"], n=1)  # [B, 1, T, 3]
@@ -166,3 +164,73 @@ class L5TrafficVAE(pl.LightningModule):
             yaws=preds["trajectories"][:, 0, :, 2:3]
         )
         return {"ego": actions}
+
+
+class L5TrafficSlimVAE(L5TrafficVAE):
+    """CVAE with lean memory footprint (by reusing encoded features)"""
+    def __init__(self, algo_config, modality_shapes):
+        pl.LightningModule.__init__(self)
+        self.algo_config = algo_config
+        self.nets = nn.ModuleDict()
+        trajectory_shape = (self.algo_config.future_num_frames, 3)
+
+        prior = vaes.FixedGaussianPrior(latent_dim=algo_config.vae.latent_dim)
+
+        map_encoder = l5m.RasterizedMapEncoder(
+            model_arch=algo_config.model_architecture,
+            num_input_channels=modality_shapes["image"][0],
+            feature_dim=algo_config.visual_feature_dim
+        )
+
+        traj_encoder = l5m.RNNTrajectoryEncoder(
+            trajectory_dim=trajectory_shape[-1],
+            rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
+        )
+
+        c_net = l5m.ConditionNet(
+            condition_input_shapes=OrderedDict(
+                map_feature=(map_encoder.output_shape()[-1],)
+            ),
+            condition_dim=algo_config.vae.condition_dim,
+            mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims
+        )
+
+        q_net = l5m.PosteriorNet(
+            input_shapes=OrderedDict(
+                traj_feature=(traj_encoder.output_shape()[-1],)
+            ),
+            condition_dim=algo_config.vae.condition_dim,
+            param_shapes=prior.posterior_param_shapes,
+            mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims
+        )
+
+        decoder = l5m.ConditionFlatDecoder(
+            condition_dim=algo_config.vae.condition_dim,
+            latent_dim=prior.latent_dim,
+            output_shapes=OrderedDict(trajectories=trajectory_shape),
+            mlp_layer_dims=algo_config.vae.decoder.mlp_layer_dims
+        )
+
+        model = vaes.CVAE(
+            q_net=q_net,
+            c_net=c_net,
+            decoder=decoder,
+            prior=prior,
+            target_criterion=nn.MSELoss(reduction="none")
+        )
+
+        self.nets["cvae"] = model
+        self.nets["map_encoder"] = map_encoder
+        self.nets["traj_encoder"] = traj_encoder
+
+    def forward(self, batch_inputs: dict):
+        trajectories = torch.cat((batch_inputs["target_positions"], batch_inputs["target_yaws"]), dim=-1)
+        traj_feat = self.nets["traj_encoder"](trajectories)
+        map_feat = self.nets["map_encoder"](batch_inputs["image"])
+        input_feats = dict(traj_feature=traj_feat)
+        condition_feats = dict(map_feature=map_feat)
+        return self.nets["cvae"](inputs=input_feats, condition_inputs=condition_feats)
+
+    def sample(self, batch_inputs: dict, n: int):
+        condition_feat = dict(map_feature=self.nets["map_encoder"](batch_inputs["image"]))
+        return self.nets["cvae"].sample(condition_inputs=condition_feat, n=n)
