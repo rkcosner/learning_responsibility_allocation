@@ -5,7 +5,9 @@ class TrainConfig(Config):
     def __init__(self):
         super(TrainConfig, self).__init__()
         self.logging.terminal_output_to_txt = True       # whether to log stdout to txt file
-        self.logging.log_tb = True                       # enable tensorboard logging
+        self.logging.log_tb = False                      # enable tensorboard logging
+        self.logging.log_wandb = True                    # enable wandb logging
+        self.logging.wandb_project_name = "tbsim"
         self.logging.log_every_n_steps = 10
         self.logging.flush_every_n_steps = 100
 

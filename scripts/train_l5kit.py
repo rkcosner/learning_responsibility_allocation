@@ -3,8 +3,9 @@ import sys
 import os
 import json
 
+import wandb
 import pytorch_lightning as pl
-from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
 
 from tbsim.utils.log_utils import PrintLogger
 import tbsim.utils.train_utils as TrainUtils
@@ -90,10 +91,19 @@ def main(cfg, auto_remove_exp_dir=False):
     train_callbacks.extend([ckpt_ade_callback, ckpt_loss_callback])
 
     # Logging
-    tb_logger = TensorBoardLogger(
-        save_dir=root_dir, version=version_key, name=None, sub_dir="logs/"
-    )
-    print("Tensorboard event will be saved at {}".format(tb_logger.log_dir))
+    assert not (cfg.train.logging.log_tb and cfg.train.logging.log_wandb)
+    if cfg.train.logging.log_tb:
+        logger = TensorBoardLogger(save_dir=root_dir, version=version_key, name=None, sub_dir="logs/")
+        print("Tensorboard event will be saved at {}".format(logger.log_dir))
+    elif cfg.train.logging.log_wandb:
+        assert "WANDB_APIKEY" in os.environ, "Set api key by `export WANDB_APIKEY=<your-apikey>`"
+        apikey = os.environ["WANDB_APIKEY"]
+        logger = WandbLogger(name=cfg.name, project=cfg.train.logging.wandb_project_name)
+        wandb.login(key=apikey)
+        logger.watch(model=model)
+    else:
+        logger = None
+        print("WARNING: not logging training stats")
 
     # Train
     trainer = pl.Trainer(
@@ -102,7 +112,7 @@ def main(cfg, auto_remove_exp_dir=False):
         # checkpointing
         enable_checkpointing=cfg.train.save.enabled,
         # logging
-        logger=tb_logger,
+        logger=logger,
         flush_logs_every_n_steps=cfg.train.logging.flush_every_n_steps,
         log_every_n_steps=cfg.train.logging.log_every_n_steps,
         # training
