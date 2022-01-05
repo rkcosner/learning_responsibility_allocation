@@ -35,6 +35,19 @@ class Prior(nn.Module):
         """
         raise NotImplementedError
 
+    @staticmethod
+    def get_mean(prior_params):
+        """
+        Extract the "mean" of a prior distribution (not supported by all priors)
+
+        Args:
+            prior_params (torch.Tensor): a batch of prior parameters
+
+        Returns:
+            mean (torch.Tensor): the "mean" of the distribution
+        """
+        raise NotImplementedError
+
     def sample(self, n: int, inputs: torch.Tensor = None):
         """
         Take samples with the prior distribution
@@ -106,6 +119,10 @@ class FixedGaussianPrior(Prior):
             "mu": nn.Parameter(data=torch.zeros(self._latent_dim), requires_grad=False),
             "logvar": nn.Parameter(data=torch.zeros(self._latent_dim), requires_grad=False)
         })
+
+    @staticmethod
+    def get_mean(prior_params):
+        return prior_params["mu"]
 
     def forward(self, inputs: torch.Tensor = None):
         """
@@ -245,6 +262,23 @@ class CVAE(nn.Module):
         x_out = TensorUtils.reshape_dimensions(x_out, begin_axis=0, end_axis=1, target_dims=(c.shape[0], n))
         return x_out
 
+    def predict(self, condition_inputs):
+        """
+        Generate a prediction based on latent prior (instead of sample) and condition inputs
+
+        Args:
+            condition_inputs (dict, torch.Tensor): condition inputs (x_c)
+
+        Returns:
+            dictionary of batched predictions (x') of size [B, ...]
+
+        """
+        c = self.c_net(condition_inputs)  # [B, ...]
+        prior_params = self.prior(c)  # [B, ...]
+        mu = self.prior.get_mean(prior_params)  # [B, ...]
+        x_out = self.decoder(latents=mu, condition_features=c)
+        return x_out
+
     def forward(self, inputs, condition_inputs):
         """
         Pass the input through encoder and decoder (using posterior parameters)
@@ -281,6 +315,7 @@ class CVAE(nn.Module):
         x_recons = outputs["x_recons"]
         for k, v in x_recons.items():
             w = target_weights[k] if k in target_weights else torch.ones_like(targets[k])
+            assert w.shape == x_recons[k].shape == targets[k].shape
             element_loss = self.target_criterion(x_recons[k], targets[k]) * w
             recon_loss += torch.mean(element_loss)  # TODO: sum up last dimension instead of averaging all?
 

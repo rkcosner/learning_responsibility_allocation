@@ -28,7 +28,7 @@ def rollout_episodes(env, policy, num_episodes):
             obs = env.get_observation()
             obs = TensorUtils.to_torch(obs, device=policy.device)
 
-            action = policy.get_action(obs)
+            action = policy.get_action(obs, sample=False)
             env.step(action)
             done = env.is_done()
 

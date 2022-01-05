@@ -12,7 +12,7 @@ class L5KitTrainConfig(TrainConfig):
         self.datamodule_class = "L5RasterizedDataModule"
 
         self.rollout.enabled = True
-        self.rollout.every_n_steps = 1000
+        self.rollout.every_n_steps = 2000
         self.rollout.num_episodes = 4
         self.rollout.num_scenes = 25
 
@@ -21,13 +21,13 @@ class L5KitTrainConfig(TrainConfig):
         self.training.num_steps = 2000000
         self.training.num_data_workers = 4
 
-        self.save.every_n_steps = 10000
+        self.save.every_n_steps = 2000
 
         ## validation config
         self.validation.enabled = True
         self.validation.batch_size = 100
         self.validation.num_data_workers = 4
-        self.validation.every_n_steps = 2000
+        self.validation.every_n_steps = 1000
         self.validation.num_steps_per_epoch = 100
 
 

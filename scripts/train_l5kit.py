@@ -16,7 +16,7 @@ from tbsim.datasets.factory import datamodule_factory
 from tbsim.algos.factory import algo_factory
 
 
-def main(cfg, auto_remove_exp_dir=False):
+def main(cfg, auto_remove_exp_dir=False, debug=False):
     pl.seed_everything(cfg.seed)
 
     print("\n============= New Training Run with Config =============")
@@ -92,7 +92,10 @@ def main(cfg, auto_remove_exp_dir=False):
 
     # Logging
     assert not (cfg.train.logging.log_tb and cfg.train.logging.log_wandb)
-    if cfg.train.logging.log_tb:
+    if debug:
+        logger = None
+        print("Debugging mode, suppress logging.")
+    elif cfg.train.logging.log_tb:
         logger = TensorBoardLogger(save_dir=root_dir, version=version_key, name=None, sub_dir="logs/")
         print("Tensorboard event will be saved at {}".format(logger.log_dir))
     elif cfg.train.logging.log_wandb:
@@ -183,6 +186,13 @@ if __name__ == "__main__":
              "True to avoid unexpected stall when launching cloud experiments)."
     )
 
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Debug mode, suppress wandb logging, etc."
+    )
+
+
     args = parser.parse_args()
 
     if args.config_name is not None:
@@ -208,4 +218,4 @@ if __name__ == "__main__":
         default_config.train.logging.wandb_project_name = args.wandb_project_name
 
     default_config.lock()  # Make config read-only
-    main(default_config, auto_remove_exp_dir=args.remove_exp_dir)
+    main(default_config, auto_remove_exp_dir=args.remove_exp_dir, debug=args.debug)

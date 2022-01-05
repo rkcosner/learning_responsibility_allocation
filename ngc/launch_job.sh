@@ -1,6 +1,6 @@
 #!/bin/bash
 
-CONFIG_FILE=vae_kl1e-5
+CONFIG_FILE=vae_kl0_c128
 WANDB_PROJECT_NAME=vae-sweep
 
 RUNTIME=24h
@@ -18,7 +18,7 @@ python scripts/train_l5kit.py --output_dir $RESULT_DIR --config_file experiments
 echo "$CMD"
 
 ngc batch run \
- --instance dgx1v.32g.1.norm \
+ --instance dgx1v.16g.1.norm \
  --name "$CONFIG_FILE" \
  --image "nvcr.io/nvidian/nvr-av/tbsim:latest" \
  --datasetid 90893:$DS_MOUNT_POINT \

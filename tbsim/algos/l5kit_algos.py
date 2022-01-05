@@ -176,5 +176,5 @@ class L5TransformerTrafficModel(pl.LightningModule):
             weight_decay=optim_params["regularization"]["L2"],
         )
 
-    def get_action(self, obs_dict):
+    def get_action(self, obs_dict, **kwargs):
         return {"ego": self(obs_dict["ego"])}

@@ -70,6 +70,10 @@ class L5TrafficVAE(pl.LightningModule):
         condition_inputs = OrderedDict(image=batch_inputs["image"])
         return self.nets["cvae"].sample(condition_inputs=condition_inputs, n=n)
 
+    def predict(self, batch_inputs: dict):
+        condition_inputs = OrderedDict(image=batch_inputs["image"])
+        return self.nets["cvae"].predict(condition_inputs=condition_inputs)
+
     def _compute_metrics(self, outputs, batch):
         metrics = {}
         preds = TensorUtils.to_numpy(outputs["x_recons"]["trajectories"][..., :2])
@@ -157,12 +161,19 @@ class L5TrafficVAE(pl.LightningModule):
             weight_decay=optim_params["regularization"]["L2"],
         )
 
-    def get_action(self, obs_dict):
-        preds = self.sample(obs_dict["ego"], n=1)  # [B, 1, T, 3]
-        actions = dict(
-            positions=preds["trajectories"][:, 0, :, :2],
-            yaws=preds["trajectories"][:, 0, :, 2:3]
-        )
+    def get_action(self, obs_dict, sample=True):
+        if sample:
+            preds = self.sample(obs_dict["ego"], n=1)  # [B, 1, T, 3]
+            actions = dict(
+                positions=preds["trajectories"][:, 0, :, :2],
+                yaws=preds["trajectories"][:, 0, :, 2:3]
+            )
+        else:
+            preds = self.predict(obs_dict["ego"])
+            actions = dict(
+                positions=preds["trajectories"][:, :, :2],
+                yaws=preds["trajectories"][:, :, 2:3]
+            )
         return {"ego": actions}
 
 
