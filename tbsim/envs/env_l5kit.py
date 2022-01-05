@@ -32,6 +32,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         self._npr = np.random.RandomState(seed=seed)
         self.dataset = dataset
+        self._num_total_scenes = len(dataset.dataset.scenes)
         self._num_scenes = num_scenes
 
         self._current_scene_indices = None  # indices of the scenes (in dataset) that are being used for simulation
@@ -53,12 +54,12 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         """
         if scene_indices is None:
             # randomly sample a batch of scenes for close-loop rollouts
-            all_indices = np.arange(self.num_instances)
+            all_indices = np.arange(self._num_total_scenes)
             scene_indices = self._npr.choice(
                 all_indices, size=(self.num_instances,), replace=False
             )
-        assert len(scene_indices) == self._num_scenes
-        assert np.max(scene_indices) < self.num_instances and np.min(scene_indices) >= 0
+        assert len(scene_indices) == self.num_instances
+        assert np.max(scene_indices) < self._num_total_scenes and np.min(scene_indices) >= 0
 
         self._current_scene_indices = scene_indices
         self._current_scene_dataset = SimulationDataset.from_dataset_indices(
