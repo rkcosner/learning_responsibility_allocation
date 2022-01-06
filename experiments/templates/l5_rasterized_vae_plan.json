@@ -20,9 +20,9 @@
         },
         "rollout": {
             "enabled": true,
-            "num_episodes": 4,
+            "num_episodes": 2,
             "num_scenes": 25,
-            "every_n_steps": 2000,
+            "every_n_steps": 1000,
             "warm_start_n_steps": 1
         },
         "training": {

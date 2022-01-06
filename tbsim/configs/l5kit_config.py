@@ -12,8 +12,8 @@ class L5KitTrainConfig(TrainConfig):
         self.datamodule_class = "L5RasterizedDataModule"
 
         self.rollout.enabled = True
-        self.rollout.every_n_steps = 2000
-        self.rollout.num_episodes = 4
+        self.rollout.every_n_steps = 1000
+        self.rollout.num_episodes = 2
         self.rollout.num_scenes = 25
 
         ## training config

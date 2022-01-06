@@ -1,9 +1,9 @@
 #!/bin/bash
 
-CONFIG_FILE=vae_kl0_c128
+CONFIG_FILE=bc_old
 WANDB_PROJECT_NAME=vae-sweep
 
-RUNTIME=24h
+RUNTIME=48h
 WS_ID=OVG6VSVJRjq7TTKBpOdohg # replace with your workspace ID
 WS_MOUNT_POINT=/workspace/ws_mount/
 DS_MOUNT_POINT=/workspace/lyft_prediction/

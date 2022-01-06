@@ -64,6 +64,8 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
     model = algo_factory(algo_config=cfg.algo, modality_shapes=datamodule.modality_shapes, **model_kwargs)
 
     # Checkpointing
+    assert cfg.train.save.every_n_steps > cfg.train.validation.every_n_steps, \
+        "checkpointing frequency needs to be greater than rollout frequency"
     ckpt_ade_callback = pl.callbacks.ModelCheckpoint(
         dirpath=ckpt_dir,
         filename="iter{step}_ep{epoch}_simADE{rollout/metrics_ego_ADE:.2f}",
@@ -75,7 +77,8 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         every_n_train_steps=cfg.train.save.every_n_steps,
         verbose=True,
     )
-
+    assert cfg.train.save.every_n_steps > cfg.train.rollout.every_n_steps, \
+        "checkpointing frequency needs to be greater than rollout frequency"
     ckpt_loss_callback = pl.callbacks.ModelCheckpoint(
         dirpath=ckpt_dir,
         filename="iter{step}_ep{epoch}_valLoss{val/losses_prediction_loss:.2f}",
