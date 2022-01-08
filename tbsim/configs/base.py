@@ -39,6 +39,9 @@ class TrainConfig(Dict):
         self.validation.every_n_steps = 1000
         self.validation.num_steps_per_epoch = 100
 
+        ## Training parallelism (e.g., multi-GPU)
+        self.parallel_strategy = "ddp_spawn"
+
 
 class EnvConfig(Dict):
     def __init__(self):

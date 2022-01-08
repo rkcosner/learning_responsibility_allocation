@@ -9,7 +9,7 @@ from tbsim.configs.registry import EXP_CONFIG_REGISTRY
 
 def main():
     # store template config jsons in this directory
-    target_dir = os.path.join(tbsim.__path__[0], "experiments/templates/")
+    target_dir = os.path.join(tbsim.__path__[0], "../experiments/templates/")
 
     for name, cfg in EXP_CONFIG_REGISTRY.items():
         cfg.dump(filename=os.path.join(target_dir, name + ".json"))
