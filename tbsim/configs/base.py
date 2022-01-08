@@ -1,7 +1,7 @@
-from tbsim.configs.config import Config
+from tbsim.configs.config import Dict
 
 
-class TrainConfig(Config):
+class TrainConfig(Dict):
     def __init__(self):
         super(TrainConfig, self).__init__()
         self.logging.terminal_output_to_txt = True       # whether to log stdout to txt file
@@ -40,19 +40,19 @@ class TrainConfig(Config):
         self.validation.num_steps_per_epoch = 100
 
 
-class EnvConfig(Config):
+class EnvConfig(Dict):
     def __init__(self):
         super(EnvConfig, self).__init__()
         self.name = "my_env"
 
 
-class AlgoConfig(Config):
+class AlgoConfig(Dict):
     def __init__(self):
         super(AlgoConfig, self).__init__()
         self.name = "my_algo"
 
 
-class ExperimentConfig(Config):
+class ExperimentConfig(Dict):
     def __init__(
             self,
             train_config: TrainConfig,

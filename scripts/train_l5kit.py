@@ -29,7 +29,7 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         auto_remove_exp_dir=auto_remove_exp_dir
     )
 
-    if cfg.train.logging.terminal_output_to_txt:
+    if cfg.train.logging.terminal_output_to_txt and not debug:
         # log stdout and stderr to a text file
         logger = PrintLogger(os.path.join(log_dir, "log.txt"))
         sys.stdout = logger

@@ -9,6 +9,7 @@ import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 
 from l5kit.rasterization import build_rasterizer
+from l5kit.rasterization.rasterizer import Rasterizer
 from l5kit.vectorization.vectorizer_builder import build_vectorizer
 from l5kit.data import LocalDataManager, ChunkedDataset
 from l5kit.dataset import EgoDataset, AgentDataset
@@ -20,6 +21,37 @@ from tbsim.external.l5_ego_dataset import (
 )
 
 
+class LazyRasterizer(Rasterizer):
+    """
+    Only creates the actual rasterizer when a member function is called.
+
+    A Rasterizer class is non-pickleable, which means that pickle complains about it when we try to do
+    multi-process training (e.g., multiGPU training). This class is a way to circumvent the issue by only
+    creating the rasterizer object when it's being used in the spawned processes.
+    """
+    def __init__(self, l5_config, data_manager):
+        super(LazyRasterizer, self).__init__()
+        self._l5_config = l5_config
+        self._dm = data_manager
+        self._rasterizer = None
+
+    @property
+    def rasterizer(self):
+        if self._rasterizer is None:
+            self._rasterizer = build_rasterizer(self._l5_config, self._dm)
+        return self._rasterizer
+
+    def rasterize(self, *args, **kwargs):
+        return self.rasterizer.rasterize(*args, **kwargs)
+
+    def to_rgb(self,*args, **kwargs):
+        return self.rasterizer.to_rgb(*args, **kwargs)
+
+    def num_channels(self) -> int:
+        return self.rasterizer.num_channels()
+
+
+
 class L5BaseDatasetModule(abc.ABC):
     pass
 
@@ -27,7 +59,7 @@ class L5BaseDatasetModule(abc.ABC):
 class L5RasterizedDataModule(pl.LightningDataModule, L5BaseDatasetModule):
     def __init__(
             self,
-            l5_config,
+            l5_config: dict,
             train_config: TrainConfig,
             mode: str,
     ):
@@ -43,12 +75,14 @@ class L5RasterizedDataModule(pl.LightningDataModule, L5BaseDatasetModule):
 
     @property
     def modality_shapes(self):
-        return OrderedDict(image=(self.rasterizer.num_channels(), 224, 224))
+        dm = LocalDataManager(None)
+        rasterizer = build_rasterizer(self._l5_config, dm)
+        return OrderedDict(image=(rasterizer.num_channels(), 224, 224))
 
     def setup(self, stage: Optional[str] = None):
         os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath(self._train_config.dataset_path)
         dm = LocalDataManager(None)
-        self.rasterizer = build_rasterizer(self._l5_config, dm)
+        self.rasterizer = LazyRasterizer(self._l5_config, dm)
 
         train_zarr = ChunkedDataset(dm.require(self._train_config.dataset_train_key)).open()
         valid_zarr = ChunkedDataset(dm.require(self._train_config.dataset_valid_key)).open()
@@ -66,6 +100,7 @@ class L5RasterizedDataModule(pl.LightningDataModule, L5BaseDatasetModule):
             self.train_dataset = self.ego_trainset
             self.valid_dataset = self.ego_validset
         else:
+            raise NotImplementedError
             self.train_dataset = self.agents_trainset
             self.valid_dataset = self.agents_validset
 
