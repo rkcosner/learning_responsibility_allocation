@@ -169,5 +169,19 @@ class Dict(dict):
             if isinstance(val, Dict):
                 val.lock(should_lock)
 
+    def dump(self, filename = None):
+        json_string = json.dumps(self.to_dict(), indent=4)
+        if filename is not None:
+            f = open(filename, "w")
+            f.write(json_string)
+            f.close()
+        return json_string
+
     def unlock(self):
         self.lock(False)
+
+    @contextlib.contextmanager
+    def unlocked(self):
+        self.unlock()
+        yield
+        self.lock()

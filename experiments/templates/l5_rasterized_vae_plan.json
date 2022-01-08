@@ -37,6 +37,7 @@
             "every_n_steps": 1000,
             "num_steps_per_epoch": 100
         },
+        "parallel_strategy": "ddp_spawn",
         "dataset_path": "YOUR-DATASET-PATH",
         "dataset_valid_key": "scenes/validate.zarr",
         "dataset_train_key": "scenes/train.zarr",

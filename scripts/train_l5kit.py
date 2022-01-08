@@ -37,6 +37,18 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
 
     train_callbacks = []
 
+    # Training Parallelism
+    assert cfg.train.parallel_strategy in ["dp", "ddp_spawn", None]  # TODO: look into other strategies
+    if not cfg.devices.num_gpus > 1:
+        # Override strategy when training on a single GPU
+        with cfg.train.unlocked():
+            cfg.train.parallel_strategy = None
+    if cfg.train.parallel_strategy in ["ddp_spawn"]:
+        with cfg.train.training.unlocked():
+            cfg.train.training.batch_size = int(cfg.train.training.batch_size / cfg.devices.num_gpus)
+        with cfg.train.validation.unlocked():
+            cfg.train.validation.batch_size = int(cfg.train.validation.batch_size / cfg.devices.num_gpus)
+
     # Dataset
     datamodule = datamodule_factory(cls_name=cfg.train.datamodule_class, config=cfg, mode="ego")
     datamodule.setup()
@@ -108,7 +120,6 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         logger = WandbLogger(name=cfg.name, project=cfg.train.logging.wandb_project_name)
         # record the entire config on wandb
         logger.experiment.config.update(cfg.to_dict())
-        logger.watch(model=model)
     else:
         logger = None
         print("WARNING: not logging training stats")
@@ -116,7 +127,6 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
     # Train
     trainer = pl.Trainer(
         default_root_dir=root_dir,
-        gpus=cfg.devices.num_gpus,
         # checkpointing
         enable_checkpointing=cfg.train.save.enabled,
         # logging
@@ -130,6 +140,9 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         limit_val_batches=cfg.train.validation.num_steps_per_epoch,
         # all callbacks
         callbacks=train_callbacks,
+        # device & distributed training setup
+        gpus=cfg.devices.num_gpus,
+        strategy=cfg.train.parallel_strategy
     )
 
     trainer.fit(model=model, datamodule=datamodule)
