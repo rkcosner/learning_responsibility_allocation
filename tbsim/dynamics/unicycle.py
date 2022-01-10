@@ -6,7 +6,7 @@ import pdb
 
 
 class Unicycle(dynamic):
-    def __init__(self, name, max_steer=0.2, max_yawvel=5, acce_bound=[-6, 4]):
+    def __init__(self, name, max_steer=0.5, max_yawvel=8, acce_bound=[-6, 4]):
         self._name = name
         self._type = DynType.UNICYCLE
         self.xdim = 4
@@ -35,10 +35,13 @@ class Unicycle(dynamic):
             raise NotImplementedError
         return dxdt
 
-    def step(self, x, u, dt):
-        assert x.shape[:-1] == u.shape[:, -1]
+    def step(self, x, u, dt, bound=True):
+        assert x.shape[:-1] == u.shape[:-1]
         if isinstance(x, np.ndarray):
             assert isinstance(u, np.ndarray)
+            if bound:
+                lb, ub = self.ubound(x)
+                u = np.clip(u, lb, ub)
             theta = x[..., 3:4]
             dxdt = np.hstack(
                 (
@@ -49,6 +52,9 @@ class Unicycle(dynamic):
             )
         elif isinstance(x, torch.Tensor):
             assert isinstance(u, torch.Tensor)
+            if bound:
+                lb, ub = self.ubound(x)
+                u = torch.clip(u, min=lb, max=ub)
             theta = x[..., 3:4]
             dxdt = torch.cat(
                 (
@@ -81,8 +87,10 @@ class Unicycle(dynamic):
         elif isinstance(x, torch.Tensor):
             v = x[..., 2:3]
             yawbound = torch.minimum(
-                self.max_steer * v, self.max_yawvel / torch.clip(torch.abs(v), min=0.1)
+                self.max_steer * torch.abs(v),
+                self.max_yawvel / torch.clip(torch.abs(v), min=0.1),
             )
+            yawbound = torch.clip(yawbound, min=0.1)
             lb = torch.cat((torch.ones_like(v) * self.acce_bound[0], -yawbound), dim=-1)
             ub = torch.cat((torch.ones_like(v) * self.acce_bound[1], yawbound), dim=-1)
             return lb, ub
@@ -92,6 +100,10 @@ class Unicycle(dynamic):
     @staticmethod
     def state2pos(x):
         return x[..., 0:2]
+
+    @staticmethod
+    def state2yaw(x):
+        return x[..., 3:]
 
     @staticmethod
     def calculate_vel(pos, yaw, dt, mask):

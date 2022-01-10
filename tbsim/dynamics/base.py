@@ -26,7 +26,7 @@ class dynamic(abc.ABC):
         return
 
     @abc.abstractmethod
-    def step(self, x, u, dt):
+    def step(self, x, u, dt, bound):
         return
 
     @abc.abstractmethod

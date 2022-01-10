@@ -23,13 +23,19 @@ class DoubleIntegrator(dynamic):
         else:
             raise NotImplementedError
 
-    def step(self, x, u, dt):
+    def step(self, x, u, dt, bound=True):
 
         if isinstance(x, np.ndarray):
+            if bound:
+                lb, ub = self.ubound(x)
+                u = np.clip(u, lb, ub)
             xn = np.hstack(
                 ((x[..., 2:4] + 0.5 * u * dt) * dt + x[..., 0:2], x[..., 2:4] + u * dt)
             )
         elif isinstance(x, torch.Tensor):
+            if bound:
+                lb, ub = self.ubound(x)
+                u = torch.clip(u, min=lb, max=ub)
             xn = torch.clone(x)
             xn[..., 0:2] += (x[..., 2:4] + 0.5 * u * dt) * dt
             xn[..., 2:4] += u * dt
@@ -74,3 +80,7 @@ class DoubleIntegrator(dynamic):
     @staticmethod
     def state2pos(x):
         return x[..., 0:2]
+
+    @staticmethod
+    def state2yaw(x):
+        return torch.atan2(x[..., 3:], x[..., 2:3])
