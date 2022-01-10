@@ -1,10 +1,10 @@
-from tbsim.dynamics.base import DynType, dynamic
+from tbsim.dynamics.base import DynType, Dynamics
 import torch
 import numpy as np
 from copy import deepcopy
 
 
-class SingleIntegrator(dynamic):
+class SingleIntegrator(Dynamics):
     def __init__(self, name, vbound):
         self._name = name
         self._type = DynType.SI

@@ -16,7 +16,7 @@ class DynType:
     DI = 3
 
 
-class dynamic(abc.ABC):
+class Dynamics(abc.ABC):
     @abc.abstractmethod
     def __init__(self, name, **kwargs):
         pass
