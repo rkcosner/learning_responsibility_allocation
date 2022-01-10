@@ -81,6 +81,15 @@
         "future_num_frames": 50,
         "step_time": 0.1,
         "render_ego_history": false,
+        "dynamics": {
+            "type": null,
+            "max_steer": 0.5,
+            "max_yawvel": 8.0,
+            "acce_bound": [
+                -6,
+                4
+            ]
+        },
         "optim_params": {
             "policy": {
                 "learning_rate": {

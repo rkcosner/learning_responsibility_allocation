@@ -26,7 +26,7 @@ class Dynamics(abc.ABC):
         return
 
     @abc.abstractmethod
-    def step(self, x, u, dt, bound):
+    def step(self, x, u, dt, bound=True):
         return
 
     @abc.abstractmethod
@@ -41,6 +41,10 @@ class Dynamics(abc.ABC):
     def ubound(self, x):
         return
 
-    @abc.abstractmethod
+    @staticmethod
     def state2pos(x):
+        return
+
+    @staticmethod
+    def state2yaw(x):
         return

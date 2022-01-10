@@ -9,9 +9,11 @@ from torchvision.models.resnet import resnet18, resnet50
 
 from tbsim.models.base_models import SplitMLP, MLP, MIMOMLP
 import tbsim.utils.tensor_utils as TensorUtils
+import tbsim.dynamics as dynamics
+import tbsim.utils.l5_utils as L5Utils
 
 
-class RasterizedPlanningModel(nn.Module):
+class RasterizedPlanningModelOld(nn.Module):
     """Raster-based model for planning.
     """
 
@@ -81,6 +83,100 @@ class RasterizedPlanningModel(nn.Module):
             batch_size, -1
         )
         loss = torch.mean(self.criterion(pred_batch["raw_outputs"], targets) * target_weights)
+        losses = OrderedDict(prediction_loss=loss)
+        return losses
+
+
+def forward_dynamics(
+        dyn_model: dynamics.Dynamics,
+        initial_states: torch.Tensor,
+        actions: torch.Tensor,
+        step_time: float
+):
+    """
+    Integrate the state forward with initial state x0, action u
+    Args:
+        dyn_model (dynamics.Dynamics): dynamics model
+        initial_states (Torch.tensor): state tensor of size [..., 4]
+        actions (Torch.tensor): action tensor of size [..., 2]
+        step_time (float): delta time between steps
+    Returns:
+        state tensor of size [B,Num_agent,T,4]
+    """
+    num_steps = actions.shape[-2]
+    x = [initial_states.squeeze(-2)] + [None] * num_steps
+    for t in range(num_steps):
+        x[t + 1] = (
+                dyn_model.step(
+                    x[t], actions[..., t, :], step_time, bound=True
+                )
+        )
+
+    x = torch.stack(x[1:], dim=-2)
+    pos = dyn_model.state2pos(x)
+    yaw = dyn_model.state2yaw(x)
+    return x, pos, yaw
+
+
+class RasterizedPlanningModel(nn.Module):
+    """Raster-based model for planning.
+    """
+
+    def __init__(
+            self,
+            model_arch: str,
+            num_input_channels: int,
+            num_future_frames: int,
+            weights_scaling: List[float],
+            criterion: nn.Module,
+            dynamics_model: dynamics.Dynamics = None,
+            step_time = 0.1
+    ) -> None:
+
+        super().__init__()
+        self.map_encoder = RasterizedMapEncoder(
+            model_arch=model_arch,
+            num_input_channels=num_input_channels,
+            feature_dim=128,
+            output_activation=nn.ReLU
+        )
+        self.dynamics_model = dynamics_model
+        self.pred_step_dim = 3 if self.dynamics_model is None else 2  # [x, y, yaw] or [acc, dh]
+        self.output_fc = nn.Linear(128, num_future_frames * self.pred_step_dim)
+        self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
+        self.criterion = criterion
+        self.step_time = step_time
+
+    def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        image_batch = data_batch["image"]
+        map_feat = self.map_encoder(image_batch)
+        preds = self.output_fc(map_feat)
+        preds = preds.reshape(preds.shape[0], -1, self.pred_step_dim)
+        if self.dynamics_model is not None:
+            raw_ego = L5Utils.batch_to_raw_ego(data_batch, step_time=self.step_time)
+            all_states, curr_states = L5Utils.raw_to_states(*raw_ego)
+            _, pos, yaw = forward_dynamics(
+                self.dynamics_model,
+                initial_states=curr_states[:, 0, ...],
+                actions=preds,
+                step_time=self.step_time
+            )
+            traj = torch.cat((pos, yaw), dim=-1)
+        else:
+            traj = preds
+
+        pred_positions = traj[:, :, :2]
+        pred_yaws = traj[:, :, 2:3]
+        out_dict = {
+            "trajectories": traj,
+            "predictions": {"positions": pred_positions, "yaws": pred_yaws}
+        }
+        return out_dict
+
+    def compute_losses(self, pred_batch, data_batch):
+        target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=2)
+        target_weights = (data_batch["target_availabilities"].unsqueeze(-1) * self.weights_scaling)
+        loss = torch.mean(self.criterion(pred_batch["trajectories"], target_traj) * target_weights)
         losses = OrderedDict(prediction_loss=loss)
         return losses
 

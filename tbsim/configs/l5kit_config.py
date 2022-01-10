@@ -209,6 +209,10 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.future_num_frames = 50
         self.step_time = 0.1
         self.render_ego_history = False
+        self.dynamics.type = None
+        self.dynamics.max_steer = 0.5
+        self.dynamics.max_yawvel = 8.0
+        self.dynamics.acce_bound = (-6, 4)
 
         self.optim_params.policy.learning_rate.initial = 1e-3  # policy learning rate
         self.optim_params.policy.learning_rate.decay_factor = (

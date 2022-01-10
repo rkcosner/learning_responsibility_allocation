@@ -6,7 +6,7 @@ import pdb
 
 
 class Unicycle(Dynamics):
-    def __init__(self, name, max_steer=0.5, max_yawvel=8, acce_bound=[-6, 4]):
+    def __init__(self, name, max_steer=0.5, max_yawvel=8, acce_bound=(-6, 4)):
         self._name = name
         self._type = DynType.UNICYCLE
         self.xdim = 4

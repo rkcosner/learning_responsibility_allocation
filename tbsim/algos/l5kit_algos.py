@@ -8,8 +8,8 @@ import pytorch_lightning as pl
 
 from tbsim.models.l5kit_models import RasterizedPlanningModel
 from tbsim.models.transformer_model import TransformerModel
+from tbsim.dynamics import Unicycle
 import tbsim.utils.tensor_utils as TensorUtils
-import tbsim.utils.torch_utils as TorchUtils
 import tbsim.utils.metrics as Metrics
 
 
@@ -21,13 +21,25 @@ class L5TrafficModel(pl.LightningModule):
         super(L5TrafficModel, self).__init__()
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
+
+        if algo_config.dynamics.type is not None:
+            dyn = Unicycle(
+                "dynamics",
+                max_steer=algo_config.dynamics.max_steer,
+                max_yawvel=algo_config.dynamics.max_yawvel,
+                acce_bound=algo_config.dynamics.acce_bound
+            )
+        else:
+            dyn = None
+
         self.nets["policy"] = RasterizedPlanningModel(
             model_arch=self.algo_config.model_architecture,
             num_input_channels=modality_shapes["image"][0],  # [C, H, W]
-            num_targets=3
-            * self.algo_config.future_num_frames,  # X, Y, Yaw * number of future states,
+            num_future_frames=self.algo_config.future_num_frames,  # X, Y, Yaw * number of future states,
             weights_scaling=[1.0, 1.0, 1.0],
             criterion=nn.MSELoss(reduction="none"),
+            step_time=self.algo_config.step_time,
+            dynamics_model=dyn
         )
 
     def forward(self, obs_dict):
@@ -116,8 +128,6 @@ class L5TransformerTrafficModel(pl.LightningModule):
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
         self.nets["policy"] = TransformerModel(algo_config)
-        device = TorchUtils.get_torch_device(algo_config.try_to_use_cuda)
-        self.nets["policy"].to(device)
 
     def forward(self, obs_dict):
         return self.nets["policy"](obs_dict)["predictions"]
