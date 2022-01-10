@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import pdb
 
 
 class CNNROIMapEncoder(nn.Module):
@@ -17,9 +18,15 @@ class CNNROIMapEncoder(nn.Module):
 
         """
         multi-layer CNN with ROI align for the output
-        ROI_outdim: ROI points along each dim total interpolating points: ROI_outdim x ROI_outdim
-        input_size: map size
-        output_size: output feature size
+        Args:
+            map_channels (int): map channel numbers
+            ROI (list): list of ROIs
+            ROI_outdim (int): ROI points along each dim total interpolating points: ROI_outdim x ROI_outdim
+            output_size (int): output feature size
+            kernel_size (list): CNN kernel size for each layer
+            strides (list): CNN strides for each layer
+            input_size (tuple): map size
+
         """
         super(CNNROIMapEncoder, self).__init__()
         self.convs = nn.ModuleList()
@@ -49,7 +56,18 @@ class CNNROIMapEncoder(nn.Module):
         )
 
     def forward(self, x, ROI):
+        """
+
+        Args:
+            x (torch.tensor): image
+            ROI (list): ROIs
+
+        Returns:
+            out (list): ROI align result for each ROI
+        """
+
         for conv, bn in zip(self.convs, self.bns):
+            x0 = x
             x = F.leaky_relu(conv(x), 0.2)
             x = bn(x)
 

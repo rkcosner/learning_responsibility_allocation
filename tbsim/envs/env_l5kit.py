@@ -9,6 +9,8 @@ from l5kit.cle.metrics import DisplacementErrorL2Metric
 
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.envs.base import BaseEnv, BatchedEnv, SimulationException
+from l5kit.geometry import compute_agent_pose
+import pdb
 
 
 class EnvL5KitSimulation(BaseEnv, BatchedEnv):
@@ -29,7 +31,10 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             start_frame_index=env_config.simulation.start_frame_index,
             show_info=True,
         )
-
+        if "generate_agent_obs" not in env_config.keys():
+            self.generate_agent_obs = True
+        else:
+            self.generate_agent_obs = env_config.generate_agent_obs
         self._npr = np.random.RandomState(seed=seed)
         self.dataset = dataset
         self._num_scenes = num_scenes
@@ -123,14 +128,20 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         if self._cached_observation is not None:
             return self._cached_observation
-
-        agent_obs = self._current_scene_dataset.rasterise_agents_frame_batch(self._frame_index)
+        if self.generate_agent_obs:
+            agent_obs = self._current_scene_dataset.rasterise_agents_frame_batch(
+                self._frame_index
+            )
+            if len(agent_obs) > 0:
+                agent_obs = default_collate(list(agent_obs.values()))
+        else:
+            agent_obs = None
         ego_obs = self._current_scene_dataset.rasterise_frame_batch(self._frame_index)
-        if len(agent_obs) > 0:
-            agent_obs = default_collate(list(agent_obs.values()))
 
         ego_obs = default_collate(ego_obs)
-        self._cached_observation = TensorUtils.to_numpy({"agents": agent_obs, "ego": ego_obs})
+        self._cached_observation = TensorUtils.to_numpy(
+            {"agents": agent_obs, "ego": ego_obs}
+        )
         return self._cached_observation
 
     def is_done(self):
@@ -196,8 +207,53 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             ego_in_out = ClosedLoopSimulator.get_ego_in_out(
                 obs["ego"], ego_control, keys_to_exclude=set(("image",))
             )
+
             for scene_idx in self._current_scene_indices:
                 self._ego_states[scene_idx].append(ego_in_out[scene_idx])
+
+            # if "all_other_agents_track_id" in ego_control:
+            #     if should_update:
+            #         # batch update all surrounding agents if the model is scene-centric
+            #         for scene_idx in self._current_scene_indices:
+
+            #             in_dict = ego_in_out[scene_idx].inputs
+            #             out_dict = ego_in_out[scene_idx].outputs
+            #             agents_track_id = out_dict["all_other_agents_track_id"]
+            #             idx = np.where(agents_track_id != 0)[0]
+            #             agent_centroid_m = (
+            #                 in_dict["centroid"]
+            #                 + out_dict["all_other_positions"][idx, 0]
+            #             )
+            #             agent_yaw_rad = (
+            #                 in_dict["yaw"] + out_dict["all_other_yaws"][idx, 0, 0]
+            #             )
+            #             world_from_agent = np.zeros([idx.shape[0], 3, 3])
+            #             for j in range(agent_yaw_rad.shape[0]):
+            #                 world_from_agent[j] = compute_agent_pose(
+            #                     agent_centroid_m[j], agent_yaw_rad[j]
+            #                 )
+            #             extents = in_dict["all_other_agents_history_extents"][idx, 0]
+            #             extents = np.hstack(
+            #                 (extents, 1.8 * np.ones((extents.shape[0], 1)))
+            #             )
+            #             agent_obs = {
+            #                 "world_from_agent": world_from_agent,
+            #                 "yaw": np.tile(in_dict["yaw"], idx.shape[0]),
+            #                 "track_id": agents_track_id[idx],
+            #                 "extent": extents,
+            #                 "scene_index": np.tile(scene_idx, idx.shape[0]),
+            #             }
+            #             agent_control = {
+            #                 "positions": out_dict["all_other_positions"][idx],
+            #                 "yaws": out_dict["all_other_yaws"][idx],
+            #             }
+
+            #             ClosedLoopSimulator.update_agents(
+            #                 dataset=self._current_scene_dataset,
+            #                 frame_idx=self._frame_index + 1,
+            #                 input_dict=agent_obs,
+            #                 output_dict=agent_control,
+            #             )
 
         if agents_control is not None:
             if should_update:

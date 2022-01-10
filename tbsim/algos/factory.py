@@ -1,6 +1,11 @@
 """Factory methods for creating models"""
 from tbsim.configs.base import AlgoConfig
-from tbsim.algos.l5kit_algos import L5TrafficModel, L5TransformerTrafficModel
+from tbsim.algos.l5kit_algos import (
+    L5TrafficModel,
+    L5TransformerTrafficModel,
+    L5TransformerGANTrafficModel,
+)
+
 
 def algo_factory(algo_config: AlgoConfig, modality_shapes, **kwargs):
     """
@@ -19,6 +24,7 @@ def algo_factory(algo_config: AlgoConfig, modality_shapes, **kwargs):
     if algo_name == "l5_rasterized":
         algo = L5TrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "TransformerPred":
-        algo_config["tgt_mask_N"] = kwargs["tgt_mask_N"]  # TODO: make this less hacky?
         algo = L5TransformerTrafficModel(algo_config=algo_config)
+    elif algo_name == "TransformerGAN":
+        algo = L5TransformerGANTrafficModel(algo_config=algo_config)
     return algo

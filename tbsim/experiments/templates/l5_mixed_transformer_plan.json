@@ -3,13 +3,15 @@
     "train": {
         "logging": {
             "terminal_output_to_txt": true,
-            "log_tb": true,
+            "log_tb": false,
+            "log_wandb": true,
+            "wandb_project_name": "tbsim",
             "log_every_n_steps": 10,
             "flush_every_n_steps": 100
         },
         "save": {
             "enabled": true,
-            "every_n_steps": 10000,
+            "every_n_steps": 1000,
             "best_k": 5
         },
         "render": {
@@ -18,24 +20,24 @@
         },
         "rollout": {
             "enabled": true,
-            "num_episodes": 4,
-            "num_scenes": 25,
-            "every_n_steps": 1000,
+            "num_episodes": 10,
+            "num_scenes": 3,
+            "every_n_steps": 500,
             "warm_start_n_steps": 1
         },
         "training": {
-            "batch_size": 100,
-            "num_steps": 2000000,
+            "batch_size": 64,
+            "num_steps": 200000,
             "num_data_workers": 4
         },
         "validation": {
             "enabled": true,
-            "batch_size": 100,
+            "batch_size": 64,
             "num_data_workers": 4,
-            "every_n_steps": 2000,
+            "every_n_steps": 500,
             "num_steps_per_epoch": 100
         },
-        "dataset_path": "YOUR-DATASET-PATH",
+        "dataset_path": "/home/chenyx/repos/l5kit/prediction-dataset",
         "dataset_valid_key": "scenes/validate.zarr",
         "dataset_train_key": "scenes/train.zarr",
         "dataset_meta_key": "meta.json",
@@ -64,6 +66,7 @@
             "satellite_map_key": "aerial_map/aerial_map.png",
             "set_origin_to_bottom": true
         },
+        "generate_agent_obs": false,
         "data_generation_params": {
             "other_agents_num": 20,
             "max_agents_distance": 50,
@@ -86,16 +89,19 @@
     "algo": {
         "name": "TransformerPred",
         "model_architecture": "Factorized",
-        "history_num_frames": 8,
-        "history_num_frames_ego": 8,
-        "history_num_frames_agents": 8,
-        "future_num_frames": 10,
+        "history_num_frames": 10,
+        "history_num_frames_ego": 10,
+        "history_num_frames_agents": 10,
+        "future_num_frames": 15,
         "step_time": 0.2,
-        "N_t": 4,
-        "N_a": 3,
-        "d_model": 512,
-        "d_ff": 2048,
-        "head": 8,
+        "N_t": 2,
+        "N_a": 1,
+        "d_model": 128,
+        "XY_pe_dim": 16,
+        "temporal_pe_dim": 16,
+        "map_emb_dim": 32,
+        "d_ff": 256,
+        "head": 4,
         "dropout": 0.1,
         "XY_step_size": [
             0.1,
@@ -111,40 +117,65 @@
         "disable_other_agents": false,
         "disable_map": false,
         "global_head_dropout": 0.0,
-        "map_channels": 3,
-        "hidden_channels": [
-            10,
-            20,
-            10,
-            3
-        ],
-        "ROI_outdim": 12,
-        "output_size": 512,
-        "patch_size": [
-            15,
-            35,
-            25,
-            25
-        ],
-        "kernel_size": [
-            5,
-            5,
-            5,
-            3
-        ],
-        "strides": [
-            1,
-            1,
-            1,
-            1
-        ],
-        "input_size": [
-            224,
-            224
-        ],
+        "training_num_N": 10000,
+        "N_layer_enc": 2,
+        "N_layer_tgt_enc": 1,
+        "N_layer_tgt_dec": 1,
+        "calc_likelihood": false,
+        "f_steps": 5,
+        "GAN_weight": 1.0,
+        "vmax": 40,
+        "vmin": -10,
+        "reg_weight": 10,
+        "CNN": {
+            "map_channels": 3,
+            "hidden_channels": [
+                10,
+                20,
+                10,
+                10
+            ],
+            "ROI_outdim": 10,
+            "output_size": 32,
+            "patch_size": [
+                15,
+                35,
+                25,
+                25
+            ],
+            "kernel_size": [
+                5,
+                5,
+                5,
+                3
+            ],
+            "strides": [
+                1,
+                1,
+                1,
+                1
+            ],
+            "input_size": [
+                224,
+                224
+            ]
+        },
+        "vectorize_map": false,
         "try_to_use_cuda": true,
         "render_ego_history": false,
         "optim_params": {
+            "policy": {
+                "learning_rate": {
+                    "initial": 0.001,
+                    "decay_factor": 0.1,
+                    "epoch_schedule": []
+                },
+                "regularization": {
+                    "L2": 0.0
+                }
+            }
+        },
+        "optim_params_discriminator": {
             "policy": {
                 "learning_rate": {
                     "initial": 0.001,

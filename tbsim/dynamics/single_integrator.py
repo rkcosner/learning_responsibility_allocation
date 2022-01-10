@@ -18,8 +18,14 @@ class SingleIntegrator(dynamic):
 
         return u
 
-    def step(self, x, u, dt):
+    def step(self, x, u, dt, bound=True):
         assert x.shape[:-1] == u.shape[:, -1]
+        if bound:
+            lb, ub = self.ubound(x)
+            if isinstance(x, np.ndarray):
+                u = np.clip(u, lb, ub)
+            elif isinstance(x, torch.Tensor):
+                u = torch.clip(u, min=lb, max=ub)
 
         return x + u * dt
 

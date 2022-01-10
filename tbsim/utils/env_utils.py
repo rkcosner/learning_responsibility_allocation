@@ -2,6 +2,7 @@ import numpy as np
 import pytorch_lightning as pl
 from tbsim.envs.base import BatchedEnv, BaseEnv
 import tbsim.utils.tensor_utils as TensorUtils
+import pdb
 
 
 def rollout_episodes(env, policy, num_episodes):
@@ -54,7 +55,14 @@ def rollout_episodes(env, policy, num_episodes):
 
 
 class RolloutCallback(pl.Callback):
-    def __init__(self, env, num_episodes=1, every_n_steps=100, warm_start_n_steps=1, verbose=False):
+    def __init__(
+        self,
+        env,
+        num_episodes=1,
+        every_n_steps=100,
+        warm_start_n_steps=1,
+        verbose=False,
+    ):
         self._env = env
         self._num_episodes = num_episodes
         self._every_n_steps = every_n_steps
@@ -71,11 +79,18 @@ class RolloutCallback(pl.Callback):
             and trainer.global_step % self._every_n_steps == 0
         )
         if should_run:
-            stats, _ = rollout_episodes(self._env, pl_module, num_episodes=self._num_episodes)
-            self.print_if_verbose("\nStep %i rollout (%i episodes): " % (trainer.global_step, self._num_episodes))
+            stats, _ = rollout_episodes(
+                self._env, pl_module, num_episodes=self._num_episodes
+            )
+            self.print_if_verbose(
+                "\nStep %i rollout (%i episodes): "
+                % (trainer.global_step, self._num_episodes)
+            )
             for k, v in stats.items():
                 # Set on_step=True and on_epoch=False to force the logger to log stats at the step
                 # See https://github.com/PyTorchLightning/pytorch-lightning/issues/9772 for explanation
-                pl_module.log("rollout/metrics_" + k, np.mean(v), on_step=True, on_epoch=False)
+                pl_module.log(
+                    "rollout/metrics_" + k, np.mean(v), on_step=True, on_epoch=False
+                )
                 self.print_if_verbose(("rollout/metrics_" + k, np.mean(v)))
             self.print_if_verbose("\n")

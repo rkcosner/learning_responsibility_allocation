@@ -2,9 +2,11 @@
 This file contains some PyTorch utilities.
 """
 import numpy as np
+import pytorch_lightning as pl
 import torch
 import torch.optim as optim
 import functools
+from tqdm.auto import tqdm
 
 
 def soft_update(source, target, tau):
@@ -212,3 +214,50 @@ def rsetattr(obj, attr, val):
     "recursively set attributes"
     pre, _, post = attr.rpartition(".")
     return setattr(rgetattr(obj, pre) if pre else obj, post, val)
+
+
+class ProgressBar(pl.Callback):
+    def __init__(
+        self, global_progress: bool = True, leave_global_progress: bool = True
+    ):
+        super().__init__()
+
+        self.global_progress = global_progress
+        self.global_desc = "Epoch: {epoch}/{max_epoch}"
+        self.leave_global_progress = leave_global_progress
+        self.global_pb = None
+
+    def on_fit_start(self, trainer, pl_module):
+        desc = self.global_desc.format(
+            epoch=trainer.current_epoch + 1, max_epoch=trainer.max_epochs
+        )
+
+        self.global_pb = tqdm(
+            desc=desc,
+            total=trainer.max_epochs,
+            initial=trainer.current_epoch,
+            leave=self.leave_global_progress,
+            disable=not self.global_progress,
+        )
+
+    def on_fit_end(self, trainer, pl_module):
+        self.global_pb.close()
+        self.global_pb = None
+
+    def on_epoch_end(self, trainer, pl_module):
+
+        # Set description
+        desc = self.global_desc.format(
+            epoch=trainer.current_epoch + 1, max_epoch=trainer.max_epochs
+        )
+        self.global_pb.set_description(desc)
+
+        # Set logs and metrics
+        # logs = pl_module.logs
+        # for k, v in logs.items():
+        #     if isinstance(v, torch.Tensor):
+        #         logs[k] = v.squeeze().item()
+        # self.global_pb.set_postfix(logs)
+
+        # Update progress
+        self.global_pb.update(1)

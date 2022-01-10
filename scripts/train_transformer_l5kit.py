@@ -227,14 +227,14 @@ if __name__ == "__main__":
         "--output_dir",
         type=str,
         default=None,
-        help="Root directory of training output (checkpoints, visualization, tensorboard log, etc.)"
+        help="Root directory of training output (checkpoints, visualization, tensorboard log, etc.)",
     )
 
     parser.add_argument(
         "--remove_exp_dir",
         action="store_true",
         help="Whether to automatically remove existing experiment directory of the same name (remember to set this to "
-             "True to avoid unexpected stall when launching cloud experiments)."
+        "True to avoid unexpected stall when launching cloud experiments).",
     )
 
     args = parser.parse_args()

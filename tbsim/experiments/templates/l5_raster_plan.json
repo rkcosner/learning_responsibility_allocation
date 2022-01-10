@@ -3,13 +3,15 @@
     "train": {
         "logging": {
             "terminal_output_to_txt": true,
-            "log_tb": true,
+            "log_tb": false,
+            "log_wandb": true,
+            "wandb_project_name": "tbsim",
             "log_every_n_steps": 10,
             "flush_every_n_steps": 100
         },
         "save": {
             "enabled": true,
-            "every_n_steps": 10000,
+            "every_n_steps": 1000,
             "best_k": 5
         },
         "render": {
@@ -18,24 +20,24 @@
         },
         "rollout": {
             "enabled": true,
-            "num_episodes": 4,
-            "num_scenes": 25,
-            "every_n_steps": 1000,
+            "num_episodes": 10,
+            "num_scenes": 3,
+            "every_n_steps": 500,
             "warm_start_n_steps": 1
         },
         "training": {
-            "batch_size": 100,
-            "num_steps": 2000000,
+            "batch_size": 64,
+            "num_steps": 200000,
             "num_data_workers": 4
         },
         "validation": {
             "enabled": true,
-            "batch_size": 100,
+            "batch_size": 64,
             "num_data_workers": 4,
-            "every_n_steps": 2000,
+            "every_n_steps": 500,
             "num_steps_per_epoch": 100
         },
-        "dataset_path": "YOUR-DATASET-PATH",
+        "dataset_path": "/home/chenyx/repos/l5kit/prediction-dataset",
         "dataset_valid_key": "scenes/validate.zarr",
         "dataset_train_key": "scenes/train.zarr",
         "dataset_meta_key": "meta.json",

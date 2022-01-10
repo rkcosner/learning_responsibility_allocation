@@ -983,3 +983,16 @@ def time_distributed(
         outputs, begin_axis=0, end_axis=0, target_dims=(batch_size, seq_len)
     )
     return outputs
+
+
+def round_2pi(x):
+    minus_flag = x > np.pi
+    while minus_flag.any():
+        x -= minus_flag * 2 * np.pi
+        minus_flag = x > np.pi
+
+    plus_flag = x < -np.pi
+    while plus_flag.any():
+        x += plus_flag * 2 * np.pi
+        plus_flag = x < -np.pi
+    return x
