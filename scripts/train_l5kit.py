@@ -29,13 +29,33 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         auto_remove_exp_dir=auto_remove_exp_dir,
     )
 
-    if cfg.train.logging.terminal_output_to_txt:
+    if cfg.train.logging.terminal_output_to_txt and not debug:
         # log stdout and stderr to a text file
         logger = PrintLogger(os.path.join(log_dir, "log.txt"))
         sys.stdout = logger
         sys.stderr = logger
 
     train_callbacks = []
+
+    # Training Parallelism
+    assert cfg.train.parallel_strategy in [
+        "dp",
+        "ddp_spawn",
+        None,
+    ]  # TODO: look into other strategies
+    if not cfg.devices.num_gpus > 1:
+        # Override strategy when training on a single GPU
+        with cfg.train.unlocked():
+            cfg.train.parallel_strategy = None
+    if cfg.train.parallel_strategy in ["ddp_spawn"]:
+        with cfg.train.training.unlocked():
+            cfg.train.training.batch_size = int(
+                cfg.train.training.batch_size / cfg.devices.num_gpus
+            )
+        with cfg.train.validation.unlocked():
+            cfg.train.validation.batch_size = int(
+                cfg.train.validation.batch_size / cfg.devices.num_gpus
+            )
 
     # Dataset
     datamodule = datamodule_factory(
@@ -128,7 +148,6 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
     # Train
     trainer = pl.Trainer(
         default_root_dir=root_dir,
-        gpus=cfg.devices.num_gpus,
         # checkpointing
         enable_checkpointing=cfg.train.save.enabled,
         # logging
@@ -142,6 +161,9 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         limit_val_batches=cfg.train.validation.num_steps_per_epoch,
         # all callbacks
         callbacks=train_callbacks,
+        # device & distributed training setup
+        gpus=cfg.devices.num_gpus,
+        strategy=cfg.train.parallel_strategy,
     )
 
     trainer.fit(model=model, datamodule=datamodule)
@@ -199,6 +221,10 @@ if __name__ == "__main__":
         action="store_true",
         help="Whether to automatically remove existing experiment directory of the same name (remember to set this to "
         "True to avoid unexpected stall when launching cloud experiments).",
+    )
+
+    parser.add_argument(
+        "--debug", action="store_true", help="Debug mode, suppress wandb logging, etc."
     )
 
     parser.add_argument(
