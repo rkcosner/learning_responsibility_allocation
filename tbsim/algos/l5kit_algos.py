@@ -184,6 +184,22 @@ class L5TransformerTrafficModel(pl.LightningModule):
 
     # def sim_step(self, env, obs_dict):
     #     action = {"ego": self(obs_dict["ego"])}
+    def _compute_metrics(self, predictions, batch):
+        metrics = {}
+        preds = TensorUtils.to_numpy(predictions["positions"])
+        gt = TensorUtils.to_numpy(batch["target_positions"])
+        avail = TensorUtils.to_numpy(batch["target_availabilities"])
+
+        ade = Metrics.single_mode_metrics(
+            Metrics.batch_average_displacement_error, gt, preds, avail
+        )
+        fde = Metrics.single_mode_metrics(
+            Metrics.batch_final_displacement_error, gt, preds, avail
+        )
+
+        metrics["ego_ADE"] = np.mean(ade)
+        metrics["ego_FDE"] = np.mean(fde)
+        return metrics
 
 
 class L5TransformerGANTrafficModel(pl.LightningModule):
@@ -217,6 +233,8 @@ class L5TransformerGANTrafficModel(pl.LightningModule):
 
         metrics["ego_ADE"] = np.mean(ade)
         metrics["ego_FDE"] = np.mean(fde)
+        metrics["positive_likelihood"] = torch.mean(predictions["likelihood"])
+        metrics["negative_likelihood"] = torch.mean(predictions["likelihood_new"])
         return metrics
 
     def adversarial_loss(self, y_hat, y):
@@ -290,17 +308,17 @@ class L5TransformerGANTrafficModel(pl.LightningModule):
 
     def configure_optimizers(self):
         optim_params = self.algo_config.optim_params
-        optim = TorchUtils.optimizer_from_optim_params(
+        optim_generator = TorchUtils.optimizer_from_optim_params(
             net_optim_params=optim_params["policy"],
             net=self.nets["policy"].Transformermodel,
         )
 
         optim_params_discriminator = self.algo_config.optim_params_discriminator
-        optim_params_discriminator = TorchUtils.optimizer_from_optim_params(
-            net_optim_params=optim_params_discriminator["policy"],
-            net=self.nets["policy"].summary_dec,
+        optim_discriminator = TorchUtils.optimizer_from_optim_params(
+            net_optim_params=optim_params_discriminator,
+            net=self.nets["policy"].Discriminator,
         )
-        return [optim_params_discriminator, optim], []
+        return [optim_discriminator, optim_generator], []
 
     def get_action(self, obs_dict):
         return {"ego": self(obs_dict["ego"])}

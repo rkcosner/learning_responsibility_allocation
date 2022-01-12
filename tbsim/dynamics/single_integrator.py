@@ -25,7 +25,8 @@ class SingleIntegrator(dynamic):
             if isinstance(x, np.ndarray):
                 u = np.clip(u, lb, ub)
             elif isinstance(x, torch.Tensor):
-                u = torch.clip(u, min=lb, max=ub)
+                s = (u - lb) / torch.clip(ub - lb, min=1e-3)
+                u = lb + (ub - lb) * torch.sigmoid(s)
 
         return x + u * dt
 

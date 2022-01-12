@@ -2,6 +2,7 @@ import numpy as np
 import pdb
 
 from numpy.lib.function_base import flip
+from tbsim.configs.base import AlgoConfig
 import torch
 import math, copy
 from typing import Dict
@@ -16,6 +17,12 @@ from tbsim.dynamics.base import DynType
 from tbsim.utils.geometry_utils import batch_nd_transform_points
 from tbsim.models.cnn_roi_encoder import CNNROIMapEncoder
 from tbsim.utils.tensor_utils import round_2pi
+from tbsim.utils.geometry_utils import (
+    VEH_VEH_collision,
+    VEH_PED_collision,
+    PED_VEH_collision,
+    PED_PED_collision,
+)
 
 
 def clones(module, n):
@@ -83,16 +90,13 @@ class FactorizedEncoderDecoder(nn.Module):
 
     def decode(self, memory, src_mask, tgt, tgt_mask, tgt_mask_agent, pos):
 
-        return (
-            self.decoder(
-                self.tgt_embed(tgt),
-                memory,
-                src_mask,
-                tgt_mask,
-                tgt_mask_agent,
-                pos,
-            ),
+        return self.decoder(
+            self.tgt_embed(tgt),
             memory,
+            src_mask,
+            tgt_mask,
+            tgt_mask_agent,
+            pos,
         )
 
 
@@ -253,6 +257,48 @@ class Decoder(nn.Module):
         for layer in self.layers:
             x = layer(x, memory, src_mask, tgt_mask)
         return self.norm(x)
+
+
+class SummaryModel(nn.Module):
+    """
+    map the scene information to attributs that summarizes the scene
+    """
+
+    def __init__(self, encoder, decoder, src_embed, src2posfun):
+        super(SummaryModel, self).__init__()
+        self.encoder = encoder
+        self.decoder = decoder
+        self.src_embed = src_embed
+        self.src2posfun = src2posfun
+
+    def src2pos(self, src, dyn_type):
+        "extract positional info from src for all datatypes, e.g., for vehicles, the first two dimensions are x and y"
+
+        pos = torch.zeros([*src.shape[:-1], 2]).to(src.device)
+        for dt, fun in self.src2posfun.items():
+            pos += fun(src) * (dyn_type == dt).view([*(dyn_type.shape), 1, 1])
+
+        return pos
+
+    def forward(
+        self,
+        src,
+        src_mask,
+        dyn_type,
+        map_emb,
+    ):
+        "Take in and process masked src and target sequences."
+        src_pos = self.src2pos(src, dyn_type)
+        return self.decode(
+            self.encode(src, src_mask, src_pos, map_emb),
+            src_mask,
+        )
+
+    def encode(self, src, src_mask, src_pos, map_emb):
+        return self.encoder(self.src_embed(src), src_mask, src_pos, map_emb)
+
+    def decode(self, memory, src_mask):
+        return self.decoder(memory, src_mask)
 
 
 class SummaryDecoder(nn.Module):
@@ -539,6 +585,7 @@ def make_factorized_model(
     N_layer_enc=1,
     N_layer_tgt_enc=1,
     N_layer_tgt_dec=1,
+    N_layer_enc_discr=1,
 ):
     "first generate the building blocks, attn networks, encoders, decoders, PEs and Feedforward nets"
     c = copy.deepcopy
@@ -550,7 +597,6 @@ def make_factorized_model(
     XY_pe = PositionalEncodingNd(XY_pe_dim, dropout, step_size=step_size)
     temporal_enc = Encoder(EncoderLayer(d_model, c(temporal_attn), c(ff), dropout), N_t)
     agent_enc = Encoder(EncoderLayer(d_model, c(agent_attn), c(ff), dropout), N_a)
-    summary_dec = SummaryDecoder(c(temporal_attn), c(agent_attn), c(ff), d_model, 1)
 
     temporal_dec = Decoder(
         DecoderLayer(d_model, c(temporal_attn), c(temporal_attn), c(ff), dropout), N_t
@@ -570,8 +616,15 @@ def make_factorized_model(
         N_layer_tgt_enc,
         N_layer_tgt_dec,
     )
+    Factorized_Encoder = FactorizedEncoder(
+        c(temporal_enc), c(agent_enc), temporal_pe_flip, XY_pe, N_layer_enc
+    )
+    Summary_Encoder = FactorizedEncoder(
+        c(temporal_enc), c(agent_enc), temporal_pe_flip, XY_pe, N_layer_enc_discr
+    )
+    Summary_Decoder = SummaryDecoder(c(temporal_attn), c(agent_attn), c(ff), d_model, 1)
     "use a simple nn.Linear as the generator as our output is continuous"
-    model = FactorizedEncoderDecoder(
+    Transformer_Model = FactorizedEncoderDecoder(
         Factorized_Encoder,
         Factorized_Decoder,
         nn.Linear(src_dim, d_model - XY_pe_dim - temporal_pe_dim - map_emb_dim),
@@ -579,8 +632,14 @@ def make_factorized_model(
         nn.Linear(d_model, out_dim),
         src2posfun,
     )
+    Summary_Model = SummaryModel(
+        Summary_Encoder,
+        Summary_Decoder,
+        nn.Linear(src_dim, d_model - XY_pe_dim - temporal_pe_dim - map_emb_dim),
+        src2posfun,
+    )
 
-    return model, summary_dec
+    return Transformer_Model, Summary_Model
 
 
 class simplelinear(nn.Module):
@@ -612,7 +671,6 @@ class TransformerModel(nn.Module):
         self.step_time = algo_config.step_time
         self.algo_config = algo_config
         self.calc_likelihood = algo_config.calc_likelihood
-        self.f_steps = algo_config.f_steps
 
         self.register_buffer(
             "weights_scaling", torch.tensor(algo_config.weights_scaling)
@@ -629,13 +687,20 @@ class TransformerModel(nn.Module):
                 vbound=np.array([[-5.0, 5.0], [-5.0, 5.0]]),
             ),
         }
+        if algo_config.calc_collision:
+            self.col_funs = {
+                "VV": VEH_VEH_collision,
+                "VP": VEH_PED_collision,
+                "PV": PED_VEH_collision,
+                "PP": PED_PED_collision,
+            }
 
         self.training_num = 0
         self.training_num_N = algo_config.training_num_N
 
         "src_dim:x,y,v,sin(yaw),cos(yaw)+16-dim type encoding"
         "tgt_dim:x,y,yaw"
-        self.Transformermodel, self.summary_dec = make_factorized_model(
+        self.Transformermodel, self.Discriminator = make_factorized_model(
             src_dim=21,
             tgt_dim=3,
             out_dim=2,
@@ -653,6 +718,7 @@ class TransformerModel(nn.Module):
             N_layer_enc=algo_config.N_layer_enc,
             N_layer_tgt_enc=algo_config.N_layer_tgt_enc,
             N_layer_tgt_dec=algo_config.N_layer_tgt_enc,
+            N_layer_enc_discr=algo_config.Discriminator.N_layer_enc,
         )
         self.src_emb = nn.Linear(
             21,
@@ -772,6 +838,59 @@ class TransformerModel(nn.Module):
     #         ).to(self.device)
     #     return ROI, index
 
+    def generate_edges(
+        self,
+        raw_type,
+        extents,
+        pos_pred,
+        yaw_pred,
+    ):
+        veh_mask = (raw_type >= 3) & (raw_type <= 13)
+        ped_mask = (raw_type == 14) | (raw_type == 15)
+
+        agent_mask = veh_mask | ped_mask
+        edge_types = ["VV", "VP", "PV", "PP"]
+        edges = {et: list() for et in edge_types}
+        for i in range(agent_mask.shape[0]):
+            agent_idx = torch.where(agent_mask[i] != 0)[0]
+            edge_idx = torch.combinations(agent_idx, r=2)
+            edge_idx_by_type = dict()
+            edges_of_all_types = torch.cat(
+                (
+                    pos_pred[i, edge_idx[:, 0], :],
+                    yaw_pred[i, edge_idx[:, 0], :],
+                    pos_pred[i, edge_idx[:, 1], :],
+                    yaw_pred[i, edge_idx[:, 1], :],
+                    extents[i, edge_idx[:, 0]]
+                    .unsqueeze(-2)
+                    .repeat(1, pos_pred.size(-2), 1),
+                    extents[i, edge_idx[:, 1]]
+                    .unsqueeze(-2)
+                    .repeat(1, pos_pred.size(-2), 1),
+                ),
+                dim=-1,
+            )
+            VV_idx = torch.where(
+                veh_mask[i, edge_idx[:, 0]] & veh_mask[i, edge_idx[:, 1]]
+            )[0]
+            edges["VV"].append(edges_of_all_types[VV_idx])
+            VP_idx = torch.where(
+                veh_mask[i, edge_idx[:, 0]] & ped_mask[i, edge_idx[:, 1]]
+            )[0]
+            edges["VP"].append(edges_of_all_types[VP_idx])
+            PV_idx = torch.where(
+                ped_mask[i, edge_idx[:, 0]] & veh_mask[i, edge_idx[:, 1]]
+            )[0]
+            edges["PV"].append(edges_of_all_types[PV_idx])
+            PP_idx = torch.where(
+                ped_mask[i, edge_idx[:, 0]] & ped_mask[i, edge_idx[:, 1]]
+            )[0]
+            edges["PP"].append(edges_of_all_types[PP_idx])
+        for et, v in edges.items():
+            edges[et] = torch.cat(v, dim=0)
+
+        return edges
+
     def integrate_forward(self, x0, action, dyn_type):
         """
         Integrate the state forward with initial state x0, action u
@@ -874,6 +993,13 @@ class TransformerModel(nn.Module):
             (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
             dim=1,
         ).type(torch.int64)
+        extents = torch.cat(
+            (
+                data_batch["extent"][..., :2].unsqueeze(1),
+                torch.max(data_batch["all_other_agents_history_extents"], dim=-2)[0],
+            ),
+            dim=1,
+        )
 
         src_pos = torch.cat(
             (
@@ -980,7 +1106,7 @@ class TransformerModel(nn.Module):
             1, 1, 1, tgt.size(-2)
         ) * seq_mask.unsqueeze(0)
 
-        out, memory = self.Transformermodel.forward(
+        out = self.Transformermodel.forward(
             src,
             tgt_hint,
             src_mask,
@@ -1014,10 +1140,12 @@ class TransformerModel(nn.Module):
             out_dict["predictions"]["all_other_agents_track_id"] = data_batch[
                 "all_other_agents_track_id"
             ]
+        # if self.algo_config.calc_collision:
+        out_dict["edges"] = self.generate_edges(raw_type, extents, pos_pred, yaw_pred)
 
         if self.calc_likelihood:
-            likelihood = self.calc_summary(memory, src_mask)
-            new_state, mask_new, map_emb_new = self.pred2obs(
+            likelihood = self.Discriminator(src, src_mask, dyn_type, map_emb)
+            src_new, src_mask_new, map_emb_new = self.pred2obs(
                 src_pos,
                 src_yaw,
                 src_mask,
@@ -1026,23 +1154,15 @@ class TransformerModel(nn.Module):
                 yaw_pred,
                 tgt_mask_agent,
                 raw_type,
-                self.f_steps,
+                self.algo_config.f_steps,
             )
-            src_pos = self.Transformermodel.src2pos(new_state, dyn_type)
-            memory_new = self.Transformermodel.encode(
-                new_state, mask_new, src_pos, map_emb_new
+
+            likelihood_new = self.Discriminator(
+                src_new, src_mask_new, dyn_type, map_emb_new
             )
-            likelihood_new = self.calc_summary(memory_new, mask_new)
             out_dict["likelihood_new"] = likelihood_new
             out_dict["likelihood"] = likelihood
         return out_dict
-
-    def calc_summary(
-        self,
-        memory,
-        src_mask,
-    ):
-        return self.summary_dec(memory, src_mask)
 
     def pred2obs(
         self,
@@ -1064,15 +1184,15 @@ class TransformerModel(nn.Module):
 
         pos_new = torch.cat((src_pos[:, :, f_steps:], pred_pos[:, :, :f_steps]), dim=-2)
         yaw_new = torch.cat((src_yaw[:, :, f_steps:], pred_yaw[:, :, :f_steps]), dim=-2)
-        mask_new = torch.cat(
+        src_mask_new = torch.cat(
             (src_mask[:, :, f_steps:], pred_mask[:, :, :f_steps]), dim=-1
         )
         vel_new = self.dyn_list[DynType.UNICYCLE].calculate_vel(
-            pos_new, yaw_new, self.step_time, mask_new
+            pos_new, yaw_new, self.step_time, src_mask_new
         )
 
-        new_feature, _, _ = self.raw2feature(
-            pos_new, vel_new, yaw_new, raw_type, mask_new
+        src_new, _, _ = self.raw2feature(
+            pos_new, vel_new, yaw_new, raw_type, src_mask_new
         )
 
         new_world_yaw = yaw_new + (
@@ -1085,14 +1205,14 @@ class TransformerModel(nn.Module):
             new_world_yaw,
             data_batch["centroid"],
             data_batch["raster_from_world"],
-            mask_new,
-            torch.tensor(self.algo_config.CNN.patch_size).to(mask_new.device),
+            src_mask_new,
+            torch.tensor(self.algo_config.CNN.patch_size).to(src_mask_new.device),
         )
         CNN_out = self.CNNmodel(data_batch["image"].permute(0, 3, 1, 2), ROI)
-        emb_size = (*new_feature.shape[:-2], self.algo_config.CNN.output_size)
+        emb_size = (*src_new.shape[:-2], self.algo_config.CNN.output_size)
 
         map_emb_new = self.Map2Emb(CNN_out, index, emb_size)
-        return new_feature, mask_new, map_emb_new
+        return src_new, src_mask_new, map_emb_new
 
     def regularization_loss(self, pred_batch, data_batch):
         # velocity regularization
@@ -1159,61 +1279,28 @@ class TransformerModel(nn.Module):
             self.regularization_loss(pred_batch, data_batch)
             * self.algo_config.reg_weight
         )
-        losses = OrderedDict(prediction_loss=loss, regularization_loss=reg_loss)
+
+        losses = OrderedDict(
+            prediction_loss=loss,
+            regularization_loss=reg_loss,
+        )
+        if self.algo_config.calc_collision:
+            coll_loss = 0
+            for et, fun in self.col_funs.items():
+                edges = pred_batch["edges"][et]
+                dis = fun(
+                    edges[..., 0:3],
+                    edges[..., 3:6],
+                    edges[..., 6:8],
+                    edges[..., 8:],
+                ).min(dim=-1)[0]
+                coll_loss += torch.sum(torch.sigmoid(-dis - 4.0))
+            losses["coll_loss"] = coll_loss * self.algo_config.collision_weight
+
+        if self.algo_config.calc_likelihood:
+            likelihood_loss = self.algo_config.GAN_weight * (
+                1 - torch.mean(pred_batch["likelihood_new"])
+            )
+            losses["likelihood_loss"] = likelihood_loss
+
         return losses
-
-    # def compute_losses(self, pred_batch, data_batch):
-    #     if self.criterion is None:
-    #         raise NotImplementedError("Loss function is undefined.")
-
-    #     batch_size = data_batch["target_positions"].shape[0]
-    #     # [batch_size, num_steps * 2]
-    #     ego_targets = (
-    #         torch.cat(
-    #             (data_batch["target_positions"], data_batch["target_yaws"]), dim=-1
-    #         )
-    #     ).view(batch_size, -1)
-
-    #     # [batch_size, num_steps]
-    #     ego_weights = (
-    #         data_batch["target_availabilities"].unsqueeze(-1) * self.weights_scaling
-    #     ).view(batch_size, -1)
-    #     ego_pred = (
-    #         torch.cat(
-    #             (
-    #                 pred_batch["predictions"]["positions"],
-    #                 pred_batch["predictions"]["yaws"],
-    #             ),
-    #             dim=-1,
-    #         )
-    #     ).view(batch_size, -1)
-    #     all_other_targets = (
-    #         torch.cat(
-    #             (
-    #                 data_batch["all_other_agents_future_positions"],
-    #                 data_batch["all_other_agents_future_yaws"],
-    #             ),
-    #             dim=-1,
-    #         )
-    #     ).view(batch_size, -1)
-    #     all_other_pred = (
-    #         torch.cat(
-    #             (
-    #                 pred_batch["predictions"]["all_other_positions"],
-    #                 pred_batch["predictions"]["all_other_yaws"],
-    #             ),
-    #             dim=-1,
-    #         )
-    #     ).view(batch_size, -1)
-    #     all_other_weights = (
-    #         data_batch["all_other_agents_future_availability"].unsqueeze(-1)
-    #         * self.weights_scaling
-    #     ).view(batch_size, -1) * self.all_other_weight
-    #     loss = torch.mean(
-    #         self.criterion(ego_pred, ego_targets) * ego_weights
-    #     ) + torch.mean(
-    #         self.criterion(all_other_pred, all_other_targets) * all_other_weights
-    #     )
-
-    #     losses = OrderedDict(prediction_loss=loss)
-    #     return losses

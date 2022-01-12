@@ -35,7 +35,8 @@ class DoubleIntegrator(dynamic):
         elif isinstance(x, torch.Tensor):
             if bound:
                 lb, ub = self.ubound(x)
-                u = torch.clip(u, min=lb, max=ub)
+                s = (u - lb) / torch.clip(ub - lb, min=1e-3)
+                u = lb + (ub - lb) * torch.sigmoid(s)
             xn = torch.clone(x)
             xn[..., 0:2] += (x[..., 2:4] + 0.5 * u * dt) * dt
             xn[..., 2:4] += u * dt

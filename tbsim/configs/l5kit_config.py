@@ -245,12 +245,12 @@ class L5TransformerPredConfig(AlgoConfig):
         self.N_layer_enc = 2
         self.N_layer_tgt_enc = 1
         self.N_layer_tgt_dec = 1
-        self.calc_likelihood = False
-        self.f_steps = 5
-        self.GAN_weight = 1.0
         self.vmax = 40
         self.vmin = -10
         self.reg_weight = 10
+        self.calc_likelihood = False
+        self.calc_collision = True
+        self.collision_weight = 0.5
 
         # map encoding parameters
         self.CNN.map_channels = 3
@@ -261,6 +261,8 @@ class L5TransformerPredConfig(AlgoConfig):
         self.CNN.kernel_size = [5, 5, 5, 3]
         self.CNN.strides = [1, 1, 1, 1]
         self.CNN.input_size = [224, 224]
+
+        self.Discriminator.N_layer_enc = 1
 
         self.vectorize_map = False
 
@@ -282,15 +284,24 @@ class L5TransformerPredConfig(AlgoConfig):
         )  # epochs where LR decay occurs
         self.optim_params.policy.regularization.L2 = 0.00  # L2 regularization strength
 
-        self.optim_params_discriminator.policy.learning_rate.initial = (
+        self.optim_params_discriminator.learning_rate.initial = (
             1e-3  # policy learning rate
         )
-        self.optim_params_discriminator.policy.learning_rate.decay_factor = (
+        self.optim_params_discriminator.learning_rate.decay_factor = (
             0.1  # factor to decay LR by (if epoch schedule non-empty)
         )
-        self.optim_params_discriminator.policy.learning_rate.epoch_schedule = (
+        self.optim_params_discriminator.learning_rate.epoch_schedule = (
             []
         )  # epochs where LR decay occurs
-        self.optim_params_discriminator.policy.regularization.L2 = (
+        self.optim_params_discriminator.regularization.L2 = (
             0.00  # L2 regularization strength
         )
+
+
+class L5TransformerGANConfig(L5TransformerPredConfig):
+    def __init__(self):
+        super(L5TransformerGANConfig, self).__init__()
+        self.name = "TransformerGAN"
+        self.calc_likelihood = True
+        self.f_steps = 5
+        self.GAN_weight = 0.5

@@ -8,7 +8,8 @@ from tbsim.configs import (
     L5KitMixedTrainConfig,
     L5KitVectorizedEnvConfig,
     L5TransformerPredConfig,
-    L5KitMixedEnvConfig
+    L5KitMixedEnvConfig,
+    L5TransformerGANConfig,
 )
 
 EXP_CONFIG_REGISTRY = dict()
@@ -17,19 +18,29 @@ EXP_CONFIG_REGISTRY["l5_raster_plan"] = ExperimentConfig(
     train_config=L5KitTrainConfig(),
     env_config=L5KitEnvConfig(),
     algo_config=L5RasterizedPlanningConfig(),
-    registered_name="l5_raster_plan"
+    registered_name="l5_raster_plan",
 )
 
 EXP_CONFIG_REGISTRY["l5_mixed_transformer_plan"] = ExperimentConfig(
     train_config=L5KitMixedTrainConfig(),
     env_config=L5KitMixedEnvConfig(),
     algo_config=L5TransformerPredConfig(),
-    registered_name="l5_mixed_transformer_plan"
+    registered_name="l5_mixed_transformer_plan",
+)
+
+EXP_CONFIG_REGISTRY["l5_mixed_transformerGAN_plan"] = ExperimentConfig(
+    train_config=L5KitMixedTrainConfig(),
+    env_config=L5KitMixedEnvConfig(),
+    algo_config=L5TransformerGANConfig(),
+    registered_name="l5_mixed_transformer_plan",
 )
 
 
 def get_registered_experiment_config(registered_name):
     if registered_name not in EXP_CONFIG_REGISTRY.keys():
-        raise KeyError("'{}' is not a registered experiment config please choose from {}".format(
-            registered_name, list(EXP_CONFIG_REGISTRY.keys())))
+        raise KeyError(
+            "'{}' is not a registered experiment config please choose from {}".format(
+                registered_name, list(EXP_CONFIG_REGISTRY.keys())
+            )
+        )
     return EXP_CONFIG_REGISTRY[registered_name]

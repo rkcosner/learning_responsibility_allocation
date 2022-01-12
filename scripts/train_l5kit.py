@@ -227,10 +227,6 @@ if __name__ == "__main__":
         "--debug", action="store_true", help="Debug mode, suppress wandb logging, etc."
     )
 
-    parser.add_argument(
-        "--debug", action="store_true", help="Debug mode, suppress wandb logging, etc."
-    )
-
     args = parser.parse_args()
 
     if args.config_name is not None:

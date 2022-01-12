@@ -42,6 +42,7 @@ class Unicycle(dynamic):
             if bound:
                 lb, ub = self.ubound(x)
                 u = np.clip(u, lb, ub)
+
             theta = x[..., 3:4]
             dxdt = np.hstack(
                 (
@@ -54,7 +55,9 @@ class Unicycle(dynamic):
             assert isinstance(u, torch.Tensor)
             if bound:
                 lb, ub = self.ubound(x)
-                u = torch.clip(u, min=lb, max=ub)
+                s = (u - lb) / torch.clip(ub - lb, min=1e-3)
+                u = lb + (ub - lb) * torch.sigmoid(s)
+
             theta = x[..., 3:4]
             dxdt = torch.cat(
                 (

@@ -11,6 +11,8 @@ cnn_test.ipynb
 config.yaml
 test_rollout.py
 visualize_agent.ipynb
+test.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

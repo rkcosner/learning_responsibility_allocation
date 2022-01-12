@@ -37,6 +37,7 @@
             "every_n_steps": 500,
             "num_steps_per_epoch": 100
         },
+        "parallel_strategy": "ddp_spawn",
         "dataset_path": "/home/chenyx/repos/l5kit/prediction-dataset",
         "dataset_valid_key": "scenes/validate.zarr",
         "dataset_train_key": "scenes/train.zarr",
@@ -121,12 +122,12 @@
         "N_layer_enc": 2,
         "N_layer_tgt_enc": 1,
         "N_layer_tgt_dec": 1,
-        "calc_likelihood": false,
-        "f_steps": 5,
-        "GAN_weight": 1.0,
         "vmax": 40,
         "vmin": -10,
         "reg_weight": 10,
+        "calc_likelihood": false,
+        "calc_collision": true,
+        "collision_weight": 0.5,
         "CNN": {
             "map_channels": 3,
             "hidden_channels": [
@@ -160,6 +161,9 @@
                 224
             ]
         },
+        "Discriminator": {
+            "N_layer_enc": 1
+        },
         "vectorize_map": false,
         "try_to_use_cuda": true,
         "render_ego_history": false,
@@ -176,15 +180,13 @@
             }
         },
         "optim_params_discriminator": {
-            "policy": {
-                "learning_rate": {
-                    "initial": 0.001,
-                    "decay_factor": 0.1,
-                    "epoch_schedule": []
-                },
-                "regularization": {
-                    "L2": 0.0
-                }
+            "learning_rate": {
+                "initial": 0.001,
+                "decay_factor": 0.1,
+                "epoch_schedule": []
+            },
+            "regularization": {
+                "L2": 0.0
             }
         }
     },

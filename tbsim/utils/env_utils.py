@@ -50,7 +50,7 @@ def rollout_episodes(env, policy, num_episodes):
                 info[k].extend(v)
             else:
                 info[k].append(v)
-
+    pdb.set_trace()
     return stats, info
 
 

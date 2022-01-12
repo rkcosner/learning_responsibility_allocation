@@ -34,7 +34,7 @@ from tbsim.configs import (
 )
 from tbsim.models.transformer_model import TransformerModel
 
-config_file = "/home/chenyx/repos/behavior-generation/tbsim/experiments/templates/l5_mixed_transformer_plan.json"
+config_file = "/home/chenyx/repos/behavior-generation/experiments/templates/l5_mixed_transformerGAN_plan.json"
 
 ext_cfg = json.load(open(config_file, "r"))
 cfg = get_registered_experiment_config(ext_cfg["registered_name"])
@@ -51,22 +51,24 @@ train_zarr = ChunkedDataset(dm.require(cfg.train.dataset_valid_key)).open()
 vectorizer = build_vectorizer(l5_config, dm)
 rasterizer = build_rasterizer(l5_config, dm)
 train_dataset = EgoDatasetMixed(l5_config, train_zarr, vectorizer, rasterizer)
-# model = L5TransformerTrafficModel.load_from_checkpoint(
-#     "2503969/iter9999_ep0_valLoss0.53.ckpt",
-#     algo_config=cfg.algo,
-# )
-model = L5TransformerTrafficModel(algo_config=cfg.algo)
+model = L5TransformerTrafficModel.load_from_checkpoint(
+    "/home/chenyx/repos/behavior-generation/TransformerGAN_trained_models/test/20220110115848/models/iter3999_ep0_valLoss1.55.ckpt",
+    algo_config=cfg.algo,
+)
+# model = L5TransformerTrafficModel(algo_config=cfg.algo)
 train_cfg = cfg["train_data_loader"]
 train_dataloader = DataLoader(
     train_dataset,
     shuffle=train_cfg["shuffle"],
-    batch_size=1,
+    batch_size=3,
     num_workers=1,
 )
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 model = model.to(device)
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
 tr_it = iter(train_dataloader)
+data = next(tr_it)
+data = next(tr_it)
 data = next(tr_it)
 for key, obj in data.items():
     data[key] = obj.to(device)
