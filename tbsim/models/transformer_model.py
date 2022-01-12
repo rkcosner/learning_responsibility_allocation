@@ -1140,8 +1140,10 @@ class TransformerModel(nn.Module):
             out_dict["predictions"]["all_other_agents_track_id"] = data_batch[
                 "all_other_agents_track_id"
             ]
-        # if self.algo_config.calc_collision:
-        out_dict["edges"] = self.generate_edges(raw_type, extents, pos_pred, yaw_pred)
+        if self.algo_config.calc_collision:
+            out_dict["edges"] = self.generate_edges(
+                raw_type, extents, pos_pred, yaw_pred
+            )
 
         if self.calc_likelihood:
             likelihood = self.Discriminator(src, src_mask, dyn_type, map_emb)
