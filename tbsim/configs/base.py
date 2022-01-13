@@ -1,5 +1,5 @@
 from tbsim.configs.config import Dict
-
+from copy import deepcopy
 
 class TrainConfig(Dict):
     def __init__(self):
@@ -88,3 +88,11 @@ class ExperimentConfig(Dict):
         self.seed = 1                     # seed for everything (for reproducibility)
 
         self.devices.num_gpus = 1         # Set to 0 to use CPU
+
+    def clone(self):
+        return self.__class__(
+            train_config=deepcopy(self.train),
+            env_config=deepcopy(self.env),
+            algo_config=deepcopy(self.algo),
+            registered_name=self.registered_name
+        )
