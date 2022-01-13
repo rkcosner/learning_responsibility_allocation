@@ -32,4 +32,4 @@ def get_registered_experiment_config(registered_name):
     if registered_name not in EXP_CONFIG_REGISTRY.keys():
         raise KeyError("'{}' is not a registered experiment config please choose from {}".format(
             registered_name, list(EXP_CONFIG_REGISTRY.keys())))
-    return EXP_CONFIG_REGISTRY[registered_name]
+    return EXP_CONFIG_REGISTRY[registered_name].clone()
