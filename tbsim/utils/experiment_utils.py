@@ -103,7 +103,7 @@ class ParamSearchPlan(object):
         return [pc.generate_config(base_cfg) for pc in self.param_configs]
 
 
-def create_configs(configs_to_search_fn, config_name, config_file, config_dir, prefix):
+def create_configs(configs_to_search_fn, config_name, config_file, config_dir, prefix, delete_config_dir=True):
     if config_name is not None:
         cfg = get_registered_experiment_config(config_name)
         print("Generating configs for {}".format(config_name))
@@ -119,7 +119,9 @@ def create_configs(configs_to_search_fn, config_name, config_file, config_dir, p
     configs = configs_to_search_fn(base_cfg=cfg)
     config_fns = []
 
-    os.makedirs(config_dir, exist_ok=True)
+    if delete_config_dir and os.path.exists(config_dir):
+        shutil.rmtree(config_dir)
+    os.makedirs(config_dir)
     for c in configs:
         pfx = "{}_".format(prefix) if prefix is not None else ""
         fn = os.path.join(config_dir, "{}{}.json".format(pfx, c.name))
