@@ -1,0 +1,13 @@
+{
+  "wandb_apikey": null,
+  "wandb_project_name": null,
+  "workspace_mounting_point": "/workspace/ws_mount/",
+  "result_dir": "/workspace/result/",
+  "workspace_id": "OVG6VSVJRjq7TTKBpOdohg",
+  "dataset_id": "90893",
+  "dataset_mounting_point": "/workspace/lyft_prediction/",
+  "dataset_path": "/workspace/lyft_prediction/lyft_prediction",
+  "docker_image": "nvcr.io/nvidian/nvr-av/tbsim:latest",
+  "total_runtime": "48h",
+  "workspace_mounting_point_local": "/Users/danfei/workspace/avg/dxdev/"
+}
