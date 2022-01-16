@@ -121,6 +121,8 @@ def batch_to_raw_ego(data_batch, step_time):
     src_mask = torch.flip(data_batch["history_availabilities"], dims=[-1]).bool()
 
     src_vel = dynamics.Unicycle.calculate_vel(pos=src_pos, yaw=src_yaw, dt=step_time, mask=src_mask)
+    if "speed" in data_batch:
+        src_vel[:, -1] = data_batch["speed"].unsqueeze(-1)
 
     raw = TensorUtils.unsqueeze((src_pos, src_vel, src_yaw, raw_type, src_mask), dim=1)  # Add the agent dimension
     return raw
@@ -162,6 +164,7 @@ def batch_to_raw_all_agents(data_batch, step_time):
     src_vel = dynamics.Unicycle.calculate_vel(
         src_pos, src_yaw, step_time, src_mask
     )
-    src_vel[:, 0, -1] = data_batch["speed"].unsqueeze(-1)
+    if "speed" in data_batch:
+        src_vel[:, 0, -1] = data_batch["speed"].unsqueeze(-1)
 
     return src_pos, src_vel, src_yaw, raw_type, src_mask

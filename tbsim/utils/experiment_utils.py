@@ -117,14 +117,16 @@ def create_configs(configs_to_search_fn, config_name, config_file, config_dir, p
         raise FileNotFoundError("No base config is provided")
 
     configs = configs_to_search_fn(base_cfg=cfg)
+    for c in configs:
+        pfx = "{}_".format(prefix) if prefix is not None else ""
+        c.name = pfx + c.name
     config_fns = []
 
     if delete_config_dir and os.path.exists(config_dir):
         shutil.rmtree(config_dir)
     os.makedirs(config_dir)
     for c in configs:
-        pfx = "{}_".format(prefix) if prefix is not None else ""
-        fn = os.path.join(config_dir, "{}{}.json".format(pfx, c.name))
+        fn = os.path.join(config_dir, "{}.json".format(c.name))
         config_fns.append(fn)
         print("Saving config to {}".format(fn))
         c.dump(fn)

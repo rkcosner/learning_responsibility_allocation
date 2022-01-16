@@ -24,7 +24,7 @@ class L5TrafficVAE(pl.LightningModule):
         map_encoder = l5m.RasterizedMapEncoder(
             model_arch=algo_config.model_architecture,
             num_input_channels=modality_shapes["image"][0],
-            feature_dim=algo_config.visual_feature_dim
+            feature_dim=algo_config.map_feature_dim
         )
 
         c_encoder = l5m.ConditionEncoder(
@@ -43,12 +43,15 @@ class L5TrafficVAE(pl.LightningModule):
             rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
         )
 
-        decoder = l5m.ConditionFlatDecoder(
-            condition_dim=algo_config.vae.condition_dim,
-            latent_dim=prior.latent_dim,
-            output_shapes=OrderedDict(trajectories=trajectory_shape),
-            mlp_layer_dims=algo_config.vae.decoder.mlp_layer_dims
+        traj_decoder = l5m.MLPTrajectoryDecoder(
+            feature_dim=self.algo_config.map_feature_dim,
+            state_dim=3,
+            num_steps=self.algo_config.future_num_frames,
+            dynamics_type=self.algo_config.dynamics.type,
+            dynamics_kwargs=self.algo_config.dynamics
         )
+
+        decoder = l5m.ConditionDecoder(traj_decoder)
 
         model = vaes.CVAE(
             q_net=q_encoder,
@@ -175,73 +178,3 @@ class L5TrafficVAE(pl.LightningModule):
                 yaws=preds["trajectories"][:, :, 2:3]
             )
         return {"ego": actions}
-
-
-class L5TrafficSlimVAE(L5TrafficVAE):
-    """CVAE with lean memory footprint (by reusing encoded features)"""
-    def __init__(self, algo_config, modality_shapes):
-        pl.LightningModule.__init__(self)
-        self.algo_config = algo_config
-        self.nets = nn.ModuleDict()
-        trajectory_shape = (self.algo_config.future_num_frames, 3)
-
-        prior = vaes.FixedGaussianPrior(latent_dim=algo_config.vae.latent_dim)
-
-        map_encoder = l5m.RasterizedMapEncoder(
-            model_arch=algo_config.model_architecture,
-            num_input_channels=modality_shapes["image"][0],
-            feature_dim=algo_config.visual_feature_dim
-        )
-
-        traj_encoder = l5m.RNNTrajectoryEncoder(
-            trajectory_dim=trajectory_shape[-1],
-            rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
-        )
-
-        c_net = l5m.ConditionNet(
-            condition_input_shapes=OrderedDict(
-                map_feature=(map_encoder.output_shape()[-1],)
-            ),
-            condition_dim=algo_config.vae.condition_dim,
-            mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims
-        )
-
-        q_net = l5m.PosteriorNet(
-            input_shapes=OrderedDict(
-                traj_feature=(traj_encoder.output_shape()[-1],)
-            ),
-            condition_dim=algo_config.vae.condition_dim,
-            param_shapes=prior.posterior_param_shapes,
-            mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims
-        )
-
-        decoder = l5m.ConditionFlatDecoder(
-            condition_dim=algo_config.vae.condition_dim,
-            latent_dim=prior.latent_dim,
-            output_shapes=OrderedDict(trajectories=trajectory_shape),
-            mlp_layer_dims=algo_config.vae.decoder.mlp_layer_dims
-        )
-
-        model = vaes.CVAE(
-            q_net=q_net,
-            c_net=c_net,
-            decoder=decoder,
-            prior=prior,
-            target_criterion=nn.MSELoss(reduction="none")
-        )
-
-        self.nets["cvae"] = model
-        self.nets["map_encoder"] = map_encoder
-        self.nets["traj_encoder"] = traj_encoder
-
-    def forward(self, batch_inputs: dict):
-        trajectories = torch.cat((batch_inputs["target_positions"], batch_inputs["target_yaws"]), dim=-1)
-        traj_feat = self.nets["traj_encoder"](trajectories)
-        map_feat = self.nets["map_encoder"](batch_inputs["image"])
-        input_feats = dict(traj_feature=traj_feat)
-        condition_feats = dict(map_feature=map_feat)
-        return self.nets["cvae"](inputs=input_feats, condition_inputs=condition_feats)
-
-    def sample(self, batch_inputs: dict, n: int):
-        condition_feat = dict(map_feature=self.nets["map_encoder"](batch_inputs["image"]))
-        return self.nets["cvae"].sample(condition_inputs=condition_feat, n=n)

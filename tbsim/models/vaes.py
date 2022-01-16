@@ -351,7 +351,7 @@ def main():
         trajectory_shape=(50, 3),
         condition_dim=condition_dim
     )
-    decoder = l5m.ConditionFlatDecoder(
+    decoder = l5m.ConditionDecoder(
         condition_dim=condition_dim,
         latent_dim=latent_dim,
         output_shapes=OrderedDict(trajectories=(50, 3))

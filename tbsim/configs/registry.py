@@ -21,6 +21,13 @@ EXP_CONFIG_REGISTRY["l5_rasterized_plan"] = ExperimentConfig(
     registered_name="l5_rasterized_plan"
 )
 
+EXP_CONFIG_REGISTRY["l5_mixed_plan"] = ExperimentConfig(
+    train_config=L5KitMixedTrainConfig(),
+    env_config=L5KitMixedEnvConfig(),
+    algo_config=L5RasterizedPlanningConfig(),
+    registered_name="l5_mixed_plan"
+)
+
 EXP_CONFIG_REGISTRY["l5_rasterized_vae_plan"] = ExperimentConfig(
     train_config=L5KitTrainConfig(),
     env_config=L5KitEnvConfig(),

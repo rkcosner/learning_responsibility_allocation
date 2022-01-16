@@ -205,7 +205,10 @@ class L5RasterizedPlanningConfig(AlgoConfig):
 
         self.name = "l5_rasterized"
         self.model_architecture = "resnet50"
+        self.map_feature_dim = 256
         self.history_num_frames = 5
+        self.history_num_frames_ego = 5
+        self.history_num_frames_agents = 5
         self.future_num_frames = 50
         self.step_time = 0.1
         self.render_ego_history = False
@@ -228,7 +231,7 @@ class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(L5RasterizedVAEConfig, self).__init__()
         self.name = "l5_rasterized_vae"
-        self.visual_feature_dim = 256
+        self.map_feature_dim = 256
         self.vae.latent_dim = 16
         self.vae.condition_dim = 16
         self.vae.kl_weight = 1e-4

@@ -19,7 +19,8 @@ class DynType:
 class Dynamics(abc.ABC):
     @abc.abstractmethod
     def __init__(self, name, **kwargs):
-        pass
+        self.xdim = 4
+        self.udim = 2
 
     @abc.abstractmethod
     def __call__(self, x, u):

@@ -1,5 +1,5 @@
 import warnings
-from typing import Dict, List
+from typing import Dict, List, Union
 from collections import OrderedDict
 from copy import deepcopy
 
@@ -11,80 +11,6 @@ from tbsim.models.base_models import SplitMLP, MLP, MIMOMLP
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.dynamics as dynamics
 import tbsim.utils.l5_utils as L5Utils
-
-
-class RasterizedPlanningModelOld(nn.Module):
-    """Raster-based model for planning.
-    """
-
-    def __init__(
-            self,
-            model_arch: str,
-            num_input_channels: int,
-            num_targets: int,
-            weights_scaling: List[float],
-            criterion: nn.Module,
-            pretrained: bool = False,
-    ) -> None:
-        super().__init__()
-        self.model_arch = model_arch
-        self.num_input_channels = num_input_channels
-        self.num_targets = num_targets
-        self.register_buffer("weights_scaling", torch.tensor(weights_scaling))
-        self.pretrained = pretrained
-        self.criterion = criterion
-
-        if pretrained and self.num_input_channels != 3:
-            warnings.warn("There is no pre-trained model with num_in_channels != 3, first layer will be reset")
-
-        if model_arch == "resnet18":
-            self.model = resnet18(pretrained=pretrained)
-            self.model.fc = nn.Linear(in_features=512, out_features=num_targets)
-        elif model_arch == "resnet50":
-            self.model = resnet50(pretrained=pretrained)
-            self.model.fc = nn.Linear(in_features=2048, out_features=num_targets)
-        else:
-            raise NotImplementedError(f"Model arch {model_arch} unknown")
-
-        if self.num_input_channels != 3:
-            self.model.conv1 = nn.Conv2d(
-                self.num_input_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False
-            )
-
-    def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        # [batch_size, channels, height, width]
-        image_batch = data_batch["image"]
-        # [batch_size, num_steps * 2]
-        outputs = self.model(image_batch)
-        batch_size = len(data_batch["image"])
-
-        predicted = outputs.view(batch_size, -1, 3)
-        # [batch_size, num_steps, 2->(XY)]
-        pred_positions = predicted[:, :, :2]
-        # [batch_size, num_steps, 1->(yaw)]
-        pred_yaws = predicted[:, :, 2:3]
-        out_dict = {
-            "raw_outputs": outputs,
-            "predictions": {"positions": pred_positions, "yaws": pred_yaws}
-        }
-        return out_dict
-
-    def compute_losses(self, pred_batch, data_batch):
-        if self.criterion is None:
-            raise NotImplementedError("Loss function is undefined.")
-
-        batch_size = data_batch["image"].shape[0]
-        # [batch_size, num_steps * 2]
-        targets = (torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=2)).view(
-            batch_size, -1
-        )
-        # [batch_size, num_steps]
-        target_weights = (data_batch["target_availabilities"].unsqueeze(-1) * self.weights_scaling).view(
-            batch_size, -1
-        )
-        loss = torch.mean(self.criterion(pred_batch["raw_outputs"], targets) * target_weights)
-        losses = OrderedDict(prediction_loss=loss)
-        return losses
 
 
 def forward_dynamics(
@@ -126,44 +52,30 @@ class RasterizedPlanningModel(nn.Module):
             self,
             model_arch: str,
             num_input_channels: int,
-            num_future_frames: int,
+            map_feature_dim: int,
             weights_scaling: List[float],
             criterion: nn.Module,
-            dynamics_model: dynamics.Dynamics = None,
-            step_time = 0.1
+            trajectory_decoder: nn.Module
     ) -> None:
 
         super().__init__()
         self.map_encoder = RasterizedMapEncoder(
             model_arch=model_arch,
             num_input_channels=num_input_channels,
-            feature_dim=128,
+            feature_dim=map_feature_dim,
             output_activation=nn.ReLU
         )
-        self.dynamics_model = dynamics_model
-        self.pred_step_dim = 3 if self.dynamics_model is None else 2  # [x, y, yaw] or [acc, dh]
-        self.output_fc = nn.Linear(128, num_future_frames * self.pred_step_dim)
+        self.traj_decoder = trajectory_decoder
         self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
         self.criterion = criterion
-        self.step_time = step_time
 
     def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         image_batch = data_batch["image"]
         map_feat = self.map_encoder(image_batch)
-        preds = self.output_fc(map_feat)
-        preds = preds.reshape(preds.shape[0], -1, self.pred_step_dim)
-        if self.dynamics_model is not None:
-            raw_ego = L5Utils.batch_to_raw_ego(data_batch, step_time=self.step_time)
-            all_states, curr_states = L5Utils.raw_to_states(*raw_ego)
-            _, pos, yaw = forward_dynamics(
-                self.dynamics_model,
-                initial_states=curr_states[:, 0, ...],
-                actions=preds,
-                step_time=self.step_time
-            )
-            traj = torch.cat((pos, yaw), dim=-1)
-        else:
-            traj = preds
+
+        raw_ego = L5Utils.batch_to_raw_ego(data_batch, step_time=self.traj_decoder.step_time)
+        all_states, curr_states = L5Utils.raw_to_states(*raw_ego)
+        traj = self.traj_decoder.forward(inputs=map_feat, current_state=curr_states[..., 0, :])
 
         pred_positions = traj[:, :, :2]
         pred_yaws = traj[:, :, 2:3]
@@ -350,21 +262,99 @@ class ConditionNet(nn.Module):
         return self.mlp(inputs)["feat"]
 
 
-class ConditionFlatDecoder(nn.Module):
+class ConditionDecoder(nn.Module):
     """Decoding (z, c) -> x' using a flat MLP"""
-    def __init__(
-            self,
-            condition_dim: int,
-            latent_dim: int,
-            output_shapes: OrderedDict,
-            mlp_layer_dims : tuple = (128, 128),
-    ):
-        super(ConditionFlatDecoder, self).__init__()
-        self.mlp = SplitMLP(
-            input_dim=(condition_dim + latent_dim),
-            output_shapes=output_shapes,
-            layer_dims=mlp_layer_dims
-        )
+    def __init__(self, decoder_model: nn.Module):
+        super(ConditionDecoder, self).__init__()
+        self.decoder_model = decoder_model
 
     def forward(self, latents, condition_features):
-        return self.mlp(torch.cat((latents, condition_features), dim=-1))
+        return self.decoder_model(torch.cat((latents, condition_features), dim=-1))
+
+
+class TrajectoryDecoder(nn.Module):
+    def __init__(
+            self,
+            feature_dim: int,
+            state_dim: int = 3,
+            num_steps: int = None,
+            dynamics_type: Union[str, dynamics.DynType] = None,
+            dynamics_kwargs: dict = None,
+            step_time: float = None,
+            network_kwargs: dict = None
+    ):
+        """
+        A class that predict future trajectories based on input features
+        Args:
+            feature_dim (int): dimension of the input feature
+            state_dim (int): dimension of the output trajectory at each step
+            num_steps (int): (optional) number of future state to predict
+            dynamics_type (str, dynamics.DynType): (optional) if specified, the network predicts action
+                for the dynamics model instead of future states. The actions are then used to predict
+                the future trajectories.
+            step_time (float): time between steps. required for using dynamics models
+            network_kwargs (dict): keyword args for the decoder networks
+        """
+        super(TrajectoryDecoder, self).__init__()
+        self.feature_dim = feature_dim
+        self.state_dim = state_dim
+        self.num_steps = num_steps
+        self.step_time = step_time
+        self._create_dynamics(dynamics_type, dynamics_kwargs)
+        self._create_networks(network_kwargs)
+
+    def _create_dynamics(self, dynamics_type, dynamics_kwargs):
+        if dynamics_type is not None:
+            self.dyn = dynamics.Unicycle(
+                "dynamics",
+                max_steer=dynamics_kwargs["max_steer"],
+                max_yawvel=dynamics_kwargs["max_yawvel"],
+                acce_bound=dynamics_kwargs["acce_bound"]
+            )
+        else:
+            self.dyn = None
+
+    def _create_networks(self, network_kwargs):
+        raise NotImplementedError
+
+    def _forward_networks(self, inputs, num_steps=None):
+        raise NotImplementedError
+
+    def _forward_dynamics(self, current_state, actions):
+        assert self.dyn is not None
+        assert current_state.shape[-1] == self.dyn.xdim
+        assert actions.shape[-1] == self.dyn.udim
+        assert isinstance(self.step_time, float) and self.step_time > 0
+        _, pos, yaw = forward_dynamics(
+            self.dyn,
+            initial_states=current_state,
+            actions=actions,
+            step_time=self.step_time
+        )
+        traj = torch.cat((pos, yaw), dim=-1)
+        return traj
+
+    def forward(self, inputs, current_state=None, num_steps=None):
+        preds = self._forward_networks(inputs, num_steps)
+        if self.dyn is not None:
+            preds = self._forward_dynamics(current_state=current_state, actions=preds)
+        return preds
+
+
+class MLPTrajectoryDecoder(TrajectoryDecoder):
+    def _create_networks(self, net_kwargs):
+        if net_kwargs is None:
+            net_kwargs = dict()
+        assert isinstance(self.num_steps, int)
+        pred_dim = self.state_dim if self.dyn is None else self.dyn.udim
+        self.mlp = MLP(
+            input_dim= self.feature_dim,
+            output_dim=pred_dim * self.num_steps,
+            output_activation=None,
+            **net_kwargs
+        )
+
+    def _forward_networks(self, inputs, num_steps=None):
+        pred_dim = self.state_dim if self.dyn is None else self.dyn.udim
+        return self.mlp(inputs).reshape(-1, self.num_steps, pred_dim)
+

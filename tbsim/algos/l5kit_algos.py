@@ -6,9 +6,8 @@ import torch.nn as nn
 import torch.optim as optim
 import pytorch_lightning as pl
 
-from tbsim.models.l5kit_models import RasterizedPlanningModel
+from tbsim.models.l5kit_models import RasterizedPlanningModel, MLPTrajectoryDecoder
 from tbsim.models.transformer_model import TransformerModel
-from tbsim.dynamics import Unicycle
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.metrics as Metrics
 
@@ -22,24 +21,22 @@ class L5TrafficModel(pl.LightningModule):
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
 
-        if algo_config.dynamics.type is not None:
-            dyn = Unicycle(
-                "dynamics",
-                max_steer=algo_config.dynamics.max_steer,
-                max_yawvel=algo_config.dynamics.max_yawvel,
-                acce_bound=algo_config.dynamics.acce_bound
-            )
-        else:
-            dyn = None
+        traj_decoder = MLPTrajectoryDecoder(
+            feature_dim=algo_config.map_feature_dim,
+            state_dim=3,
+            num_steps=algo_config.future_num_frames,
+            dynamics_type=algo_config.dynamics.type,
+            dynamics_kwargs=algo_config.dynamics,
+            step_time=algo_config.step_time
+        )
 
         self.nets["policy"] = RasterizedPlanningModel(
-            model_arch=self.algo_config.model_architecture,
+            model_arch=algo_config.model_architecture,
             num_input_channels=modality_shapes["image"][0],  # [C, H, W]
-            num_future_frames=self.algo_config.future_num_frames,  # X, Y, Yaw * number of future states,
+            trajectory_decoder=traj_decoder,
+            map_feature_dim=algo_config.map_feature_dim,
             weights_scaling=[1.0, 1.0, 1.0],
-            criterion=nn.MSELoss(reduction="none"),
-            step_time=self.algo_config.step_time,
-            dynamics_model=dyn
+            criterion=nn.MSELoss(reduction="none")
         )
 
     def forward(self, obs_dict):
