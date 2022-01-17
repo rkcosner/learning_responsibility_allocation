@@ -64,7 +64,10 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                 all_indices, size=(self.num_instances,), replace=False
             )
         assert len(scene_indices) == self.num_instances
-        assert np.max(scene_indices) < self._num_total_scenes and np.min(scene_indices) >= 0
+        assert (
+            np.max(scene_indices) < self._num_total_scenes
+            and np.min(scene_indices) >= 0
+        )
 
         self._current_scene_indices = scene_indices
         self._current_scene_dataset = SimulationDataset.from_dataset_indices(

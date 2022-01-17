@@ -32,7 +32,7 @@ EXP_CONFIG_REGISTRY["l5_mixed_transformerGAN_plan"] = ExperimentConfig(
     train_config=L5KitMixedTrainConfig(),
     env_config=L5KitMixedEnvConfig(),
     algo_config=L5TransformerGANConfig(),
-    registered_name="l5_mixed_transformer_plan",
+    registered_name="l5_mixed_transformerGAN_plan",
 )
 
 

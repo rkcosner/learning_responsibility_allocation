@@ -158,7 +158,7 @@ class L5TransformerTrafficModel(pl.LightningModule):
         return output
 
     def validation_step(self, batch, batch_idx):
-        pout = self.nets["policy"](batch)
+        pout = self.nets["policy"](batch, batch_idx)
         losses = TensorUtils.detach(self.nets["policy"].compute_losses(pout, batch))
         metrics = self._compute_metrics(pout["predictions"], batch)
         return {"losses": losses, "metrics": metrics}
@@ -218,7 +218,8 @@ class L5TransformerGANTrafficModel(pl.LightningModule):
     def forward(self, obs_dict):
         return self.nets["policy"](obs_dict)["predictions"]
 
-    def _compute_metrics(self, predictions, batch):
+    def _compute_metrics(self, pout, batch):
+        predictions = pout["predictions"]
         metrics = {}
         preds = TensorUtils.to_numpy(predictions["positions"])
         gt = TensorUtils.to_numpy(batch["target_positions"])
@@ -233,8 +234,12 @@ class L5TransformerGANTrafficModel(pl.LightningModule):
 
         metrics["ego_ADE"] = np.mean(ade)
         metrics["ego_FDE"] = np.mean(fde)
-        metrics["positive_likelihood"] = torch.mean(predictions["likelihood"])
-        metrics["negative_likelihood"] = torch.mean(predictions["likelihood_new"])
+        metrics["positive_likelihood"] = TensorUtils.to_numpy(
+            pout["scene_predictions"]["likelihood"]
+        ).mean()
+        metrics["negative_likelihood"] = TensorUtils.to_numpy(
+            pout["scene_predictions"]["likelihood_new"]
+        ).mean()
         return metrics
 
     def adversarial_loss(self, y_hat, y):
@@ -261,15 +266,18 @@ class L5TransformerGANTrafficModel(pl.LightningModule):
 
         # adversarial loss is binary cross-entropy
         if optimizer_idx == 0:
-            batch_size = pout["likelihood"].shape[0]
-            real_label = torch.ones((batch_size, 1), device=pout["likelihood"].device)
-            fake_label = torch.zeros((batch_size, 1), device=pout["likelihood"].device)
-            d_loss_real = self.adversarial_loss(pout["likelihood"], real_label)
-            d_loss_fake = self.adversarial_loss(pout["likelihood_new"], fake_label)
+            real_label = torch.ones_like(pout["scene_predictions"]["likelihood"])
+            fake_label = torch.zeros_like(pout["scene_predictions"]["likelihood_new"])
+            d_loss_real = self.adversarial_loss(
+                pout["scene_predictions"]["likelihood"], real_label
+            )
+            d_loss_fake = self.adversarial_loss(
+                pout["scene_predictions"]["likelihood_new"], fake_label
+            )
             d_loss = d_loss_real + d_loss_fake
-            if batch_idx % 200 == 0:
-                print("positive:", pout["likelihood"][0:5])
-                print("negative:", pout["likelihood_new"][0:5])
+            # if batch_idx % 200 == 0:
+            #     print("positive:", pout["likelihood"][0:5])
+            #     print("negative:", pout["likelihood_new"][0:5])
             return d_loss
         if optimizer_idx == 1:
 
@@ -283,10 +291,10 @@ class L5TransformerGANTrafficModel(pl.LightningModule):
                 g_loss += v
 
             g_loss += (
-                torch.mean(1.0 - pout["likelihood_new"]) * self.algo_config.GAN_weight
+                torch.mean(1.0 - pout["scene_predictions"]["likelihood_new"])
+                * self.algo_config.GAN_weight
             )
-
-            metrics = self._compute_metrics(pout["predictions"], batch)
+            metrics = self._compute_metrics(pout, batch)
             for mk, m in metrics.items():
                 self.log("train/metrics_" + mk, m, prog_bar=False)
             return g_loss
@@ -294,7 +302,7 @@ class L5TransformerGANTrafficModel(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         pout = self.nets["policy"](batch)
         losses = TensorUtils.detach(self.nets["policy"].compute_losses(pout, batch))
-        metrics = self._compute_metrics(pout["predictions"], batch)
+        metrics = self._compute_metrics(pout, batch)
         return {"losses": losses, "metrics": metrics}
 
     def validation_epoch_end(self, outputs) -> None:

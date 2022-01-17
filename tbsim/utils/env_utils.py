@@ -26,9 +26,9 @@ def rollout_episodes(env, policy, num_episodes):
 
         done = env.is_done()
         while not done:
+
             obs = env.get_observation()
             obs = TensorUtils.to_torch(obs, device=policy.device)
-
             action = policy.get_action(obs)
             env.step(action)
             done = env.is_done()
@@ -50,7 +50,7 @@ def rollout_episodes(env, policy, num_episodes):
                 info[k].extend(v)
             else:
                 info[k].append(v)
-    pdb.set_trace()
+
     return stats, info
 
 

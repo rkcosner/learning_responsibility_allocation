@@ -245,7 +245,7 @@ class L5TransformerPredConfig(AlgoConfig):
         self.N_layer_enc = 2
         self.N_layer_tgt_enc = 1
         self.N_layer_tgt_dec = 1
-        self.vmax = 40
+        self.vmax = 30
         self.vmin = -10
         self.reg_weight = 10
         self.calc_likelihood = False
@@ -261,6 +261,9 @@ class L5TransformerPredConfig(AlgoConfig):
         self.CNN.kernel_size = [5, 5, 5, 3]
         self.CNN.strides = [1, 1, 1, 1]
         self.CNN.input_size = [224, 224]
+
+        # Multi-modal prediction
+        self.M = 3
 
         self.Discriminator.N_layer_enc = 1
 
@@ -304,4 +307,4 @@ class L5TransformerGANConfig(L5TransformerPredConfig):
         self.name = "TransformerGAN"
         self.calc_likelihood = True
         self.f_steps = 5
-        self.GAN_weight = 0.5
+        self.GAN_weight = 0.3
