@@ -1,3 +1,4 @@
+from logging import raiseExceptions
 import numpy as np
 import pdb
 
@@ -179,13 +180,15 @@ class FactorizedEncoder(nn.Module):
         # x += (self.XY_pe(x, src_pos) + self.temporal_pe(x)) * src_mask.unsqueeze(-1)
         # if map_emb is not None:
         #     x += map_emb.unsqueeze(2)
+        if map_emb.ndim == 3:
+            map_emb = map_emb.unsqueeze(2).repeat(1, 1, x.size(2), 1)
         x = (
             torch.cat(
                 (
                     x,
                     self.XY_pe(x, src_pos),
                     self.temporal_pe(x).repeat(x.size(0), x.size(1), 1, 1),
-                    map_emb.unsqueeze(2).repeat(1, 1, x.size(2), 1),
+                    map_emb,
                 ),
                 dim=-1,
             )
@@ -194,6 +197,48 @@ class FactorizedEncoder(nn.Module):
         for i in range(self.N_layer):
             x = self.agent_encs[i](x, src_mask)
             x = self.temporal_encs[i](x, src_mask)
+        return x
+
+
+class StaticEncoder(nn.Module):
+    def __init__(self, agent_enc, XY_pe, N_layer=1):
+        """
+        Factorized encoder and agent axis
+        Args:
+            temporal_enc: encoder with attention over temporal axis
+            agent_enc: encoder with attention over agent axis
+            temporal_pe: positional encoding over time
+            XY_pe: positional encoding over XY coordinates
+        """
+        super(StaticEncoder, self).__init__()
+        self.N_layer = N_layer
+        self.agent_encs = clones(agent_enc, N_layer)
+        self.XY_pe = XY_pe
+
+    def forward(self, x, src_mask, src_pos, map_emb):
+        """Pass the input (and mask) through each layer in turn.
+        Args:
+            x:[B,Num_agent,T,d_model]
+            src_mask:[B,Num_agent,T]
+            src_pos:[B,Num_agent,T,2]
+            map_emb: [B,Num_agent,1,map_emb_dim] output of the CNN ROI map encoder
+        Returns:
+            embedding of size [B,Num_agent,T,d_model]
+        """
+
+        x = (
+            torch.cat(
+                (
+                    x,
+                    self.XY_pe(x, src_pos),
+                    map_emb,
+                ),
+                dim=-1,
+            )
+            * src_mask.unsqueeze(-1)
+        )
+        for i in range(self.N_layer):
+            x = self.agent_encs[i](x, src_mask)
         return x
 
 
@@ -261,7 +306,7 @@ class Decoder(nn.Module):
 
 class SummaryModel(nn.Module):
     """
-    map the scene information to attributs that summarizes the scene
+    map the scene information to attributes that summarizes the scene
     """
 
     def __init__(self, encoder, decoder, src_embed, src2posfun):
@@ -306,21 +351,24 @@ class SummaryDecoder(nn.Module):
     Map the encoded tensor to a description of the whole scene, e.g., the likelihood of certain modes
     """
 
-    def __init__(self, temporal_attn, agent_attn, ff, emb_dim, output_dim):
+    def __init__(
+        self, temporal_attn, agent_attn, ff, emb_dim, output_dim, static=False
+    ):
         super(SummaryDecoder, self).__init__()
         self.temporal_attn = temporal_attn
         self.agent_attn = agent_attn
         self.ff = ff
         self.output_dim = output_dim
+        self.static = static
         self.MLP = nn.Sequential(nn.Linear(emb_dim, output_dim), nn.Sigmoid())
 
     def forward(self, x, mask):
         x = self.agent_attn(x, x, x, mask)
         x = self.ff(torch.max(x, dim=-3)[0]).unsqueeze(1)
-        x = self.temporal_attn(x, x, x)
-        x = torch.max(x, dim=-2)[0].squeeze(1)
+        if not self.static:
+            x = self.temporal_attn(x, x, x)
+            x = torch.max(x, dim=-2)[0].squeeze(1)
         x = self.MLP(x)
-
         return x
 
 
@@ -673,8 +721,10 @@ def make_factorized_model(
     N_layer_enc=1,
     N_layer_tgt_enc=1,
     N_layer_tgt_dec=1,
-    N_layer_enc_discr=1,
     M=1,
+    use_GAN=False,
+    GAN_static=True,
+    N_layer_enc_discr=1,
 ):
     "first generate the building blocks, attn networks, encoders, decoders, PEs and Feedforward nets"
     c = copy.deepcopy
@@ -731,10 +781,43 @@ def make_factorized_model(
     Factorized_Encoder = FactorizedEncoder(
         c(temporal_enc), c(agent_enc), temporal_pe_flip, XY_pe, N_layer_enc
     )
-    Summary_Encoder = FactorizedEncoder(
-        c(temporal_enc), c(agent_enc), temporal_pe_flip, XY_pe, N_layer_enc_discr
-    )
-    Summary_Decoder = SummaryDecoder(c(temporal_attn), c(agent_attn), c(ff), d_model, 1)
+    if use_GAN:
+        if GAN_static:
+            Summary_Encoder = StaticEncoder(
+                c(agent_enc),
+                XY_pe,
+                N_layer_enc_discr,
+            )
+            Summary_Decoder = SummaryDecoder(
+                c(temporal_attn), c(agent_attn), c(ff), d_model, 1, static=True
+            )
+            static_src_emb = nn.Linear(src_dim, d_model - XY_pe_dim - map_emb_dim)
+            Summary_Model = SummaryModel(
+                Summary_Encoder,
+                Summary_Decoder,
+                c(static_src_emb),
+                src2posfun,
+            )
+        else:
+            Summary_Encoder = Summary_Encoder = FactorizedEncoder(
+                c(temporal_enc),
+                c(agent_enc),
+                temporal_pe_flip,
+                XY_pe,
+                N_layer_enc_discr,
+            )
+            Summary_Decoder = SummaryDecoder(
+                c(temporal_attn), c(agent_attn), c(ff), d_model, 1, static=True
+            )
+            Summary_Model = SummaryModel(
+                Summary_Encoder,
+                Summary_Decoder,
+                c(src_emb),
+                src2posfun,
+            )
+
+    else:
+        Summary_Model = None
     "use a simple nn.Linear as the generator as our output is continuous"
 
     Transformer_Model = FactorizedEncoderDecoder(
@@ -743,12 +826,6 @@ def make_factorized_model(
         c(src_emb),
         c(tgt_emb),
         c(generator),
-        src2posfun,
-    )
-    Summary_Model = SummaryModel(
-        Summary_Encoder,
-        Summary_Decoder,
-        c(src_emb),
         src2posfun,
     )
 
@@ -792,6 +869,7 @@ class TransformerModel(nn.Module):
         self.ego_weight = algo_config.ego_weight
         self.all_other_weight = algo_config.all_other_weight
         self.criterion = nn.MSELoss(reduction="none")
+        self.map_enc_mode = algo_config.map_enc_mode
         "unicycle for vehicles and double integrators for pedestrians"
         self.dyn_list = {
             DynType.UNICYCLE: Unicycle(
@@ -816,6 +894,14 @@ class TransformerModel(nn.Module):
 
         "src_dim:x,y,v,sin(yaw),cos(yaw)+16-dim type encoding"
         "tgt_dim:x,y,yaw"
+        if algo_config.name == "TransformerGAN":
+            self.use_GAN = True
+            N_layer_enc_discr = algo_config.Discriminator.N_layer_enc
+            self.GAN_static = algo_config.GAN_static
+        else:
+            self.use_GAN = False
+            N_layer_enc_discr = None
+            self.GAN_static = False
         self.Transformermodel, self.Discriminator = make_factorized_model(
             src_dim=21,
             tgt_dim=3,
@@ -834,8 +920,10 @@ class TransformerModel(nn.Module):
             N_layer_enc=algo_config.N_layer_enc,
             N_layer_tgt_enc=algo_config.N_layer_tgt_enc,
             N_layer_tgt_dec=algo_config.N_layer_tgt_enc,
-            N_layer_enc_discr=algo_config.Discriminator.N_layer_enc,
             M=self.M,
+            use_GAN=self.use_GAN,
+            GAN_static=self.GAN_static,
+            N_layer_enc_discr=N_layer_enc_discr,
         )
         self.src_emb = nn.Linear(
             21,
@@ -936,35 +1024,6 @@ class TransformerModel(nn.Module):
         for i in range(nbatches):
             mask_hint[i, :, sample[i] :] = 0
         return mask_hint
-
-    # def generate_ROIs(self, pos, yaw, centroid, raster_from_world, mask, patch_size):
-    #     """
-    #     This version generates ROI for all agents at all time instances that are available
-    #     """
-    #     bs = pos.shape[0]
-    #     s = torch.sin(yaw).unsqueeze(-1)
-    #     c = torch.cos(yaw).unsqueeze(-1)
-    #     rotM = torch.cat(
-    #         (torch.cat((c, -s), dim=-1), torch.cat((s, c), dim=-1)), dim=-2
-    #     )
-    #     world_xy = ((pos.unsqueeze(-2)) @ (rotM.transpose(-1, -2))).squeeze(-2)
-    #     world_xy += centroid.view(-1, 1, 1, 2).type(torch.float)
-    #     Mat = raster_from_world.view(-1, 1, 1, 3, 3).type(torch.float)
-    #     raster_xy = batch_nd_transform_points(world_xy, Mat)
-    #     ROI = [None] * bs
-    #     index = [None] * bs
-    #     for i in range(bs):
-    #         ii, jj = torch.where(mask[i])
-    #         index[i] = (ii, jj)
-    #         ROI[i] = torch.cat(
-    #             (
-    #                 raster_xy[i, ii, jj],
-    #                 patch_size.repeat(ii.shape[0], 1),
-    #                 yaw[i, ii, jj],
-    #             ),
-    #             dim=-1,
-    #         ).to(self.device)
-    #     return ROI, index
 
     def generate_edges(
         self,
@@ -1080,40 +1139,76 @@ class TransformerModel(nn.Module):
 
         return x, pos, yaw
 
-    def generate_ROIs(self, pos, yaw, centroid, raster_from_world, mask, patch_size):
+    def generate_ROIs(
+        self,
+        pos,
+        yaw,
+        centroid,
+        raster_from_world,
+        mask,
+        patch_size,
+        mode="last",
+    ):
         """
-        This version generates ROI for all agents only at most recent time step
+        This version generates ROI for all agents only at most recent time step unless specified otherwise
         """
-
-        num = torch.arange(0, mask.shape[2]).view(1, 1, -1).to(mask.device)
-        nummask = num * mask
-        last_idx, _ = torch.max(nummask, dim=2)
-
-        bs = pos.shape[0]
-        s = torch.sin(yaw).unsqueeze(-1)
-        c = torch.cos(yaw).unsqueeze(-1)
-        rotM = torch.cat(
-            (torch.cat((c, -s), dim=-1), torch.cat((s, c), dim=-1)), dim=-2
-        )
-        world_xy = ((pos.unsqueeze(-2)) @ (rotM.transpose(-1, -2))).squeeze(-2)
-        world_xy += centroid.view(-1, 1, 1, 2).type(torch.float)
-        Mat = raster_from_world.view(-1, 1, 1, 3, 3).type(torch.float)
-        raster_xy = batch_nd_transform_points(world_xy, Mat)
-        agent_mask = mask.any(dim=2)
-        ROI = [None] * bs
-        index = [None] * bs
-        for i in range(bs):
-            ii = torch.where(agent_mask[i])[0]
-            index[i] = ii
-            ROI[i] = torch.cat(
-                (
-                    raster_xy[i, ii, last_idx[i, ii]],
-                    patch_size.repeat(ii.shape[0], 1),
-                    yaw[i, ii, last_idx[i, ii]],
-                ),
-                dim=-1,
+        if mode == "all":
+            bs = pos.shape[0]
+            s = torch.sin(yaw).unsqueeze(-1)
+            c = torch.cos(yaw).unsqueeze(-1)
+            rotM = torch.cat(
+                (torch.cat((c, -s), dim=-1), torch.cat((s, c), dim=-1)), dim=-2
             )
-        return ROI, index
+            world_xy = ((pos.unsqueeze(-2)) @ (rotM.transpose(-1, -2))).squeeze(-2)
+            world_xy += centroid.view(-1, 1, 1, 2).type(torch.float)
+            Mat = raster_from_world.view(-1, 1, 1, 3, 3).type(torch.float)
+            raster_xy = batch_nd_transform_points(world_xy, Mat)
+            ROI = [None] * bs
+            index = [None] * bs
+            for i in range(bs):
+                ii, jj = torch.where(mask[i])
+                index[i] = (ii, jj)
+                ROI[i] = torch.cat(
+                    (
+                        raster_xy[i, ii, jj],
+                        patch_size.repeat(ii.shape[0], 1),
+                        yaw[i, ii, jj],
+                    ),
+                    dim=-1,
+                ).to(pos.device)
+            return ROI, index
+        elif mode == "last":
+            num = torch.arange(0, mask.shape[2]).view(1, 1, -1).to(mask.device)
+            nummask = num * mask
+            last_idx, _ = torch.max(nummask, dim=2)
+
+            bs = pos.shape[0]
+            s = torch.sin(yaw).unsqueeze(-1)
+            c = torch.cos(yaw).unsqueeze(-1)
+            rotM = torch.cat(
+                (torch.cat((c, -s), dim=-1), torch.cat((s, c), dim=-1)), dim=-2
+            )
+            world_xy = ((pos.unsqueeze(-2)) @ (rotM.transpose(-1, -2))).squeeze(-2)
+            world_xy += centroid.view(-1, 1, 1, 2).type(torch.float)
+            Mat = raster_from_world.view(-1, 1, 1, 3, 3).type(torch.float)
+            raster_xy = batch_nd_transform_points(world_xy, Mat)
+            agent_mask = mask.any(dim=2)
+            ROI = [None] * bs
+            index = [None] * bs
+            for i in range(bs):
+                ii = torch.where(agent_mask[i])[0]
+                index[i] = ii
+                ROI[i] = torch.cat(
+                    (
+                        raster_xy[i, ii, last_idx[i, ii]],
+                        patch_size.repeat(ii.shape[0], 1),
+                        yaw[i, ii, last_idx[i, ii]],
+                    ),
+                    dim=-1,
+                )
+            return ROI, index
+        else:
+            raise ValueError("mode must be 'all' or 'last'")
 
     @staticmethod
     def Map2Emb(CNN_out, index, emb_size):
@@ -1207,6 +1302,7 @@ class TransformerModel(nn.Module):
         )
 
         # generate ROI based on the rasterized position
+
         ROI, index = self.generate_ROIs(
             src_pos,
             src_world_yaw,
@@ -1214,9 +1310,13 @@ class TransformerModel(nn.Module):
             data_batch["raster_from_world"],
             src_mask,
             torch.tensor(self.algo_config.CNN.patch_size).to(device),
+            mode=self.map_enc_mode,
         )
         CNN_out = self.CNNmodel(data_batch["image"].permute(0, 3, 1, 2), ROI)
-        emb_size = (*src.shape[:-2], self.algo_config.CNN.output_size)
+        if self.map_enc_mode == "all":
+            emb_size = (*src.shape[:-1], self.algo_config.CNN.output_size)
+        elif self.map_enc_mode == "last":
+            emb_size = (*src.shape[:-2], self.algo_config.CNN.output_size)
 
         # put the CNN output in the right location of the embedding
         map_emb = self.Map2Emb(CNN_out, index, emb_size)
@@ -1320,22 +1420,49 @@ class TransformerModel(nn.Module):
             )
 
         if self.calc_likelihood:
-            likelihood = self.Discriminator(src, src_mask, dyn_type, map_emb)
-            src_new, src_mask_new, map_emb_new = self.pred2obs(
-                src_pos,
-                src_yaw,
-                src_mask,
-                data_batch,
-                pos_pred,
-                yaw_pred,
-                tgt_mask_agent,
-                raw_type,
-                self.algo_config.f_steps,
-            )
+            if self.GAN_static:
+                if map_emb.ndim == 4:
+                    likelihood = self.Discriminator(
+                        src[:, :, -1:],
+                        src_mask[:, :, -1:],
+                        dyn_type,
+                        map_emb[:, :, -1:],
+                    ).view(src.shape[0], -1)
+                else:
+                    likelihood = self.Discriminator(
+                        src[:, :, -1:],
+                        src_mask[:, :, -1:],
+                        dyn_type,
+                        map_emb.unsqueeze(-2),
+                    ).view(src.shape[0], -1)
+            else:
+                likelihood = self.Discriminator(src, src_mask, dyn_type, map_emb).view(
+                    src.shape[0], -1
+                )
+            if self.GAN_static:
+                src_new, src_mask_new, map_emb_new = self.pred2obs_static(
+                    data_batch,
+                    pos_pred,
+                    yaw_pred,
+                    tgt_mask_agent,
+                    raw_type,
+                )
+            else:
+                src_new, src_mask_new, map_emb_new = self.pred2obs(
+                    src_pos,
+                    src_yaw,
+                    src_mask,
+                    data_batch,
+                    pos_pred,
+                    yaw_pred,
+                    tgt_mask_agent,
+                    raw_type,
+                    self.algo_config.f_steps,
+                )
             if self.M == 1:
                 likelihood_new = self.Discriminator(
                     src_new, src_mask_new, dyn_type, map_emb_new
-                )
+                ).view(src.shape[0], -1)
             else:
                 likelihood_new = list()
                 for i in range(self.M):
@@ -1347,7 +1474,9 @@ class TransformerModel(nn.Module):
                             map_emb_new[:, i],
                         )
                     )
-                likelihood_new = torch.stack(likelihood_new, dim=1)
+                likelihood_new = torch.stack(likelihood_new, dim=1).view(
+                    src.shape[0], self.M, -1
+                )
             out_dict["scene_predictions"]["likelihood_new"] = likelihood_new
             out_dict["scene_predictions"]["likelihood"] = likelihood
         return out_dict
@@ -1358,8 +1487,8 @@ class TransformerModel(nn.Module):
         src_yaw,
         src_mask,
         data_batch,
-        pred_pos,
-        pred_yaw,
+        pos_pred,
+        yaw_pred,
         pred_mask,
         raw_type,
         f_steps=1,
@@ -1369,17 +1498,17 @@ class TransformerModel(nn.Module):
         Args:
             f_steps (int, optional): number of forwarding steps. Defaults to 1.
         """
-        if pred_pos.ndim == 5:
+        if pos_pred.ndim == 5:
             src_pos = src_pos.unsqueeze(1).repeat(1, self.M, 1, 1, 1)
             src_yaw = src_yaw.unsqueeze(1).repeat(1, self.M, 1, 1, 1)
             src_mask = src_mask.unsqueeze(1).repeat(1, self.M, 1, 1)
             pred_mask = pred_mask.unsqueeze(1).repeat(1, self.M, 1, 1)
             raw_type = raw_type.unsqueeze(1).repeat(1, self.M, 1)
         pos_new = torch.cat(
-            (src_pos[..., f_steps:, :], pred_pos[..., :f_steps, :]), dim=-2
+            (src_pos[..., f_steps:, :], pos_pred[..., :f_steps, :]), dim=-2
         )
         yaw_new = torch.cat(
-            (src_yaw[..., f_steps:, :], pred_yaw[..., :f_steps, :]), dim=-2
+            (src_yaw[..., f_steps:, :], yaw_pred[..., :f_steps, :]), dim=-2
         )
         src_mask_new = torch.cat(
             (src_mask[..., f_steps:], pred_mask[..., :f_steps]), dim=-1
@@ -1414,13 +1543,15 @@ class TransformerModel(nn.Module):
                 data_batch["raster_from_world"],
                 src_mask_new,
                 torch.tensor(self.algo_config.CNN.patch_size).to(src_mask_new.device),
+                mode="last",
             )
+
             CNN_out = self.CNNmodel(data_batch["image"].permute(0, 3, 1, 2), ROI)
             emb_size = (*src_new.shape[:-2], self.algo_config.CNN.output_size)
-
             map_emb_new = self.Map2Emb(CNN_out, index, emb_size)
         else:
-            emb_size = (*src_new[:, 0].shape[:-2], self.algo_config.CNN.output_size)
+
+            emb_size = (*src_new.shape[:-2], self.algo_config.CNN.output_size)
             map_emb_new = list()
             for i in range(self.M):
                 ROI, index = self.generate_ROIs(
@@ -1432,11 +1563,83 @@ class TransformerModel(nn.Module):
                     torch.tensor(self.algo_config.CNN.patch_size).to(
                         src_mask_new.device
                     ),
+                    mode="last",
                 )
                 CNN_out = self.CNNmodel(data_batch["image"].permute(0, 3, 1, 2), ROI)
                 map_emb_new.append(self.Map2Emb(CNN_out, index, emb_size))
             map_emb_new = torch.stack(map_emb_new, dim=1)
         return src_new, src_mask_new, map_emb_new
+
+    def pred2obs_static(
+        self,
+        data_batch,
+        pos_pred,
+        yaw_pred,
+        pred_mask,
+        raw_type,
+    ):
+        """
+        generate observation f_steps later by concatenating the predictions
+        Args:
+            f_steps (int, optional): number of forwarding steps. Defaults to 1.
+        """
+        if pos_pred.ndim == 5:
+            pred_mask = pred_mask.unsqueeze(1).repeat(1, self.M, 1, 1)
+            raw_type = raw_type.unsqueeze(1).repeat(1, self.M, 1)
+
+        pred_vel = self.dyn_list[DynType.UNICYCLE].calculate_vel(
+            pos_pred, yaw_pred, self.step_time, pred_mask
+        )
+        src_new, _, _ = self.raw2feature(
+            pos_pred,
+            pred_vel,
+            yaw_pred,
+            raw_type,
+            pred_mask,
+        )
+        if yaw_pred.ndim == 4:
+            new_world_yaw = yaw_pred + (
+                data_batch["yaw"]
+                .view(-1, 1, 1, 1)
+                .repeat(1, yaw_pred.size(1), yaw_pred.size(2), 1)
+            ).type(torch.float)
+        elif yaw_pred.ndim == 5:
+            new_world_yaw = yaw_pred + (
+                data_batch["yaw"]
+                .view(-1, 1, 1, 1, 1)
+                .repeat(1, self.M, yaw_pred.size(-3), yaw_pred.size(-2), 1)
+            ).type(torch.float)
+        if self.M == 1:
+            ROI, index = self.generate_ROIs(
+                pos_pred,
+                new_world_yaw,
+                data_batch["centroid"],
+                data_batch["raster_from_world"],
+                pred_mask,
+                torch.tensor(self.algo_config.CNN.patch_size).to(pos_pred.device),
+                mode="all",
+            )
+            CNN_out = self.CNNmodel(data_batch["image"].permute(0, 3, 1, 2), ROI)
+            emb_size = (*src_new.shape[:-1], self.algo_config.CNN.output_size)
+
+            map_emb_new = self.Map2Emb(CNN_out, index, emb_size)
+        else:
+            emb_size = (*src_new[:, 0].shape[:-1], self.algo_config.CNN.output_size)
+            map_emb_new = list()
+            for i in range(self.M):
+                ROI, index = self.generate_ROIs(
+                    pos_pred[:, i],
+                    new_world_yaw[:, i],
+                    data_batch["centroid"],
+                    data_batch["raster_from_world"],
+                    pred_mask[:, i],
+                    torch.tensor(self.algo_config.CNN.patch_size).to(pos_pred.device),
+                    mode="all",
+                )
+                CNN_out = self.CNNmodel(data_batch["image"].permute(0, 3, 1, 2), ROI)
+                map_emb_new.append(self.Map2Emb(CNN_out, index, emb_size))
+            map_emb_new = torch.stack(map_emb_new, dim=1)
+        return src_new, pred_mask, map_emb_new
 
     def regularization_loss(self, pred_batch, data_batch):
         # velocity regularization

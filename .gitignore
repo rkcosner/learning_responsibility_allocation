@@ -1,6 +1,7 @@
 TransformerGAN_trained_models/
 TransformerPred_trained_models/
 wandb/
+tbsim-ws/
 
 ## config files
 *.yaml
@@ -8,10 +9,10 @@ wandb/
 ## local test files
 
 cnn_test.ipynb
-config.yaml
 test_rollout.py
 visualize_agent.ipynb
 test.py
+experiments/templates/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

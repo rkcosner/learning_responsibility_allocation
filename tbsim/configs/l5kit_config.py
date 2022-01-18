@@ -251,6 +251,7 @@ class L5TransformerPredConfig(AlgoConfig):
         self.calc_likelihood = False
         self.calc_collision = True
         self.collision_weight = 0.5
+        self.map_enc_mode = "all"
 
         # map encoding parameters
         self.CNN.map_channels = 3
@@ -263,7 +264,7 @@ class L5TransformerPredConfig(AlgoConfig):
         self.CNN.input_size = [224, 224]
 
         # Multi-modal prediction
-        self.M = 3
+        self.M = 1
 
         self.Discriminator.N_layer_enc = 1
 
@@ -287,6 +288,16 @@ class L5TransformerPredConfig(AlgoConfig):
         )  # epochs where LR decay occurs
         self.optim_params.policy.regularization.L2 = 0.00  # L2 regularization strength
 
+
+class L5TransformerGANConfig(L5TransformerPredConfig):
+    def __init__(self):
+        super(L5TransformerGANConfig, self).__init__()
+        self.name = "TransformerGAN"
+        self.calc_likelihood = True
+        self.f_steps = 5
+        self.GAN_weight = 0.3
+        self.GAN_static = True
+
         self.optim_params_discriminator.learning_rate.initial = (
             1e-3  # policy learning rate
         )
@@ -299,12 +310,3 @@ class L5TransformerPredConfig(AlgoConfig):
         self.optim_params_discriminator.regularization.L2 = (
             0.00  # L2 regularization strength
         )
-
-
-class L5TransformerGANConfig(L5TransformerPredConfig):
-    def __init__(self):
-        super(L5TransformerGANConfig, self).__init__()
-        self.name = "TransformerGAN"
-        self.calc_likelihood = True
-        self.f_steps = 5
-        self.GAN_weight = 0.3
