@@ -47,9 +47,6 @@ def get_exp_dir(exp_name, output_dir, save_checkpoints=True, auto_remove_exp_dir
         video_dir (str): path to video directory (sub-folder in experiment directory)
             to store rollout videos
     """
-    # timestamp for directory names
-    t_now = time.time()
-    version_str = datetime.datetime.fromtimestamp(t_now).strftime('%Y%m%d%H%M%S')
 
     # create directory for where to dump model parameters, tensorboard logs, and videos
     base_output_dir = output_dir
@@ -64,11 +61,23 @@ def get_exp_dir(exp_name, output_dir, save_checkpoints=True, auto_remove_exp_dir
         if ans == "y":
             print("REMOVING")
             shutil.rmtree(base_output_dir)
+    os.makedirs(base_output_dir, exist_ok=True)
+
+    # version the run
+    # t_now = time.time()
+    # version_str = datetime.datetime.fromtimestamp(t_now).strftime('%Y%m%d%H%M%S')
+    existing_runs = [a for a in os.listdir(base_output_dir) if os.path.isdir(os.path.join(base_output_dir, a))]
+    run_counts = [-1]
+    for ep in existing_runs:
+        m = ep.split("run")
+        if len(m) == 2 and m[0] == "":
+            run_counts.append(int(m[1]))
+    version_str = "run{}".format(max(run_counts) + 1)
 
     # only make model directory if model saving is enabled
     ckpt_dir = None
     if save_checkpoints:
-        ckpt_dir = os.path.join(base_output_dir, version_str, "models")
+        ckpt_dir = os.path.join(base_output_dir, version_str, "checkpoints")
         os.makedirs(ckpt_dir)
 
     # tensorboard directory
