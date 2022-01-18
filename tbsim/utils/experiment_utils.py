@@ -121,7 +121,7 @@ def create_configs(configs_to_search_fn, config_name, config_file, config_dir, p
 
     if delete_config_dir and os.path.exists(config_dir):
         shutil.rmtree(config_dir)
-    os.makedirs(config_dir)
+    os.makedirs(config_dir, exist_ok=True)
     for c in configs:
         pfx = "{}_".format(prefix) if prefix is not None else ""
         fn = os.path.join(config_dir, "{}{}.json".format(pfx, c.name))

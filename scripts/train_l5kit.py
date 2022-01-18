@@ -12,6 +12,7 @@ import tbsim.utils.train_utils as TrainUtils
 from tbsim.envs.env_l5kit import EnvL5KitSimulation
 from tbsim.utils.env_utils import RolloutCallback
 from tbsim.configs.registry import get_registered_experiment_config
+from tbsim.utils.config_utils import get_experiment_config_from_file
 from tbsim.datasets.factory import datamodule_factory
 from tbsim.algos.factory import algo_factory
 
@@ -28,6 +29,9 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         save_checkpoints=cfg.train.save.enabled,
         auto_remove_exp_dir=auto_remove_exp_dir
     )
+
+    # Save experiment config to the training dir
+    cfg.dump(os.path.join(root_dir, version_key, "config.json"))
 
     if cfg.train.logging.terminal_output_to_txt and not debug:
         # log stdout and stderr to a text file
@@ -215,9 +219,7 @@ if __name__ == "__main__":
         default_config = get_registered_experiment_config(args.config_name)
     elif args.config_file is not None:
         # Update default config with external json file
-        ext_cfg = json.load(open(args.config_file, "r"))
-        default_config = get_registered_experiment_config(ext_cfg["registered_name"])
-        default_config.update(**ext_cfg)
+        default_config = get_experiment_config_from_file(args.config_file)
     else:
         raise Exception("Need either a config name or a json file to create experiment config")
 
