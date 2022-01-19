@@ -35,8 +35,7 @@ class L5TrafficModel(pl.LightningModule):
             num_input_channels=modality_shapes["image"][0],  # [C, H, W]
             trajectory_decoder=traj_decoder,
             map_feature_dim=algo_config.map_feature_dim,
-            weights_scaling=[1.0, 1.0, 1.0],
-            criterion=nn.MSELoss(reduction="none")
+            weights_scaling=[1.0, 1.0, 1.0]
         )
 
     def forward(self, obs_dict):
@@ -76,12 +75,11 @@ class L5TrafficModel(pl.LightningModule):
         """
         pout = self.nets["policy"](batch)
         losses = self.nets["policy"].compute_losses(pout, batch)
-        for lk, l in losses.items():
-            self.log("train/losses_" + lk, l)
-
         total_loss = 0.0
-        for v in losses.values():
-            total_loss += v
+        for lk, l in losses.items():
+            loss = l * self.algo_config.loss_weights[lk]
+            self.log("train/losses_" + lk, loss)
+            total_loss += loss
 
         metrics = self._compute_metrics(pout["predictions"], batch)
         for mk, m in metrics.items():

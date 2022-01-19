@@ -188,6 +188,7 @@ def generate_agent_sample_mixed(
         "centroid": agent_centroid_m,
         "yaw": agent_yaw_rad,
         "speed": np.linalg.norm(future_vels_mps[0]),
+        "curr_speed": np.linalg.norm(history_vels_mps[0])
     }
 
     vectorized_features = vectorizer.vectorize(

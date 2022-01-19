@@ -44,6 +44,61 @@ def forward_dynamics(
     return x, pos, yaw
 
 
+def trajectory_loss(predictions, targets, availabilities, weights_scaling=None, crit=nn.MSELoss(reduction="none")):
+    """
+
+    Args:
+        predictions (torch.Tensor): predicted trajectory [B, (A), T, D]
+        targets (torch.Tensor): target trajectory [B, (A), T, D]
+        availabilities (torch.Tensor): [B, (A), T]
+        weights_scaling (torch.Tensor): [D]
+        crit (nn.Module): loss function
+
+    Returns:
+        loss (torch.Tensor)
+    """
+    assert availabilities.shape == predictions.shape[:-1]
+    assert predictions.shape == targets.shape
+    if weights_scaling is None:
+        weights_scaling = torch.zeros(targets.shape[-1]).to(targets.device)
+    assert weights_scaling.shape[-1] == targets.shape[-1]
+    target_weights = (availabilities.unsqueeze(-1) * weights_scaling)
+    loss = torch.mean(crit(predictions, targets) * target_weights)
+    return loss
+
+
+def goal_reaching_loss(predictions, targets, availabilities, weights_scaling=None, crit=nn.MSELoss(reduction="none")):
+    """
+
+    Args:
+        predictions (torch.Tensor): predicted trajectory [B, (A), T, D]
+        targets (torch.Tensor): target trajectory [B, (A), T, D]
+        availabilities (torch.Tensor): [B, (A), T]
+        weights_scaling (torch.Tensor): [D]
+        crit (nn.Module): loss function
+
+    Returns:
+        loss (torch.Tensor)
+    """
+    # compute loss mask by finding the last available target
+    num_frames = availabilities.shape[-1]
+    inds = torch.arange(0, num_frames).to(targets.device)  # [T]
+    inds = (availabilities > 0).float() * inds  # [B, (A), T] arange indices with unavailable indices set to 0
+    last_inds = inds.max(dim=-1)[1]  # [B, (A)] calculate the index of the last availale frame
+    goal_mask = TensorUtils.to_one_hot(last_inds, num_class=num_frames)  # [B, (A), T] with the last frame set to 1
+    # filter out samples that do not have available frames
+    available_samples_mask = availabilities.sum(-1) > 0  # [B, (A)]
+    goal_mask = goal_mask * available_samples_mask.unsqueeze(-1).float()  # [B, (A), T]
+    goal_loss = trajectory_loss(
+        predictions,
+        targets,
+        availabilities=goal_mask,
+        weights_scaling=weights_scaling,
+        crit=crit
+    )
+    return goal_loss
+
+
 class RasterizedPlanningModel(nn.Module):
     """Raster-based model for planning.
     """
@@ -54,8 +109,7 @@ class RasterizedPlanningModel(nn.Module):
             num_input_channels: int,
             map_feature_dim: int,
             weights_scaling: List[float],
-            criterion: nn.Module,
-            trajectory_decoder: nn.Module
+            trajectory_decoder: nn.Module,
     ) -> None:
 
         super().__init__()
@@ -67,15 +121,18 @@ class RasterizedPlanningModel(nn.Module):
         )
         self.traj_decoder = trajectory_decoder
         self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
-        self.criterion = criterion
 
     def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         image_batch = data_batch["image"]
         map_feat = self.map_encoder(image_batch)
 
-        raw_ego = L5Utils.batch_to_raw_ego(data_batch, step_time=self.traj_decoder.step_time)
-        all_states, curr_states = L5Utils.raw_to_states(*raw_ego)
-        traj = self.traj_decoder.forward(inputs=map_feat, current_state=curr_states[..., 0, :])
+        # raw_ego = L5Utils.batch_to_raw_ego(data_batch, step_time=self.traj_decoder.step_time)
+        # all_states, curr_states = L5Utils.raw_to_states(*raw_ego)
+        # org_curr_states = curr_states[..., 0, :]
+
+        curr_states = torch.zeros(image_batch.shape[0], 4).to(image_batch.device)  # [x, y, vel, yaw]
+        curr_states[:, 2] = data_batch["curr_speed"]
+        traj = self.traj_decoder.forward(inputs=map_feat, current_state=curr_states)
 
         pred_positions = traj[:, :, :2]
         pred_yaws = traj[:, :, 2:3]
@@ -87,9 +144,19 @@ class RasterizedPlanningModel(nn.Module):
 
     def compute_losses(self, pred_batch, data_batch):
         target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=2)
-        target_weights = (data_batch["target_availabilities"].unsqueeze(-1) * self.weights_scaling)
-        loss = torch.mean(self.criterion(pred_batch["trajectories"], target_traj) * target_weights)
-        losses = OrderedDict(prediction_loss=loss)
+        pred_loss = trajectory_loss(
+            predictions=pred_batch["trajectories"],
+            targets=target_traj,
+            availabilities=data_batch["target_availabilities"],
+            weights_scaling=self.weights_scaling
+        )
+        goal_loss = goal_reaching_loss(
+            predictions=pred_batch["trajectories"],
+            targets=target_traj,
+            availabilities=data_batch["target_availabilities"],
+            weights_scaling=self.weights_scaling
+        )
+        losses = OrderedDict(prediction_loss=pred_loss, goal_loss=goal_loss)
         return losses
 
 
@@ -304,7 +371,7 @@ class TrajectoryDecoder(nn.Module):
         self._create_networks(network_kwargs)
 
     def _create_dynamics(self, dynamics_type, dynamics_kwargs):
-        if dynamics_type is not None:
+        if dynamics_type in ["Unicycle", dynamics.DynType.UNICYCLE]:
             self.dyn = dynamics.Unicycle(
                 "dynamics",
                 max_steer=dynamics_kwargs["max_steer"],

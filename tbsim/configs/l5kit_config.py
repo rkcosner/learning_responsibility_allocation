@@ -217,6 +217,10 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.dynamics.max_yawvel = 8.0
         self.dynamics.acce_bound = (-6, 4)
 
+        self.loss_weights.prediction_loss = 1.0
+        self.loss_weights.goal_loss = 0.0
+        self.loss_weights.collision_loss = 0.0
+
         self.optim_params.policy.learning_rate.initial = 1e-3  # policy learning rate
         self.optim_params.policy.learning_rate.decay_factor = (
             0.1  # factor to decay LR by (if epoch schedule non-empty)
