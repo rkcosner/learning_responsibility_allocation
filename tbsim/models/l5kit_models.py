@@ -23,14 +23,14 @@ def forward_dynamics(
     Integrate the state forward with initial state x0, action u
     Args:
         dyn_model (dynamics.Dynamics): dynamics model
-        initial_states (Torch.tensor): state tensor of size [..., 4]
-        actions (Torch.tensor): action tensor of size [..., 2]
+        initial_states (Torch.tensor): state tensor of size [B, (A), 4]
+        actions (Torch.tensor): action tensor of size [B, (A), T, 2]
         step_time (float): delta time between steps
     Returns:
-        state tensor of size [B,Num_agent,T,4]
+        state tensor of size [B, (A), T, 4]
     """
     num_steps = actions.shape[-2]
-    x = [initial_states.squeeze(-2)] + [None] * num_steps
+    x = [initial_states] + [None] * num_steps
     for t in range(num_steps):
         x[t + 1] = (
                 dyn_model.step(

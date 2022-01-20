@@ -12,7 +12,7 @@ from tbsim.envs.base import BaseEnv, BatchedEnv, SimulationException
 
 
 class EnvL5KitSimulation(BaseEnv, BatchedEnv):
-    def __init__(self, env_config, num_scenes, dataset, seed=0):
+    def __init__(self, env_config, num_scenes, dataset, seed=0, prediction_only=False):
         """
         A gym-like interface for simulating traffic behaviors (both ego and other agents) with L5Kit's SimulationDataset
 
@@ -20,6 +20,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             env_config (L5KitEnvConfig): a Config object specifying the behavior of the L5Kit CloseLoopSimulator
             num_scenes (int): number of scenes to run in parallel
             dataset (EgoDataset): an EgoDataset instance that contains scene data for simulation
+            prediction_only (bool): if set to True, ignore the input action command and only record the predictions
         """
         self._sim_cfg = SimulationConfig(
             disable_new_agents=True,
@@ -41,6 +42,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self._frame_index = 0
         self._cached_observation = None
         self._done = False
+        self._prediction_only = prediction_only
 
         self._ego_states = dict()
         self._agents_states = dict()
@@ -182,7 +184,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         ego_control = actions.get("ego", None)
         agents_control = actions.get("agents", None)
 
-        should_update = self._frame_index + 1 < self.horizon
+        should_update = self._frame_index + 1 < self.horizon and not self._prediction_only
         if ego_control is not None:
             if should_update:
                 # update the next frame's ego position and orientation using control input
