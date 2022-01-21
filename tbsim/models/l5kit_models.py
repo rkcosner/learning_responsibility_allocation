@@ -11,6 +11,12 @@ from tbsim.models.base_models import SplitMLP, MLP, MIMOMLP
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.dynamics as dynamics
 import tbsim.utils.l5_utils as L5Utils
+from tbsim.utils.geometry_utils import (
+    VEH_VEH_collision,
+    VEH_PED_collision,
+    PED_VEH_collision,
+    PED_PED_collision,
+)
 
 
 def forward_dynamics(
@@ -46,7 +52,7 @@ def forward_dynamics(
 
 def trajectory_loss(predictions, targets, availabilities, weights_scaling=None, crit=nn.MSELoss(reduction="none")):
     """
-
+    Aggregated per-step loss between gt and predicted trajectories
     Args:
         predictions (torch.Tensor): predicted trajectory [B, (A), T, D]
         targets (torch.Tensor): target trajectory [B, (A), T, D]
@@ -69,7 +75,7 @@ def trajectory_loss(predictions, targets, availabilities, weights_scaling=None, 
 
 def goal_reaching_loss(predictions, targets, availabilities, weights_scaling=None, crit=nn.MSELoss(reduction="none")):
     """
-
+    Final step loss between gt and predicted trajectories (normally used in conjunction with a forward dynamics model)
     Args:
         predictions (torch.Tensor): predicted trajectory [B, (A), T, D]
         targets (torch.Tensor): target trajectory [B, (A), T, D]
@@ -97,6 +103,37 @@ def goal_reaching_loss(predictions, targets, availabilities, weights_scaling=Non
         crit=crit
     )
     return goal_loss
+
+
+def collision_loss(pred_edges: Dict[str, torch.Tensor], col_funcs=None):
+    """
+    Calculate collision loss among predicted edges along a batch of trajectories
+    Args:
+        pred_edges (dict): A dict that maps collision types to box locations
+        col_funcs (dict): A dict of collision functions (implemented in tbsim.utils.geometric_utils)
+
+    Returns:
+        collision loss (torch.Tensor)
+    """
+    if col_funcs is None:
+        col_funcs = {
+            "VV": VEH_VEH_collision,
+            "VP": VEH_PED_collision,
+            "PV": PED_VEH_collision,
+            "PP": PED_PED_collision,
+        }
+
+    coll_loss = 0
+    for et, fun in col_funcs.items():
+        edges = pred_edges[et]
+        dis = fun(
+            edges[..., 0:3],
+            edges[..., 3:6],
+            edges[..., 6:8],
+            edges[..., 8:],
+        ).min(dim=-1)[0]
+        coll_loss += torch.sum(torch.sigmoid(-dis - 4.0))  # smooth collision loss
+    return coll_loss
 
 
 class RasterizedPlanningModel(nn.Module):
@@ -132,7 +169,7 @@ class RasterizedPlanningModel(nn.Module):
 
         curr_states = torch.zeros(image_batch.shape[0], 4).to(image_batch.device)  # [x, y, vel, yaw]
         curr_states[:, 2] = data_batch["curr_speed"]
-        traj = self.traj_decoder.forward(inputs=map_feat, current_state=curr_states)
+        traj = self.traj_decoder.forward(inputs=map_feat, current_states=curr_states)["trajectories"]
 
         pred_positions = traj[:, :, :2]
         pred_yaws = traj[:, :, 2:3]
@@ -156,7 +193,26 @@ class RasterizedPlanningModel(nn.Module):
             availabilities=data_batch["target_availabilities"],
             weights_scaling=self.weights_scaling
         )
-        losses = OrderedDict(prediction_loss=pred_loss, goal_loss=goal_loss)
+
+        # compute collision loss
+        targets_all = L5Utils.batch_to_target_all_agents(data_batch)
+        raw_type = torch.cat(
+            (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
+            dim=1,
+        ).type(torch.int64)
+
+        # Use predicted ego position to compute future box edges
+        targets_all["target_positions"] [:, 0, :, :] = pred_batch["predictions"]["positions"]
+        targets_all["target_yaws"][:, 0, :, :] = pred_batch["predictions"]["yaws"]
+
+        pred_edges = L5Utils.generate_edges(
+            raw_type, targets_all["extents"],
+            pos_pred=targets_all["target_positions"],
+            yaw_pred=targets_all["target_yaws"]
+        )
+
+        coll_loss = collision_loss(pred_edges=pred_edges)
+        losses = OrderedDict(prediction_loss=pred_loss, goal_loss=goal_loss, collision_loss=coll_loss)
         return losses
 
 
@@ -368,7 +424,7 @@ class TrajectoryDecoder(nn.Module):
         self.num_steps = num_steps
         self.step_time = step_time
         self._create_dynamics(dynamics_type, dynamics_kwargs)
-        self._create_networks(network_kwargs)
+        self._create_networks(network_kwargs, dynamics_kwargs.get("predict_current_states"))
 
     def _create_dynamics(self, dynamics_type, dynamics_kwargs):
         if dynamics_type in ["Unicycle", dynamics.DynType.UNICYCLE]:
@@ -381,47 +437,60 @@ class TrajectoryDecoder(nn.Module):
         else:
             self.dyn = None
 
-    def _create_networks(self, network_kwargs):
+    def _create_networks(self, network_kwargs, predict_current_states=False):
         raise NotImplementedError
 
     def _forward_networks(self, inputs, num_steps=None):
         raise NotImplementedError
 
-    def _forward_dynamics(self, current_state, actions):
+    def _forward_dynamics(self, current_states, actions):
         assert self.dyn is not None
-        assert current_state.shape[-1] == self.dyn.xdim
+        assert current_states.shape[-1] == self.dyn.xdim
         assert actions.shape[-1] == self.dyn.udim
         assert isinstance(self.step_time, float) and self.step_time > 0
         _, pos, yaw = forward_dynamics(
             self.dyn,
-            initial_states=current_state,
+            initial_states=current_states,
             actions=actions,
             step_time=self.step_time
         )
         traj = torch.cat((pos, yaw), dim=-1)
         return traj
 
-    def forward(self, inputs, current_state=None, num_steps=None):
+    def forward(self, inputs, current_states=None, num_steps=None):
         preds = self._forward_networks(inputs, num_steps)
+        if "current_states" in preds:
+            current_states = preds["current_states"]
         if self.dyn is not None:
-            preds = self._forward_dynamics(current_state=current_state, actions=preds)
+            preds["trajectories"] = self._forward_dynamics(
+                current_states=current_states,
+                actions=preds["trajectories"]
+            )
         return preds
 
 
 class MLPTrajectoryDecoder(TrajectoryDecoder):
-    def _create_networks(self, net_kwargs):
+    def _create_networks(self, net_kwargs, predict_current_states=False):
         if net_kwargs is None:
             net_kwargs = dict()
         assert isinstance(self.num_steps, int)
-        pred_dim = self.state_dim if self.dyn is None else self.dyn.udim
-        self.mlp = MLP(
-            input_dim= self.feature_dim,
-            output_dim=pred_dim * self.num_steps,
+        if self.dyn is None:
+            pred_shapes = OrderedDict(trajectories=(self.num_steps, self.state_dim))
+        else:
+            pred_shapes = OrderedDict(trajectories=(self.num_steps, self.dyn.udim))
+            if predict_current_states:
+                pred_shapes["current_states"] = (self.dyn.xdim,)
+
+        self.mlp = SplitMLP(
+            input_dim=self.feature_dim,
+            output_shapes=pred_shapes,
             output_activation=None,
             **net_kwargs
         )
 
     def _forward_networks(self, inputs, num_steps=None):
-        pred_dim = self.state_dim if self.dyn is None else self.dyn.udim
-        return self.mlp(inputs).reshape(-1, self.num_steps, pred_dim)
+        preds = self.mlp(inputs)
+        if "current_states" in preds:
+            preds["current_states"][:, [0, 1, 3]] = 0. # ego frame prediction - [x, y, yaw] are 0's
+        return preds
 

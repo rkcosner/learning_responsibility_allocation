@@ -212,10 +212,12 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.future_num_frames = 50
         self.step_time = 0.1
         self.render_ego_history = False
+
         self.dynamics.type = None
         self.dynamics.max_steer = 0.5
         self.dynamics.max_yawvel = 8.0
         self.dynamics.acce_bound = (-6, 4)
+        self.dynamics.predict_current_states = False
 
         self.loss_weights.prediction_loss = 1.0
         self.loss_weights.goal_loss = 0.0
