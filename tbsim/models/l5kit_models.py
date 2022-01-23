@@ -8,6 +8,7 @@ import torch.nn as nn
 from torchvision.models.resnet import resnet18, resnet50
 
 from tbsim.models.base_models import SplitMLP, MLP, MIMOMLP
+import tbsim.models.vaes as vaes
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.dynamics as dynamics
 import tbsim.utils.l5_utils as L5Utils
@@ -163,10 +164,6 @@ class RasterizedPlanningModel(nn.Module):
         image_batch = data_batch["image"]
         map_feat = self.map_encoder(image_batch)
 
-        # raw_ego = L5Utils.batch_to_raw_ego(data_batch, step_time=self.traj_decoder.step_time)
-        # all_states, curr_states = L5Utils.raw_to_states(*raw_ego)
-        # org_curr_states = curr_states[..., 0, :]
-
         curr_states = torch.zeros(image_batch.shape[0], 4).to(image_batch.device)  # [x, y, vel, yaw]
         curr_states[:, 2] = data_batch["curr_speed"]
         traj = self.traj_decoder.forward(inputs=map_feat, current_states=curr_states)["trajectories"]
@@ -213,6 +210,92 @@ class RasterizedPlanningModel(nn.Module):
 
         coll_loss = collision_loss(pred_edges=pred_edges)
         losses = OrderedDict(prediction_loss=pred_loss, goal_loss=goal_loss, collision_loss=coll_loss)
+        return losses
+
+
+class RasterizedVAEModel(nn.Module):
+    def __init__(self, algo_config, modality_shapes, weights_scaling):
+        super(RasterizedVAEModel, self).__init__()
+        trajectory_shape = (algo_config.future_num_frames, 3)
+        self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
+        prior = vaes.FixedGaussianPrior(latent_dim=algo_config.vae.latent_dim)
+
+        map_encoder = RasterizedMapEncoder(
+            model_arch=algo_config.model_architecture,
+            num_input_channels=modality_shapes["image"][0],
+            feature_dim=algo_config.map_feature_dim
+        )
+
+        c_encoder = ConditionEncoder(
+            map_encoder=map_encoder,
+            trajectory_shape=trajectory_shape,
+            condition_dim=algo_config.vae.condition_dim,
+            mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
+            rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
+        )
+
+        q_encoder = PosteriorEncoder(
+            condition_dim=algo_config.vae.condition_dim,
+            trajectory_shape=trajectory_shape,
+            output_shapes=prior.posterior_param_shapes,
+            mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
+            rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
+        )
+
+        traj_decoder = MLPTrajectoryDecoder(
+            feature_dim=algo_config.vae.condition_dim + algo_config.vae.latent_dim,
+            state_dim=trajectory_shape[-1],
+            num_steps=algo_config.future_num_frames,
+            dynamics_type=algo_config.dynamics.type,
+            dynamics_kwargs=algo_config.dynamics
+        )
+
+        decoder = ConditionDecoder(traj_decoder)
+
+        self.vae = vaes.CVAE(
+            q_net=q_encoder,
+            c_net=c_encoder,
+            decoder=decoder,
+            prior=prior,
+            target_criterion=nn.MSELoss(reduction="none")
+        )
+
+    def _traj_to_preds(self, traj):
+        pred_positions = traj[:, :, :2]
+        pred_yaws = traj[:, :, 2:3]
+        return {
+            "trajectories": traj,
+            "predictions": {"positions": pred_positions, "yaws": pred_yaws}
+        }
+
+    def forward(self, batch_inputs: dict):
+        trajectories = torch.cat((batch_inputs["target_positions"], batch_inputs["target_yaws"]), dim=-1)
+        inputs = OrderedDict(trajectories=trajectories)
+        condition_inputs = OrderedDict(image=batch_inputs["image"])
+        outs = self.vae(inputs=inputs, condition_inputs=condition_inputs)
+        outs.update(self._traj_to_preds(outs["x_recons"]["trajectories"]))
+        return outs
+
+    def sample(self, batch_inputs: dict, n: int):
+        condition_inputs = OrderedDict(image=batch_inputs["image"])
+        outs = self.vae.sample(condition_inputs=condition_inputs, n=n)
+        return self._traj_to_preds(outs["trajectories"])
+
+    def predict(self, batch_inputs: dict):
+        condition_inputs = OrderedDict(image=batch_inputs["image"])
+        outs = self.vae.predict(condition_inputs=condition_inputs)
+        return self._traj_to_preds(outs["trajectories"])
+
+    def compute_losses(self, pred_batch, data_batch):
+        kl_loss = self.vae.compute_kl_loss(pred_batch)
+        target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=2)
+        pred_loss = trajectory_loss(
+            predictions=pred_batch["trajectories"],
+            targets=target_traj,
+            availabilities=data_batch["target_availabilities"],
+            weights_scaling=self.weights_scaling
+        )
+        losses = OrderedDict(prediction_loss=pred_loss, kl_loss=kl_loss)
         return losses
 
 

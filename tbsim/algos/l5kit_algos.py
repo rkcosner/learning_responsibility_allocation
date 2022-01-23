@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 import pytorch_lightning as pl
 
-from tbsim.models.l5kit_models import RasterizedPlanningModel, MLPTrajectoryDecoder
+from tbsim.models.l5kit_models import RasterizedPlanningModel, MLPTrajectoryDecoder, RasterizedVAEModel
 from tbsim.models.transformer_model import TransformerModel
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.metrics as Metrics
@@ -112,6 +112,28 @@ class L5TrafficModel(pl.LightningModule):
 
     def get_action(self, obs_dict, **kwargs):
         return {"ego": self(obs_dict["ego"])}
+
+
+class L5VAETrafficModel(L5TrafficModel):
+    def __init__(self, algo_config, modality_shapes):
+        pl.LightningModule.__init__(self)
+        super(L5TrafficModel, self).__init__()
+        self.algo_config = algo_config
+        self.nets = nn.ModuleDict()
+        self.nets["policy"] = RasterizedVAEModel(
+            algo_config=algo_config,
+            modality_shapes=modality_shapes,
+            weights_scaling=[1.0, 1.0, 1.0]
+        )
+
+    def get_action(self, obs_dict, sample=True):
+        if sample:
+            preds = self.nets["policy"].sample(obs_dict["ego"], n=1)["predictions"]  # [B, 1, T, 3]
+            preds = TensorUtils.squeeze(preds, dim=1)
+        else:
+            preds = self.nets["policy"].predict(obs_dict["ego"])["predictions"]
+        return {"ego": preds}
+
 
 
 class L5TransformerTrafficModel(pl.LightningModule):

@@ -295,33 +295,17 @@ class CVAE(nn.Module):
         x_out = self.decoder(latents=z, condition_features=c)
         return {"x_recons": x_out, "q_params": q_params, "z": z, "c": c}
 
-    def compute_losses(self, outputs: dict, targets: dict, target_weights=None, kl_weight: float = 1.0):
+    def compute_kl_loss(self, outputs: dict):
         """
-        Compute VAE losses
+        Compute KL Divergence loss
 
         Args:
             outputs (dict): outputs of the self.forward() call
-            targets (dict): reconstruction targets (x')
-            target_weights (dict): (Optional) a dictionary of floats for weighing loss for reconstructing individual
-                                    elements in the target, must be the same shape as the target.
-            kl_weight (float): weighting factor for the KL divergence loss
 
         Returns:
             a dictionary of loss values
         """
-        recon_loss = 0
-        if target_weights is None:
-            target_weights = dict()
-        x_recons = outputs["x_recons"]
-        for k, v in x_recons.items():
-            w = target_weights[k] if k in target_weights else torch.ones_like(targets[k])
-            assert w.shape == x_recons[k].shape == targets[k].shape
-            element_loss = self.target_criterion(x_recons[k], targets[k]) * w
-            recon_loss += torch.mean(element_loss)  # TODO: sum up last dimension instead of averaging all?
-
-        kld_loss = self.prior.kl_loss(outputs["q_params"], inputs=outputs["c"]) * kl_weight
-
-        return {"prediction_loss": recon_loss, "kl_loss": kld_loss}
+        return self.prior.kl_loss(outputs["q_params"], inputs=outputs["c"])
 
 
 def main():

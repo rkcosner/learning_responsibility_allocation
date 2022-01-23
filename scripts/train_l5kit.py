@@ -235,5 +235,10 @@ if __name__ == "__main__":
     if args.wandb_project_name is not None:
         default_config.train.logging.wandb_project_name = args.wandb_project_name
 
+    if args.debug:
+        # Test policy rollout
+        default_config.train.rollout.every_n_steps = 10
+        default_config.train.rollout.num_episodes = 1
+
     default_config.lock()  # Make config read-only
     main(default_config, auto_remove_exp_dir=args.remove_exp_dir, debug=args.debug)
