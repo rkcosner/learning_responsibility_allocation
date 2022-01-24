@@ -223,8 +223,7 @@ class CVAE(nn.Module):
             q_net: nn.Module,
             c_net: nn.Module,
             decoder: nn.Module,
-            prior: Prior,
-            target_criterion: nn.Module
+            prior: Prior
     ):
         """
         A basic Conditional Variational Autoencoder Network (C-VAE)
@@ -234,27 +233,29 @@ class CVAE(nn.Module):
             c_net (nn.Module): a model that encodes condition inputs (x_c) into condition feature (c)
             decoder (nn.Module): a model that decodes latent (z) and condition feature (c) to data (x')
             prior (nn.Module): a model containing information about distribution prior (kl-loss, prior params, etc.)
-            target_criterion (nn.Module): a loss function for target reconstruction
         """
         super(CVAE, self).__init__()
         self.q_net = q_net
         self.c_net = c_net
         self.decoder = decoder
         self.prior = prior
-        self.target_criterion = target_criterion
 
-    def sample(self, condition_inputs, n: int):
+    def sample(self, condition_inputs, n: int, condition_feature=None):
         """
         Draw data samples (x') given a batch of condition inputs (x_c) and the VAE prior.
 
         Args:
             condition_inputs (dict, torch.Tensor): condition inputs (x_c)
             n (int): number of samples to draw
+            condition_feature (torch.Tensor): Optional - externally supply condition code (c)
 
         Returns:
             dictionary of batched samples (x') of size [B, n, ...]
         """
-        c = self.c_net(condition_inputs)  # [B, ...]
+        if condition_feature is not None:
+            c = condition_feature
+        else:
+            c = self.c_net(condition_inputs)  # [B, ...]
         z = self.prior.sample(n=n, inputs=c)  # z of shape [B (from c), N, ...]
         z_samples = TensorUtils.join_dimensions(z, begin_axis=0, end_axis=2)  # [B * N, ...]
         c_samples = TensorUtils.repeat_by_expand_at(c, repeats=n, dim=0)  # [B * N, ...]
@@ -262,18 +263,23 @@ class CVAE(nn.Module):
         x_out = TensorUtils.reshape_dimensions(x_out, begin_axis=0, end_axis=1, target_dims=(c.shape[0], n))
         return x_out
 
-    def predict(self, condition_inputs):
+    def predict(self, condition_inputs, condition_feature=None):
         """
         Generate a prediction based on latent prior (instead of sample) and condition inputs
 
         Args:
             condition_inputs (dict, torch.Tensor): condition inputs (x_c)
+            condition_feature (torch.Tensor): Optional - externally supply condition code (c)
 
         Returns:
             dictionary of batched predictions (x') of size [B, ...]
 
         """
-        c = self.c_net(condition_inputs)  # [B, ...]
+        if condition_feature is not None:
+            c = condition_feature
+        else:
+            c = self.c_net(condition_inputs)  # [B, ...]
+
         prior_params = self.prior(c)  # [B, ...]
         mu = self.prior.get_mean(prior_params)  # [B, ...]
         x_out = self.decoder(latents=mu, condition_features=c)

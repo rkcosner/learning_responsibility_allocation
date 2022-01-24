@@ -178,7 +178,8 @@ class L5VAETrafficModel(pl.LightningModule):
         pout = self.nets["policy"](batch)
         losses = self.nets["policy"].compute_losses(pout, batch)
         # take samples to measure trajectory diversity
-        samples = self.nets["policy"].sample(batch, n=self.algo_config.vae.num_eval_samples)
+        with torch.no_grad():
+            samples = self.nets["policy"].sample(batch, n=self.algo_config.vae.num_eval_samples)
         total_loss = 0.0
         for lk, l in losses.items():
             loss = l * self.algo_config.loss_weights[lk]
@@ -187,14 +188,15 @@ class L5VAETrafficModel(pl.LightningModule):
 
         metrics = self._compute_metrics(pout, samples, batch)
         for mk, m in metrics.items():
-            self.log("train/metrics_" + mk, m, prog_bar=True)
+            self.log("train/metrics_" + mk, m)
 
         return total_loss
 
     def validation_step(self, batch, batch_idx):
         pout = self.nets["policy"](batch)
         losses = TensorUtils.detach(self.nets["policy"].compute_losses(pout, batch))
-        samples = self.nets["policy"].sample(batch, n=self.algo_config.vae.num_eval_samples)
+        with torch.no_grad():
+            samples = self.nets["policy"].sample(batch, n=self.algo_config.vae.num_eval_samples)
         metrics = self._compute_metrics(pout, samples, batch)
         return {"losses": losses, "metrics": metrics}
 
