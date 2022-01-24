@@ -8,6 +8,7 @@ import subprocess
 import shutil
 from pathlib import Path
 
+import tbsim
 from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.configs.base import ExperimentConfig
 
@@ -182,6 +183,20 @@ def launch_experiments_ngc(script_path, cfgs, cfg_paths, ngc_config):
         ]
         print(cmd)
         subprocess.run(cmd)
+
+
+def upload_codebase_to_ngc_workspace(ngc_config):
+    ngc_path = os.path.join(ngc_config["workspace_mounting_point_local"], "tbsim/")
+    local_path = Path(tbsim.__path__[0]).parent
+    assert os.path.exists(ngc_path), "please mount NGC path first"
+    dir_list = ["scripts/", "tbsim/"]
+    for d in dir_list:
+        print("uploading {}".format(d))
+        shutil.copytree(os.path.join(local_path, d), os.path.join(ngc_path, d), dirs_exist_ok=True)
+    file_list = ["setup.py"]
+    for f in file_list:
+        print("uploading {}".format(f))
+        shutil.copy(os.path.join(local_path, f), os.path.join(ngc_path, f))
 
 
 def launch_experiments_local(script_path, cfgs, cfg_paths, extra_args = []):

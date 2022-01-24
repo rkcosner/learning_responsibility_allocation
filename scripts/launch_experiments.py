@@ -2,7 +2,12 @@ import argparse
 import json
 import os
 
-from tbsim.utils.experiment_utils import read_configs, launch_experiments_ngc, launch_experiments_local
+from tbsim.utils.experiment_utils import (
+    read_configs,
+    launch_experiments_ngc,
+    launch_experiments_local,
+    upload_codebase_to_ngc_workspace
+)
 from tbsim.configs.registry import get_registered_experiment_config
 
 
@@ -31,7 +36,7 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--ngc",
+        "--local",
         action="store_true",
         help="(optional) if launching experiment on ngc"
     )
@@ -39,7 +44,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--ngc_config",
         type=str,
-        help="path to ngc config"
+        help="path to your ngc config file",
+        default="ngc/ngc_config.json"
     )
 
     parser.add_argument(
@@ -76,11 +82,15 @@ if __name__ == "__main__":
     else:
         cfgs, cfg_fns = read_configs(args.config_dir)
 
-    if args.ngc:
+    if args.local:
+        launch_experiments_local(args.script_path, cfgs, cfg_fns)
+    else:
         ngc_cfg = json.load(open(args.ngc_config, "r"))
         ngc_cfg["wandb_apikey"] = os.environ["WANDB_APIKEY"]
         ngc_cfg["wandb_project_name"] = args.wandb_project_name
         ngc_cfg["instance"] = args.ngc_instance
+        res = input("upload codebase to ngc workspace? (y/n)")
+        if res == "y":
+            print("uploading codebase ... (this may take a while)")
+            upload_codebase_to_ngc_workspace(ngc_cfg)
         launch_experiments_ngc(args.script_path, cfgs, cfg_fns, ngc_config=ngc_cfg)
-    else:
-        launch_experiments_local(args.script_path, cfgs, cfg_fns)
