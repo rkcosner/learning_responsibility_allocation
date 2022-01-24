@@ -80,34 +80,39 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
     model = algo_factory(algo_config=cfg.algo, modality_shapes=datamodule.modality_shapes, **model_kwargs)
 
     # Checkpointing
-    assert cfg.train.save.every_n_steps > cfg.train.validation.every_n_steps, \
-        "checkpointing frequency needs to be greater than rollout frequency"
-    ckpt_ade_callback = pl.callbacks.ModelCheckpoint(
-        dirpath=ckpt_dir,
-        filename="iter{step}_ep{epoch}_simADE{rollout/metrics_ego_ADE:.2f}",
-        # explicitly spell out metric names, otherwise PL parses '/' in metric names to directories
-        auto_insert_metric_name=False,
-        save_top_k=cfg.train.save.best_k,  # save the best k models
-        monitor="rollout/metrics_ego_ADE",
-        mode="min",
-        every_n_train_steps=cfg.train.save.every_n_steps,
-        verbose=True,
-    )
-    assert cfg.train.save.every_n_steps > cfg.train.rollout.every_n_steps, \
-        "checkpointing frequency needs to be greater than rollout frequency"
-    ckpt_loss_callback = pl.callbacks.ModelCheckpoint(
-        dirpath=ckpt_dir,
-        filename="iter{step}_ep{epoch}_valLoss{val/losses_prediction_loss:.2f}",
-        # explicitly spell out metric names, otherwise PL parses '/' in metric names to directories
-        auto_insert_metric_name=False,
-        save_top_k=cfg.train.save.best_k,  # save the best k models
-        monitor="val/losses_prediction_loss",
-        mode="min",
-        every_n_train_steps=cfg.train.save.every_n_steps,
-        verbose=True,
-    )
+    if cfg.train.save.save_best_validation:
+        assert cfg.train.validation.enabled
+        assert cfg.train.save.every_n_steps > cfg.train.validation.every_n_steps, \
+            "checkpointing frequency needs to be greater than validation frequency"
+        ckpt_valid_callback = pl.callbacks.ModelCheckpoint(
+            dirpath=ckpt_dir,
+            filename="iter{step}_ep{epoch}_valLoss{val/losses_prediction_loss:.2f}",
+            # explicitly spell out metric names, otherwise PL parses '/' in metric names to directories
+            auto_insert_metric_name=False,
+            save_top_k=cfg.train.save.best_k,  # save the best k models
+            monitor="val/losses_prediction_loss",
+            mode="min",
+            every_n_train_steps=cfg.train.save.every_n_steps,
+            verbose=True,
+        )
+        train_callbacks.append(ckpt_valid_callback)
 
-    train_callbacks.extend([ckpt_ade_callback, ckpt_loss_callback])
+    if cfg.train.save.save_best_rollout:
+        assert cfg.train.rollout.enabled
+        assert cfg.train.save.every_n_steps > cfg.train.rollout.every_n_steps, \
+            "checkpointing frequency needs to be greater than rollout frequency"
+        ckpt_rollout_callback = pl.callbacks.ModelCheckpoint(
+            dirpath=ckpt_dir,
+            filename="iter{step}_ep{epoch}_simADE{rollout/metrics_ego_ADE:.2f}",
+            # explicitly spell out metric names, otherwise PL parses '/' in metric names to directories
+            auto_insert_metric_name=False,
+            save_top_k=cfg.train.save.best_k,  # save the best k models
+            monitor="rollout/metrics_ego_ADE",
+            mode="min",
+            every_n_train_steps=cfg.train.save.every_n_steps,
+            verbose=True,
+        )
+        train_callbacks.append(ckpt_rollout_callback)
 
     # Logging
     assert not (cfg.train.logging.log_tb and cfg.train.logging.log_wandb)
