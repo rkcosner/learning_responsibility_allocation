@@ -261,8 +261,8 @@ class RasterizedVAEModel(nn.Module):
         )
 
     def _traj_to_preds(self, traj):
-        pred_positions = traj[:, :, :2]
-        pred_yaws = traj[:, :, 2:3]
+        pred_positions = traj[..., :2]
+        pred_yaws = traj[..., 2:3]
         return {
             "trajectories": traj,
             "predictions": {"positions": pred_positions, "yaws": pred_yaws}

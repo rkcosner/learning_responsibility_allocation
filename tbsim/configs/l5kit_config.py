@@ -240,6 +240,7 @@ class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
         self.map_feature_dim = 256
         self.vae.latent_dim = 2
         self.vae.condition_dim = 128
+        self.vae.num_eval_samples = 10
         self.vae.encoder.rnn_hidden_size = 100
         self.vae.encoder.mlp_layer_dims = (128, 128)
         self.vae.decoder.rnn_hidden_size = 100

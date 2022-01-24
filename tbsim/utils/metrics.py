@@ -216,6 +216,67 @@ def batch_final_displacement_error(
     return error
 
 
+def batch_average_diversity(
+        ground_truth: np.ndarray, pred: np.ndarray, confidences: np.ndarray, avails: np.ndarray, mode: str="max"
+) -> np.ndarray:
+    """
+    Compute the distance among trajectory samples averaged across time steps
+    Args:
+        ground_truth (np.ndarray): array of shape (batch)x(time)x(2D coords)
+        pred (np.ndarray): array of shape (batch)x(modes)x(time)x(2D coords)
+        confidences (np.ndarray): array of shape (batch)x(modes) with a confidence for each mode in each sample
+        avails (np.ndarray): array of shape (batch)x(time) with the availability for each gt timestep
+        mode (str): calculation mode: option are "mean" (average distance) and "max" (distance between
+            the two most distinctive samples).
+    Returns:
+        np.ndarray: average displacement error (ADE) of the batch, an array of float numbers
+    """
+    _assert_shapes(ground_truth, pred, confidences, avails)
+    # compute pairwise distances
+    error = np.linalg.norm(pred[:, np.newaxis, :] - pred[:, :, np.newaxis], axis=-1)  # [B, M, M, T]
+    error = np.mean(error, axis=-1)  # average over timesteps
+    error = error.reshape([error.shape[0], -1])  # [B, M * M]
+    if mode == "max":
+        error = np.max(error, axis=-1)
+    elif mode == "mean":
+        error = np.mean(error, axis=-1)
+    else:
+        raise ValueError(f"mode: {mode} not valid")
+
+    return error
+
+
+def batch_final_diversity(
+        ground_truth: np.ndarray, pred: np.ndarray, confidences: np.ndarray, avails: np.ndarray, mode: str="max"
+) -> np.ndarray:
+    """
+    Compute the distance among trajectory samples at the last timestep
+    Args:
+        ground_truth (np.ndarray): array of shape (batch)x(time)x(2D coords)
+        pred (np.ndarray): array of shape (batch)x(modes)x(time)x(2D coords)
+        confidences (np.ndarray): array of shape (batch)x(modes) with a confidence for each mode in each sample
+        avails (np.ndarray): array of shape (batch)x(time) with the availability for each gt timestep
+        mode (str): calculation mode: option are "mean" (average distance) and "max" (distance between
+            the two most distinctive samples).
+    Returns:
+        np.ndarray: average displacement error (ADE) of the batch, an array of float numbers
+    """
+    _assert_shapes(ground_truth, pred, confidences, avails)
+    # compute pairwise distances at the last time step
+    pred = pred[..., -1]
+    error = np.linalg.norm(pred[:, np.newaxis, :] - pred[:, :, np.newaxis], axis=-1)  # [B, M, M]
+    error = error.reshape([error.shape[0], -1])  # [B, M * M]
+    if mode == "max":
+        error = np.max(error, axis=-1)
+    elif mode == "mean":
+        error = np.mean(error, axis=-1)
+    else:
+        raise ValueError(f"mode: {mode} not valid")
+
+    return error
+
+
+
 def single_mode_metrics(metrics_func, ground_truth: np.ndarray, pred: np.ndarray, avails: np.ndarray):
     """
     Run a metrics with single mode by inserting a mode dimension
