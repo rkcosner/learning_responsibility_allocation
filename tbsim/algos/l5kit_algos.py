@@ -58,6 +58,27 @@ class L5TrafficModel(pl.LightningModule):
 
         metrics["ego_ADE"] = np.mean(ade)
         metrics["ego_FDE"] = np.mean(fde)
+
+        targets_all = L5Utils.batch_to_target_all_agents(data_batch)
+        raw_type = torch.cat(
+            (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
+            dim=1,
+        ).type(torch.int64)
+
+        # Use predicted ego position to compute future box edges
+        # targets_all["target_positions"] [:, 0, :, :] = pred_batch["predictions"]["positions"]
+        # targets_all["target_yaws"][:, 0, :, :] = pred_batch["predictions"]["yaws"]
+
+        pred_edges = L5Utils.generate_edges(
+            raw_type, targets_all["extents"],
+            pos_pred=targets_all["target_positions"],
+            yaw_pred=targets_all["target_yaws"]
+        )
+
+        coll_rates = TensorUtils.to_numpy(Metrics.batch_pairwise_collision_rate(pred_edges))
+        for c in coll_rates:
+            metrics["coll_" + c] = coll_rates[c]
+
         return metrics
 
     def training_step(self, batch, batch_idx):

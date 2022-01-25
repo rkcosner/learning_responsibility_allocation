@@ -4,8 +4,15 @@ Adapted from https://github.com/lyft/l5kit/blob/master/l5kit/l5kit/evaluation/me
 
 
 from typing import Callable
-
+import torch
 import numpy as np
+
+from tbsim.utils.geometry_utils import (
+    VEH_VEH_collision,
+    VEH_PED_collision,
+    PED_VEH_collision,
+    PED_PED_collision,
+)
 
 
 metric_signature = Callable[[np.ndarray, np.ndarray, np.ndarray, np.ndarray], np.ndarray]
@@ -294,3 +301,38 @@ def single_mode_metrics(metrics_func, ground_truth: np.ndarray, pred: np.ndarray
     conf = np.ones((pred.shape[0], 1))
     kwargs = dict(ground_truth=ground_truth, pred=pred, confidences=conf, avails=avails)
     return metrics_func(**kwargs)
+
+
+def batch_pairwise_collision_rate(agent_edges, collision_funcs=None):
+    """
+    Count number of collisions among edge pairs in a batch
+    Args:
+        agent_edges (dict): A dict that maps collision types to box locations
+        collision_funcs (dict): A dict of collision functions (implemented in tbsim.utils.geometric_utils)
+
+    Returns:
+        collision loss (torch.Tensor)
+    """
+    if collision_funcs is None:
+        collision_funcs = {
+            "VV": VEH_VEH_collision,
+            "VP": VEH_PED_collision,
+            "PV": PED_VEH_collision,
+            "PP": PED_PED_collision,
+        }
+
+    coll_rates = {}
+    for et, fun in collision_funcs.items():
+        edges = agent_edges[et]
+        dis = fun(
+            edges[..., 0:3],
+            edges[..., 3:6],
+            edges[..., 6:8],
+            edges[..., 8:],
+        )
+        dis = dis.min(-1)[0]  # reduction over time
+        if isinstance(dis, np.ndarray):
+            coll_rates[et] = np.sum(dis <= 0) / float(dis.shape[0])
+        else:
+            coll_rates[et] = torch.sum(dis <= 0) / float(dis.shape[0])
+    return coll_rates
