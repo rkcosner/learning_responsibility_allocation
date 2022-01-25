@@ -10,6 +10,7 @@ from tbsim.models.l5kit_models import RasterizedPlanningModel, MLPTrajectoryDeco
 from tbsim.models.transformer_model import TransformerModel
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.metrics as Metrics
+import tbsim.utils.l5_utils as L5Utils
 
 
 class L5TrafficModel(pl.LightningModule):
@@ -217,13 +218,16 @@ class L5VAETrafficModel(pl.LightningModule):
             weight_decay=optim_params["regularization"]["L2"],
         )
 
-    def get_action(self, obs_dict, sample=True):
+    def get_action(self, obs_dict, sample=True, num_viz_samples=10):
         if sample:
             preds = self.nets["policy"].sample(obs_dict["ego"], n=1)["predictions"]  # [B, 1, T, 3]
             preds = TensorUtils.squeeze(preds, dim=1)
         else:
             preds = self.nets["policy"].predict(obs_dict["ego"])["predictions"]
-        return {"ego": preds}
+
+        # get trajectory samples for visualization purposes
+        ego_samples = self.nets["policy"].sample(obs_dict["ego"], n=num_viz_samples)["predictions"]
+        return {"ego": preds, "ego_samples": ego_samples}
 
 
 class L5TransformerTrafficModel(pl.LightningModule):

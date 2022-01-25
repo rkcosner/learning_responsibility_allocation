@@ -173,7 +173,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                 - agents_control (Dict): a dictionary containing future agent positions and orientations for all scenes
         """
         for k in actions:
-            assert k in ["ego", "agents"]
+            assert k in ["ego", "agents", "ego_samples", "agents_samples"]
 
         if self._done:
             raise SimulationException("Simulation episode has ended")
@@ -199,7 +199,12 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             ego_in_out = ClosedLoopSimulator.get_ego_in_out(
                 obs["ego"], ego_control, keys_to_exclude=set(("image",))
             )
-            for scene_idx in self._current_scene_indices:
+            for i, scene_idx in enumerate(self._current_scene_indices):
+                # If applicable, insert prediction samples for visualization purposes
+                if "ego_samples" in actions:
+                    ego_in_out[scene_idx].outputs["samples"] = dict()
+                    for k in actions["ego_samples"]:
+                        ego_in_out[scene_idx].outputs["samples"][k] = actions["ego_samples"][k][i]
                 self._ego_states[scene_idx].append(ego_in_out[scene_idx])
 
         if agents_control is not None:
@@ -214,7 +219,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             agents_in_out = ClosedLoopSimulator.get_agents_in_out(
                 obs["agents"], agents_control, keys_to_exclude=set(("image",))
             )
-            for scene_idx in self._current_scene_indices:
+            for i, scene_idx in enumerate(self._current_scene_indices):
                 self._agents_states[scene_idx].append(agents_in_out.get(scene_idx, []))
 
         # TODO: accumulate sim trajectories
