@@ -256,8 +256,7 @@ class RasterizedVAEModel(nn.Module):
             q_net=q_encoder,
             c_net=c_encoder,
             decoder=decoder,
-            prior=prior,
-            target_criterion=nn.MSELoss(reduction="none")
+            prior=prior
         )
 
     def _traj_to_preds(self, traj):
