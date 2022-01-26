@@ -213,6 +213,51 @@ class RasterizedPlanningModel(nn.Module):
         return losses
 
 
+class RasterizedGCModel(RasterizedPlanningModel):
+    def __init__(
+            self,
+            model_arch: str,
+            num_input_channels: int,
+            map_feature_dim: int,
+            goal_feature_dim: int,
+            weights_scaling: List[float],
+            trajectory_decoder: nn.Module,
+    ) -> None:
+        super(RasterizedGCModel, self).__init__(
+            model_arch=model_arch,
+            num_input_channels=num_input_channels,
+            map_feature_dim=map_feature_dim,
+            weights_scaling=weights_scaling,
+            trajectory_decoder=trajectory_decoder
+        )
+
+        self.goal_encoder = MLP(
+            input_dim=trajectory_decoder.state_dim,
+            output_dim=goal_feature_dim,
+            output_activation=nn.ReLU
+        )
+
+    def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        image_batch = data_batch["image"]
+        map_feat = self.map_encoder(image_batch)
+        target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=2)
+        goal_state = target_traj[:, -1]
+        goal_feat = self.goal_encoder(goal_state)
+        input_feat = torch.cat((map_feat, goal_feat), dim=-1)
+
+        curr_states = torch.zeros(image_batch.shape[0], 4).to(image_batch.device)  # [x, y, vel, yaw]
+        curr_states[:, 2] = data_batch["curr_speed"]
+        traj = self.traj_decoder.forward(inputs=input_feat, current_states=curr_states)["trajectories"]
+
+        pred_positions = traj[:, :, :2]
+        pred_yaws = traj[:, :, 2:3]
+        out_dict = {
+            "trajectories": traj,
+            "predictions": {"positions": pred_positions, "yaws": pred_yaws}
+        }
+        return out_dict
+
+
 class RasterizedVAEModel(nn.Module):
     def __init__(self, algo_config, modality_shapes, weights_scaling):
         super(RasterizedVAEModel, self).__init__()

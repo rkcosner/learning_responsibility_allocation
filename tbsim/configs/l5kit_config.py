@@ -233,6 +233,14 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.optim_params.policy.regularization.L2 = 0.00  # L2 regularization strength
 
 
+class L5RasterizedGCConfig(L5RasterizedPlanningConfig):
+    def __init__(self):
+        super(L5RasterizedGCConfig, self).__init__()
+        self.name = "l5_rasterized_gc"
+        self.goal_feature_dim = 32
+        self.decoder.layer_dims = (128, 128)
+
+
 class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(L5RasterizedVAEConfig, self).__init__()

@@ -6,6 +6,7 @@ from tbsim.configs.l5kit_config import (
     L5KitMixedTrainConfig,
     L5KitEnvConfig,
     L5RasterizedPlanningConfig,
+    L5RasterizedGCConfig,
     L5TransformerPredConfig,
     L5KitVectorizedEnvConfig,
     L5KitMixedEnvConfig,
@@ -19,6 +20,13 @@ EXP_CONFIG_REGISTRY["l5_rasterized_plan"] = ExperimentConfig(
     env_config=L5KitEnvConfig(),
     algo_config=L5RasterizedPlanningConfig(),
     registered_name="l5_rasterized_plan"
+)
+
+EXP_CONFIG_REGISTRY["l5_mixed_gc"] = ExperimentConfig(
+    train_config=L5KitMixedTrainConfig(),
+    env_config=L5KitMixedEnvConfig(),
+    algo_config=L5RasterizedGCConfig(),
+    registered_name="l5_mixed_gc"
 )
 
 EXP_CONFIG_REGISTRY["l5_mixed_plan"] = ExperimentConfig(

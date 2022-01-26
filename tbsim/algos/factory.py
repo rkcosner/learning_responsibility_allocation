@@ -1,6 +1,6 @@
 """Factory methods for creating models"""
 from tbsim.configs.base import AlgoConfig
-from tbsim.algos.l5kit_algos import L5TrafficModel, L5TransformerTrafficModel, L5VAETrafficModel
+from tbsim.algos.l5kit_algos import L5TrafficModel, L5TransformerTrafficModel, L5VAETrafficModel, L5TrafficModelGC
 
 
 def algo_factory(algo_config: AlgoConfig, modality_shapes, **kwargs):
@@ -19,6 +19,8 @@ def algo_factory(algo_config: AlgoConfig, modality_shapes, **kwargs):
 
     if algo_name == "l5_rasterized":
         algo = L5TrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
+    elif algo_name == "l5_rasterized_gc":
+        algo = L5TrafficModelGC(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "l5_rasterized_vae":
         algo = L5VAETrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "TransformerPred":
