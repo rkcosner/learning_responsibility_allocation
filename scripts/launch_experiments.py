@@ -69,8 +69,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.config_name is not None:
         cfg = get_registered_experiment_config(args.config_name)
+        cfg.name = args.config_name
         cfgs = [cfg]
-        cfg_fn = os.path.join(args.config_dir, "/{}.json".format(cfg.name))
+        cfg_fn = os.path.join(args.config_dir, "{}.json".format(cfg.name))
         cfg.dump(filename=cfg_fn)
         cfg_fns = [cfg_fn]
     elif args.config_file is not None:

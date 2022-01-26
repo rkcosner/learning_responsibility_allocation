@@ -1,6 +1,7 @@
 import json
 import os
 import itertools
+import sys
 from collections import namedtuple
 from typing import List
 from glob import glob
@@ -10,6 +11,7 @@ from pathlib import Path
 
 import tbsim
 from tbsim.configs.registry import get_registered_experiment_config
+from tbsim.configs.config import Dict
 from tbsim.configs.base import ExperimentConfig
 
 
@@ -148,7 +150,18 @@ def read_configs(config_dir):
     return configs, config_fns
 
 
-def launch_experiments_ngc(script_path, cfgs, cfg_paths, ngc_config):
+def launch_experiments_ngc(script_path: str, cfgs: List[Dict], cfg_paths: List[str], ngc_config: dict):
+    """
+    Launch one or more experiments on NGC
+    Args:
+        script_path (str): local path to the training script (e.g., scripts/train.py)
+        cfgs (List[Dict]): list of configs to launch experiments with
+        cfg_paths (List[str]): list of path to the config files (for copying to NGC workspace)
+        ngc_config (dict): ngc experiment configuration
+
+    Returns:
+        None
+    """
     for cfg, cpath in zip(cfgs, cfg_paths):
         ngc_cpath = os.path.join(ngc_config["workspace_mounting_point_local"], "tbsim/", cpath)
         ngc_cdir = Path(ngc_cpath).parent
@@ -186,6 +199,12 @@ def launch_experiments_ngc(script_path, cfgs, cfg_paths, ngc_config):
 
 
 def upload_codebase_to_ngc_workspace(ngc_config):
+    """
+    Upload local codebase to NGC workspace
+    Args:
+        ngc_config (dict): NGC config
+
+    """
     ngc_path = os.path.join(ngc_config["workspace_mounting_point_local"], "tbsim/")
     local_path = Path(tbsim.__path__[0]).parent
     assert os.path.exists(ngc_path), "please mount NGC path first"
@@ -203,3 +222,92 @@ def launch_experiments_local(script_path, cfgs, cfg_paths, extra_args = []):
     for cfg, cpath in zip(cfgs, cfg_paths):
         cmd = ["python", script_path, "--config_file", cpath] + extra_args
         subprocess.run(cmd)
+
+
+def get_results_info_ngc(ngc_job_id):
+    cmd = ['ngc', 'result', 'info', str(ngc_job_id), '--files']
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    outs, errs = process.communicate()
+    if len(errs) > 0:
+        print(str(errs))
+        return None
+    outs = str(outs).split("\\n")
+    ckpt_paths = [l.strip(" ") for l in outs if l.endswith(".ckpt")]
+    cfg_path = [l.strip(" ") for l in outs if l.endswith(".json")]
+    assert len(cfg_path) == 1
+    cfg_path = cfg_path[0]
+    job_name = cfg_path.split('/')[1]
+    return ckpt_paths, cfg_path, job_name
+
+
+def _download_from_ngc(ngc_job_id, paths_to_download, target_dir, tmp_dir="/tmp"):
+    cmd = ["ngc", "result", "download", str(ngc_job_id)]
+    print("Downloading: ")
+    for fp in paths_to_download:
+        print(fp)
+        cmd.extend(["--file", fp])
+
+    cmd.extend(["--dest", tmp_dir])
+    subprocess.run(cmd)
+
+    os.makedirs(target_dir, exist_ok=True)
+
+    for fp in paths_to_download:
+        src_path = os.path.join(tmp_dir, ngc_job_id + fp)
+        shutil.move(src_path, target_dir)
+
+    shutil.rmtree(os.path.join(tmp_dir, ngc_job_id + "/"))
+
+
+def download_checkpoints_from_ngc(ngc_job_id, ckpt_root_dir, ckpt_path_func=None, tmp_dir='/tmp'):
+    assert os.path.exists(ckpt_root_dir)
+    ckpt_paths, cfg_path, job_name = get_results_info_ngc(ngc_job_id)
+
+    if ckpt_path_func is None:
+        ckpt_path_func = lambda x: x
+    to_download = ckpt_path_func(ckpt_paths)
+    to_download.append(cfg_path)
+    ckpt_target_dir = os.path.join(ckpt_root_dir, "{}_{}".format(job_name, ngc_job_id))
+
+    _download_from_ngc(ngc_job_id, to_download, ckpt_target_dir, tmp_dir=tmp_dir)
+    return ckpt_target_dir
+
+
+def get_local_checkpoint_dir(ngc_job_id, ckpt_root_dir):
+    for p in glob(ckpt_root_dir + "/*"):
+        if str(ngc_job_id) == p.split("_")[-1]:
+            return p
+    return None
+
+
+def get_checkpoint(ngc_job_id, ckpt_key, ckpt_root_dir="checkpoints/", download_tmp_dir="/tmp"):
+    ckpt_path_func = lambda paths: [p for p in paths if ckpt_key in p]
+    local_dir = get_local_checkpoint_dir(ngc_job_id, ckpt_root_dir)
+    if local_dir is None:
+        print("checkpoint does not exist, downloading ...")
+        ckpt_dir = download_checkpoints_from_ngc(
+            ngc_job_id=ngc_job_id,
+            ckpt_root_dir=ckpt_root_dir,
+            ckpt_path_func=ckpt_path_func,
+            tmp_dir=download_tmp_dir
+        )
+    else:
+        ckpt_paths = glob(local_dir + "/*.ckpt")
+        if len(ckpt_path_func(ckpt_paths)) == 0:
+            print("checkpoint does not exist, downloading ...")
+            ckpt_dir = download_checkpoints_from_ngc(
+                ngc_job_id=ngc_job_id,
+                ckpt_root_dir=ckpt_root_dir,
+                ckpt_path_func=ckpt_path_func,
+                tmp_dir=download_tmp_dir
+            )
+        else:
+            ckpt_dir = local_dir
+    ckpt_paths = ckpt_path_func(glob(ckpt_dir + "/*.ckpt"))
+    assert len(ckpt_paths) > 0, "Could not find a checkpoint that has key {}".format(ckpt_key)
+    assert len(ckpt_paths) == 1, "More than one checkpoint found"
+    return ckpt_paths[0]
+
+
+if __name__ == "__main__":
+    print(get_checkpoint("2546043", ckpt_key="iter87999_"))
