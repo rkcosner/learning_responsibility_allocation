@@ -6,13 +6,16 @@ import pdb
 
 
 class Unicycle(Dynamics):
-    def __init__(self, name, max_steer=0.5, max_yawvel=8, acce_bound=(-6, 4)):
+    def __init__(
+        self, name, max_steer=0.5, max_yawvel=8, acce_bound=[-6, 4], vbound=[-10, 30]
+    ):
         self._name = name
         self._type = DynType.UNICYCLE
         self.xdim = 4
         self.udim = 2
         self.cyclic_state = [3]
         self.acce_bound = acce_bound
+        self.vbound = vbound
         self.max_steer = max_steer
         self.max_yawvel = max_yawvel
 
@@ -42,6 +45,7 @@ class Unicycle(Dynamics):
             if bound:
                 lb, ub = self.ubound(x)
                 u = np.clip(u, lb, ub)
+
             theta = x[..., 3:4]
             dxdt = np.hstack(
                 (
@@ -54,7 +58,9 @@ class Unicycle(Dynamics):
             assert isinstance(u, torch.Tensor)
             if bound:
                 lb, ub = self.ubound(x)
-                u = torch.clip(u, min=lb, max=ub)
+                s = (u - lb) / torch.clip(ub - lb, min=1e-3)
+                u = lb + (ub - lb) * torch.sigmoid(s)
+
             theta = x[..., 3:4]
             dxdt = torch.cat(
                 (
@@ -81,8 +87,18 @@ class Unicycle(Dynamics):
                 self.max_steer * v,
                 self.max_yawvel / np.clip(np.abs(v), a_min=0.1, a_max=None),
             )
-            lb = np.hstack((np.ones_like(v) * self.acce_bound[0], -yawbound))
-            ub = np.hstack((np.ones_like(v) * self.acce_bound[1], yawbound))
+            acce_lb = np.clip(
+                np.clip(self.vbound[0] - v, None, self.acce_bound[1]),
+                self.acce_bound[0],
+                None,
+            )
+            acce_ub = np.clip(
+                np.clip(self.vbound[1] - v, self.acce_bound[0], None),
+                None,
+                self.acce_bound[1],
+            )
+            lb = np.hstack((acce_lb, -yawbound))
+            ub = np.hstack((acce_ub, yawbound))
             return lb, ub
         elif isinstance(x, torch.Tensor):
             v = x[..., 2:3]
@@ -91,9 +107,18 @@ class Unicycle(Dynamics):
                 self.max_yawvel / torch.clip(torch.abs(v), min=0.1),
             )
             yawbound = torch.clip(yawbound, min=0.1)
-            lb = torch.cat((torch.ones_like(v) * self.acce_bound[0], -yawbound), dim=-1)
-            ub = torch.cat((torch.ones_like(v) * self.acce_bound[1], yawbound), dim=-1)
+            acce_lb = torch.clip(
+                torch.clip(self.vbound[0] - v, max=self.acce_bound[1]),
+                min=self.acce_bound[0],
+            )
+            acce_ub = torch.clip(
+                torch.clip(self.vbound[1] - v, min=self.acce_bound[0]),
+                max=self.acce_bound[1],
+            )
+            lb = torch.cat((acce_lb, -yawbound), dim=-1)
+            ub = torch.cat((acce_ub, yawbound), dim=-1)
             return lb, ub
+
         else:
             raise NotImplementedError
 

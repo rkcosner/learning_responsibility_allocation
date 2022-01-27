@@ -14,11 +14,13 @@ class DynType:
     UNICYCLE = 1
     SI = 2
     DI = 3
+    BICYCLE = 4
 
 
 class Dynamics(abc.ABC):
     @abc.abstractmethod
     def __init__(self, name, **kwargs):
+        self._name = name
         self.xdim = 4
         self.udim = 2
 
@@ -32,7 +34,7 @@ class Dynamics(abc.ABC):
 
     @abc.abstractmethod
     def name(self):
-        return
+        return self._name
 
     @abc.abstractmethod
     def type(self):

@@ -1,3 +1,5 @@
+import math
+
 from tbsim.configs.base import TrainConfig, EnvConfig, AlgoConfig
 
 
@@ -215,8 +217,10 @@ class L5RasterizedPlanningConfig(AlgoConfig):
 
         self.dynamics.type = None
         self.dynamics.max_steer = 0.5
-        self.dynamics.max_yawvel = 8.0
-        self.dynamics.acce_bound = (-6, 4)
+        self.dynamics.max_yawvel = math.pi * 2.0
+        self.dynamics.acce_bound = (-10, 8)
+        self.dynamics.ddh_bound = (-math.pi * 2.0, math.pi * 2.0)
+        self.dynamics.max_speed = 40.0   # roughly 90mph
         self.dynamics.predict_current_states = False
 
         self.loss_weights.prediction_loss = 1.0

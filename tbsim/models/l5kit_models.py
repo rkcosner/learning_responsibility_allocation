@@ -41,7 +41,7 @@ def forward_dynamics(
     for t in range(num_steps):
         x[t + 1] = (
                 dyn_model.step(
-                    x[t], actions[..., t, :], step_time, bound=True
+                    x[t], actions[..., t, :], step_time
                 )
         )
 
@@ -164,8 +164,18 @@ class RasterizedPlanningModel(nn.Module):
         image_batch = data_batch["image"]
         map_feat = self.map_encoder(image_batch)
 
-        curr_states = torch.zeros(image_batch.shape[0], 4).to(image_batch.device)  # [x, y, vel, yaw]
-        curr_states[:, 2] = data_batch["curr_speed"]
+        if self.traj_decoder.dyn is not None:
+            if self.traj_decoder.dyn.type() == dynamics.DynType.BICYCLE:
+                curr_states = torch.zeros(image_batch.shape[0], 6).to(image_batch.device)  # [x, y, yaw, vel, dh, veh_len]
+                curr_states[:, 3] = data_batch["curr_speed"].abs()
+                curr_states[:, [4]] = (data_batch["history_yaws"][:, 0] - data_batch["history_yaws"][:, 1]).abs()
+                curr_states[:, 5] = data_batch["extent"][:, 0]  # [l, w, h]
+            else:
+                curr_states = torch.zeros(image_batch.shape[0], 4).to(image_batch.device)  # [x, y, vel, yaw]
+                curr_states[:, 2] = data_batch["curr_speed"]
+
+        else:
+            curr_states = None
         traj = self.traj_decoder.forward(inputs=map_feat, current_states=curr_states)["trajectories"]
 
         pred_positions = traj[:, :, :2]
@@ -560,6 +570,13 @@ class TrajectoryDecoder(nn.Module):
                 max_steer=dynamics_kwargs["max_steer"],
                 max_yawvel=dynamics_kwargs["max_yawvel"],
                 acce_bound=dynamics_kwargs["acce_bound"]
+            )
+        elif dynamics_type in ["Bicycle", dynamics.DynType.BICYCLE]:
+            self.dyn = dynamics.Bicycle(
+                acc_bound=dynamics_kwargs["acce_bound"],
+                ddh_bound=dynamics_kwargs["ddh_bound"],
+                max_hdot=dynamics_kwargs["max_yawvel"],
+                max_speed=dynamics_kwargs["max_speed"]
             )
         else:
             self.dyn = None
