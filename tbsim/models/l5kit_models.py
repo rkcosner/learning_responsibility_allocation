@@ -5,6 +5,7 @@ from copy import deepcopy
 
 import torch
 import torch.nn as nn
+import torch.optim as optim
 from torchvision.models.resnet import resnet18, resnet50
 
 from tbsim.models.base_models import SplitMLP, MLP, MIMOMLP
@@ -67,7 +68,7 @@ def trajectory_loss(predictions, targets, availabilities, weights_scaling=None, 
     assert availabilities.shape == predictions.shape[:-1]
     assert predictions.shape == targets.shape
     if weights_scaling is None:
-        weights_scaling = torch.zeros(targets.shape[-1]).to(targets.device)
+        weights_scaling = torch.ones(targets.shape[-1]).to(targets.device)
     assert weights_scaling.shape[-1] == targets.shape[-1]
     target_weights = (availabilities.unsqueeze(-1) * weights_scaling)
     loss = torch.mean(crit(predictions, targets) * target_weights)
@@ -137,6 +138,50 @@ def collision_loss(pred_edges: Dict[str, torch.Tensor], col_funcs=None):
     return coll_loss
 
 
+def optimize_actions(obs_dict: dict, model: nn.Module, step_time: float, num_optim_iteration: int = 50):
+    with torch.no_grad():
+        preds = model(obs_dict)
+
+    pred_controls = preds["controls"]
+    pred_controls.requires_grad = True
+    action_optim = optim.LBFGS([pred_controls], max_iter=20, lr=1.0, line_search_fn='strong_wolfe')
+    curr_states = preds["curr_states"]
+    target_trajectories = torch.cat((obs_dict["target_positions"], obs_dict["target_yaws"]), dim=-1)
+
+    dyn = model.traj_decoder.dyn
+    for oidx in range(num_optim_iteration):
+        def closure():
+            action_optim.zero_grad()
+
+            # get trajectory with current params
+            _, pos, yaw = forward_dynamics(
+                dyn, initial_states=curr_states, actions=pred_controls, step_time=step_time
+            )
+            # measure error from GT pos and heading
+            goal_loss = goal_reaching_loss(
+                predictions=torch.cat((pos, yaw), dim=-1),
+                targets=target_trajectories,
+                availabilities=obs_dict["target_availabilities"]
+            )
+            loss = goal_loss
+
+            # backprop
+            loss.backward()
+            return loss
+        action_optim.step(closure)
+
+    _, final_pos, final_yaw = forward_dynamics(
+        dyn, initial_states=curr_states, actions=pred_controls, step_time=step_time
+    )
+    loss = goal_reaching_loss(
+        predictions=torch.cat((final_pos, final_yaw), dim=-1),
+        targets=target_trajectories,
+        availabilities=obs_dict["target_availabilities"]
+    )
+
+    return dict(positions=final_pos, yaws=final_yaw), loss.item()
+
+
 class RasterizedPlanningModel(nn.Module):
     """Raster-based model for planning.
     """
@@ -176,7 +221,8 @@ class RasterizedPlanningModel(nn.Module):
 
         else:
             curr_states = None
-        traj = self.traj_decoder.forward(inputs=map_feat, current_states=curr_states)["trajectories"]
+        dec_output = self.traj_decoder.forward(inputs=map_feat, current_states=curr_states)
+        traj = dec_output["trajectories"]
 
         pred_positions = traj[:, :, :2]
         pred_yaws = traj[:, :, 2:3]
@@ -184,6 +230,9 @@ class RasterizedPlanningModel(nn.Module):
             "trajectories": traj,
             "predictions": {"positions": pred_positions, "yaws": pred_yaws}
         }
+        if self.traj_decoder.dyn is not None:
+            out_dict["controls"] = dec_output["controls"]
+            out_dict["curr_states"] = curr_states
         return out_dict
 
     def compute_losses(self, pred_batch, data_batch):
@@ -606,6 +655,7 @@ class TrajectoryDecoder(nn.Module):
         if "current_states" in preds:
             current_states = preds["current_states"]
         if self.dyn is not None:
+            preds["controls"] = preds["trajectories"]
             preds["trajectories"] = self._forward_dynamics(
                 current_states=current_states,
                 actions=preds["trajectories"]

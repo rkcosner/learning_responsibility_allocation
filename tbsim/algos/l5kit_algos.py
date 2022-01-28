@@ -6,7 +6,13 @@ import torch.nn as nn
 import torch.optim as optim
 import pytorch_lightning as pl
 
-from tbsim.models.l5kit_models import RasterizedPlanningModel, MLPTrajectoryDecoder, RasterizedVAEModel
+from tbsim.models.l5kit_models import (
+    RasterizedPlanningModel,
+    MLPTrajectoryDecoder,
+    RasterizedVAEModel,
+    RasterizedGCModel,
+    optimize_actions
+)
 from tbsim.models.transformer_model import TransformerModel
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.metrics as Metrics
@@ -65,10 +71,6 @@ class L5TrafficModel(pl.LightningModule):
             dim=1,
         ).type(torch.int64)
 
-        # Use predicted ego position to compute future box edges
-        # targets_all["target_positions"] [:, 0, :, :] = pred_batch["predictions"]["positions"]
-        # targets_all["target_yaws"][:, 0, :, :] = pred_batch["predictions"]["yaws"]
-
         pred_edges = L5Utils.generate_edges(
             raw_type, targets_all["extents"],
             pos_pred=targets_all["target_positions"],
@@ -77,7 +79,7 @@ class L5TrafficModel(pl.LightningModule):
 
         coll_rates = TensorUtils.to_numpy(Metrics.batch_pairwise_collision_rate(pred_edges))
         for c in coll_rates:
-            metrics["coll_" + c] = coll_rates[c]
+            metrics["coll_" + c] = float(coll_rates[c])
 
         return metrics
 
@@ -106,7 +108,7 @@ class L5TrafficModel(pl.LightningModule):
 
         metrics = self._compute_metrics(pout, batch)
         for mk, m in metrics.items():
-            self.log("train/metrics_" + mk, m, prog_bar=True)
+            self.log("train/metrics_" + mk, m)
 
         return total_loss
 
@@ -134,7 +136,46 @@ class L5TrafficModel(pl.LightningModule):
         )
 
     def get_action(self, obs_dict, **kwargs):
-        return {"ego": self(obs_dict["ego"])}
+        if not kwargs.get("optimize", False):
+            return {"ego": self(obs_dict["ego"])}
+        else:
+            optimized_actions, loss = optimize_actions(
+                obs_dict=obs_dict["ego"],
+                model=self.nets["policy"],
+                step_time=self.algo_config.step_time,
+                num_optim_iteration=kwargs.get("num_optim_iterations", 50)
+            )
+            print("Action optim loss=", loss)
+            return {"ego": optimized_actions}
+
+
+class L5TrafficModelGC(L5TrafficModel):
+    def __init__(self, algo_config, modality_shapes):
+        """
+        Creates networks and places them into @self.nets.
+        """
+        pl.LightningModule.__init__(self)
+        self.algo_config = algo_config
+        self.nets = nn.ModuleDict()
+
+        traj_decoder = MLPTrajectoryDecoder(
+            feature_dim=algo_config.map_feature_dim + algo_config.goal_feature_dim,
+            state_dim=3,
+            num_steps=algo_config.future_num_frames,
+            dynamics_type=algo_config.dynamics.type,
+            dynamics_kwargs=algo_config.dynamics,
+            step_time=algo_config.step_time,
+            network_kwargs=algo_config.decoder
+        )
+
+        self.nets["policy"] = RasterizedGCModel(
+            model_arch=algo_config.model_architecture,
+            num_input_channels=modality_shapes["image"][0],  # [C, H, W]
+            trajectory_decoder=traj_decoder,
+            map_feature_dim=algo_config.map_feature_dim,
+            weights_scaling=[1.0, 1.0, 1.0],
+            goal_feature_dim=algo_config.goal_feature_dim
+        )
 
 
 class L5VAETrafficModel(pl.LightningModule):
