@@ -242,7 +242,7 @@ if __name__ == "__main__":
 
     if args.debug:
         # Test policy rollout
-        default_config.train.rollout.every_n_steps = 10
+        default_config.train.rollout.every_n_steps = 100
         default_config.train.rollout.num_episodes = 1
 
     default_config.lock()  # Make config read-only

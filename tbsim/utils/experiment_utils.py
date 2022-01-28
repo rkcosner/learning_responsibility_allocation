@@ -186,7 +186,7 @@ def launch_experiments_ngc(script_path: str, cfgs: List[Dict], cfg_paths: List[s
         cmd = [
             "ngc", "batch", "run",
             "--instance", ngc_config["instance"],
-            "--name", cfg.name,
+            "--name", cfg.name + "",
             "--image", ngc_config["docker_image"],
             "--datasetid", "{}:{}".format(ngc_config["dataset_id"], ngc_config["dataset_mounting_point"]),
             "--workspace", "{}:{}".format(ngc_config["workspace_id"], ngc_config["workspace_mounting_point"]),
@@ -306,7 +306,8 @@ def get_checkpoint(ngc_job_id, ckpt_key, ckpt_root_dir="checkpoints/", download_
     ckpt_paths = ckpt_path_func(glob(ckpt_dir + "/*.ckpt"))
     assert len(ckpt_paths) > 0, "Could not find a checkpoint that has key {}".format(ckpt_key)
     assert len(ckpt_paths) == 1, "More than one checkpoint found"
-    return ckpt_paths[0]
+    cfg_path = os.path.join(ckpt_dir, "config.json")
+    return ckpt_paths[0], cfg_path
 
 
 if __name__ == "__main__":
