@@ -77,12 +77,15 @@
     "algo": {
         "name": "l5_rasterized",
         "model_architecture": "resnet50",
+        "map_feature_dim": 256,
         "history_num_frames": 5,
+        "history_num_frames_ego": 5,
+        "history_num_frames_agents": 5,
         "future_num_frames": 50,
         "step_time": 0.1,
         "render_ego_history": false,
         "dynamics": {
-            "type": null,
+            "type": "Unicycle",
             "max_steer": 0.5,
             "max_yawvel": 8.0,
             "acce_bound": [
