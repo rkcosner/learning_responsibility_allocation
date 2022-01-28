@@ -9,5 +9,5 @@
   "dataset_path": "/workspace/lyft_prediction/lyft_prediction",
   "docker_image": "nvcr.io/nvidian/nvr-av/tbsim:latest",
   "total_runtime": "48h",
-  "workspace_mounting_point_local": "/Users/danfei/workspace/avg/dxdev/"
+  "workspace_mounting_point_local": "<YOUR-NGC-WORKSPACE-MOUNTING-POINT>"
 }
