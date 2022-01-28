@@ -1,3 +1,5 @@
+import math
+
 from tbsim.configs.base import TrainConfig, EnvConfig, AlgoConfig
 
 
@@ -13,7 +15,7 @@ class L5KitTrainConfig(TrainConfig):
 
         self.rollout.enabled = True
         self.rollout.every_n_steps = 1000
-        self.rollout.num_episodes = 4
+        self.rollout.num_episodes = 2
         self.rollout.num_scenes = 25
 
         ## training config
@@ -21,13 +23,13 @@ class L5KitTrainConfig(TrainConfig):
         self.training.num_steps = 2000000
         self.training.num_data_workers = 4
 
-        self.save.every_n_steps = 10000
+        self.save.every_n_steps = 2000
 
         ## validation config
         self.validation.enabled = True
         self.validation.batch_size = 100
         self.validation.num_data_workers = 4
-        self.validation.every_n_steps = 2000
+        self.validation.every_n_steps = 1000
         self.validation.num_steps_per_epoch = 100
 
 
@@ -40,6 +42,8 @@ class L5KitMixedTrainConfig(L5KitTrainConfig):
 class L5KitEnvConfig(EnvConfig):
     def __init__(self):
         super(L5KitEnvConfig, self).__init__()
+
+        self.name = "l5_rasterized"
 
         # raster image size [pixels]
         self.rasterizer.raster_size = (224, 224)
@@ -89,6 +93,7 @@ class L5KitEnvConfig(EnvConfig):
 class L5KitVectorizedEnvConfig(EnvConfig):
     def __init__(self):
         super(L5KitVectorizedEnvConfig, self).__init__()
+        self.name = "l5_vectorized"
 
         # the keys are relative to the dataset environment variable
         self.rasterizer.semantic_map_key = "semantic_map/semantic_map.pb"
@@ -130,6 +135,7 @@ class L5KitMixedEnvConfig(EnvConfig):
     """Vectorized Scene Component + Rasterized Map"""
     def __init__(self):
         super(L5KitMixedEnvConfig, self).__init__()
+        self.name = "l5_mixed"
 
         # the keys are relative to the dataset environment variable
         self.rasterizer.semantic_map_key = "semantic_map/semantic_map.pb"
@@ -201,10 +207,25 @@ class L5RasterizedPlanningConfig(AlgoConfig):
 
         self.name = "l5_rasterized"
         self.model_architecture = "resnet50"
+        self.map_feature_dim = 256
         self.history_num_frames = 5
+        self.history_num_frames_ego = 5
+        self.history_num_frames_agents = 5
         self.future_num_frames = 50
         self.step_time = 0.1
         self.render_ego_history = False
+
+        self.dynamics.type = None
+        self.dynamics.max_steer = 0.5
+        self.dynamics.max_yawvel = math.pi * 2.0
+        self.dynamics.acce_bound = (-10, 8)
+        self.dynamics.ddh_bound = (-math.pi * 2.0, math.pi * 2.0)
+        self.dynamics.max_speed = 40.0   # roughly 90mph
+        self.dynamics.predict_current_states = False
+
+        self.loss_weights.prediction_loss = 1.0
+        self.loss_weights.goal_loss = 0.0
+        self.loss_weights.collision_loss = 0.0
 
         self.optim_params.policy.learning_rate.initial = 1e-3  # policy learning rate
         self.optim_params.policy.learning_rate.decay_factor = (
@@ -214,6 +235,30 @@ class L5RasterizedPlanningConfig(AlgoConfig):
             []
         )  # epochs where LR decay occurs
         self.optim_params.policy.regularization.L2 = 0.00  # L2 regularization strength
+
+
+class L5RasterizedGCConfig(L5RasterizedPlanningConfig):
+    def __init__(self):
+        super(L5RasterizedGCConfig, self).__init__()
+        self.name = "l5_rasterized_gc"
+        self.goal_feature_dim = 32
+        self.decoder.layer_dims = (128, 128)
+
+
+class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
+    def __init__(self):
+        super(L5RasterizedVAEConfig, self).__init__()
+        self.name = "l5_rasterized_vae"
+        self.map_feature_dim = 256
+        self.vae.latent_dim = 2
+        self.vae.condition_dim = 128
+        self.vae.num_eval_samples = 10
+        self.vae.encoder.rnn_hidden_size = 100
+        self.vae.encoder.mlp_layer_dims = (128, 128)
+        self.vae.decoder.rnn_hidden_size = 100
+        self.vae.decoder.mlp_layer_dims = (128, 128)
+
+        self.loss_weights.kl_loss = 1e-4
 
 
 class L5TransformerPredConfig(AlgoConfig):

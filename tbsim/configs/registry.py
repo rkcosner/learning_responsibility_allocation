@@ -1,23 +1,46 @@
 """A global registry for looking up named experiment configs"""
+from tbsim.configs.base import ExperimentConfig
 
-from tbsim.configs import (
-    ExperimentConfig,
-    L5KitEnvConfig,
+from tbsim.configs.l5kit_config import (
     L5KitTrainConfig,
-    L5RasterizedPlanningConfig,
     L5KitMixedTrainConfig,
-    L5KitVectorizedEnvConfig,
+    L5KitEnvConfig,
+    L5RasterizedPlanningConfig,
+    L5RasterizedGCConfig,
     L5TransformerPredConfig,
-    L5KitMixedEnvConfig
+    L5KitVectorizedEnvConfig,
+    L5KitMixedEnvConfig,
+    L5RasterizedVAEConfig
 )
 
 EXP_CONFIG_REGISTRY = dict()
 
-EXP_CONFIG_REGISTRY["l5_raster_plan"] = ExperimentConfig(
+EXP_CONFIG_REGISTRY["l5_rasterized_plan"] = ExperimentConfig(
     train_config=L5KitTrainConfig(),
     env_config=L5KitEnvConfig(),
     algo_config=L5RasterizedPlanningConfig(),
-    registered_name="l5_raster_plan"
+    registered_name="l5_rasterized_plan"
+)
+
+EXP_CONFIG_REGISTRY["l5_mixed_gc"] = ExperimentConfig(
+    train_config=L5KitMixedTrainConfig(),
+    env_config=L5KitMixedEnvConfig(),
+    algo_config=L5RasterizedGCConfig(),
+    registered_name="l5_mixed_gc"
+)
+
+EXP_CONFIG_REGISTRY["l5_mixed_plan"] = ExperimentConfig(
+    train_config=L5KitMixedTrainConfig(),
+    env_config=L5KitMixedEnvConfig(),
+    algo_config=L5RasterizedPlanningConfig(),
+    registered_name="l5_mixed_plan"
+)
+
+EXP_CONFIG_REGISTRY["l5_rasterized_vae_plan"] = ExperimentConfig(
+    train_config=L5KitTrainConfig(),
+    env_config=L5KitEnvConfig(),
+    algo_config=L5RasterizedVAEConfig(),
+    registered_name="l5_rasterized_vae_plan"
 )
 
 EXP_CONFIG_REGISTRY["l5_mixed_transformer_plan"] = ExperimentConfig(

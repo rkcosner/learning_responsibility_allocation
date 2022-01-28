@@ -14,24 +14,27 @@ class DynType:
     UNICYCLE = 1
     SI = 2
     DI = 3
+    BICYCLE = 4
 
 
-class dynamic(abc.ABC):
+class Dynamics(abc.ABC):
     @abc.abstractmethod
     def __init__(self, name, **kwargs):
-        pass
+        self._name = name
+        self.xdim = 4
+        self.udim = 2
 
     @abc.abstractmethod
     def __call__(self, x, u):
         return
 
     @abc.abstractmethod
-    def step(self, x, u, dt):
+    def step(self, x, u, dt, bound=True):
         return
 
     @abc.abstractmethod
     def name(self):
-        return
+        return self._name
 
     @abc.abstractmethod
     def type(self):
@@ -41,6 +44,10 @@ class dynamic(abc.ABC):
     def ubound(self, x):
         return
 
-    @abc.abstractmethod
+    @staticmethod
     def state2pos(x):
+        return
+
+    @staticmethod
+    def state2yaw(x):
         return

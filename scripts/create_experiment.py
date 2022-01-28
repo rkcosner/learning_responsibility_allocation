@@ -36,14 +36,14 @@ if __name__ == "__main__":
         "--config_file",
         type=str,
         default=None,
-        help="(optional) path to a config json to launch the experiment with, or as a template for parameter tuning"
+        help="(optional) path to a config json that will be used as the template for parameter tuning"
     )
 
     parser.add_argument(
         "--config_dir",
         type=str,
         default="experiments/test/",
-        help="directory for saving generate config files."
+        help="directory for saving generated config files."
     )
 
     parser.add_argument(
@@ -60,5 +60,6 @@ if __name__ == "__main__":
         args.config_name,
         args.config_file,
         args.config_dir,
-        args.prefix
+        args.prefix,
+        delete_config_dir=False
     )

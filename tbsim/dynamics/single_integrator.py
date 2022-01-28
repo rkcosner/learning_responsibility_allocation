@@ -1,10 +1,10 @@
-from tbsim.dynamics.base import DynType, dynamic
+from tbsim.dynamics.base import DynType, Dynamics
 import torch
 import numpy as np
 from copy import deepcopy
 
 
-class SingleIntegrator(dynamic):
+class SingleIntegrator(Dynamics):
     def __init__(self, name, vbound):
         self._name = name
         self._type = DynType.SI
@@ -18,8 +18,14 @@ class SingleIntegrator(dynamic):
 
         return u
 
-    def step(self, x, u, dt):
+    def step(self, x, u, dt, bound=True):
         assert x.shape[:-1] == u.shape[:, -1]
+        if bound:
+            lb, ub = self.ubound(x)
+            if isinstance(x, np.ndarray):
+                u = np.clip(u, lb, ub)
+            elif isinstance(x, torch.Tensor):
+                u = torch.clip(u, min=lb, max=ub)
 
         return x + u * dt
 

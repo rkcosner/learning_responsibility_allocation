@@ -6,13 +6,14 @@ from torch.utils.data.dataloader import default_collate
 from l5kit.simulation.dataset import SimulationConfig, SimulationDataset
 from l5kit.simulation.unroll import ClosedLoopSimulator, SimulationOutput
 from l5kit.cle.metrics import DisplacementErrorL2Metric
+from l5kit.geometry import transform_points, rotation33_as_yaw
 
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.envs.base import BaseEnv, BatchedEnv, SimulationException
 
 
 class EnvL5KitSimulation(BaseEnv, BatchedEnv):
-    def __init__(self, env_config, num_scenes, dataset, seed=0):
+    def __init__(self, env_config, num_scenes, dataset, seed=0, prediction_only=False):
         """
         A gym-like interface for simulating traffic behaviors (both ego and other agents) with L5Kit's SimulationDataset
 
@@ -20,6 +21,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             env_config (L5KitEnvConfig): a Config object specifying the behavior of the L5Kit CloseLoopSimulator
             num_scenes (int): number of scenes to run in parallel
             dataset (EgoDataset): an EgoDataset instance that contains scene data for simulation
+            prediction_only (bool): if set to True, ignore the input action command and only record the predictions
         """
         self._sim_cfg = SimulationConfig(
             disable_new_agents=True,
@@ -41,6 +43,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self._frame_index = 0
         self._cached_observation = None
         self._done = False
+        self._prediction_only = prediction_only
 
         self._ego_states = dict()
         self._agents_states = dict()
@@ -161,28 +164,9 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
     def horizon(self):
         return len(self._current_scene_dataset)
 
-    def step(self, actions):
-        """
-        Step the simulation with control inputs
-
-        Args:
-            actions (Dict): a dictionary containing either or both "ego_control" or "agents_control"
-                - ego_control (Dict): a dictionary containing future ego position and orientation for all scenes
-                - agents_control (Dict): a dictionary containing future agent positions and orientations for all scenes
-        """
-        for k in actions:
-            assert k in ["ego", "agents"]
-
-        if self._done:
-            raise SimulationException("Simulation episode has ended")
-
-        actions = TensorUtils.to_numpy(actions)
+    def _step(self, ego_control=None, agents_control=None, ego_samples=None, agents_samples=None):
         obs = self.get_observation()
-
-        ego_control = actions.get("ego", None)
-        agents_control = actions.get("agents", None)
-
-        should_update = self._frame_index + 1 < self.horizon
+        should_update = self._frame_index + 1 < self.horizon and not self._prediction_only
         if ego_control is not None:
             if should_update:
                 # update the next frame's ego position and orientation using control input
@@ -197,7 +181,12 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             ego_in_out = ClosedLoopSimulator.get_ego_in_out(
                 obs["ego"], ego_control, keys_to_exclude=set(("image",))
             )
-            for scene_idx in self._current_scene_indices:
+            for i, scene_idx in enumerate(self._current_scene_indices):
+                # If applicable, insert prediction samples for visualization purposes
+                if ego_samples is not None:
+                    ego_in_out[scene_idx].outputs["samples"] = dict()
+                    for k in ego_samples:
+                        ego_in_out[scene_idx].outputs["samples"][k] = ego_samples[k][i]
                 self._ego_states[scene_idx].append(ego_in_out[scene_idx])
 
         if agents_control is not None:
@@ -212,7 +201,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             agents_in_out = ClosedLoopSimulator.get_agents_in_out(
                 obs["agents"], agents_control, keys_to_exclude=set(("image",))
             )
-            for scene_idx in self._current_scene_indices:
+            for i, scene_idx in enumerate(self._current_scene_indices):
                 self._agents_states[scene_idx].append(agents_in_out.get(scene_idx, []))
 
         # TODO: accumulate sim trajectories
@@ -222,3 +211,45 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             self._done = True
         else:
             self._frame_index += 1
+
+    def step(self, actions, num_steps_to_take: int = 1):
+        """
+        Step the simulation with control inputs
+
+        Args:
+            actions (Dict): a dictionary containing either or both "ego_control" or "agents_control"
+                - ego_control (Dict): a dictionary containing future ego position and orientation for all scenes
+                - agents_control (Dict): a dictionary containing future agent positions and orientations for all scenes
+            num_steps_to_take (int): how many env steps to take. Must be less or equal to length of the input actions
+        """
+        for k in actions:
+            assert k in ["ego", "agents", "ego_samples", "agents_samples"]
+
+        if self._done:
+            raise SimulationException("Simulation episode has ended")
+
+        actions = TensorUtils.to_numpy(actions)
+
+        obs = self.get_observation()
+        actions_world = dict(ego=dict())
+        # Convert action to world frame
+        world_from_agent = obs["ego"]["world_from_agent"]
+        actions_world["ego"]["positions"] = transform_points(actions["ego"]["positions"], world_from_agent)
+        actions_world["ego"]["yaws"] = obs["ego"]["yaw"][..., None, None] + actions["ego"]["yaws"]
+
+        for step_i in range(num_steps_to_take):
+            step_actions_world = TensorUtils.map_ndarray(actions_world, lambda x: x[..., step_i:, :])
+
+            # transform step action back to the agent frame
+            obs = self.get_observation()
+            agent_from_world = obs["ego"]["agent_from_world"]
+            step_actions = dict(ego=dict())
+            step_actions["ego"]["positions"] = transform_points(step_actions_world["ego"]["positions"], agent_from_world)
+            step_actions["ego"]["yaws"] = step_actions_world["ego"]["yaws"] - obs["ego"]["yaw"][..., None, None]
+
+            ego_control = step_actions.get("ego", None)
+            # agents_samples = step_actions.get("agents", None)
+            # ego_samples = None if ego_control is None else ego_control.get("samples", None)
+            # agents_samples = None if agents_samples is None else agents_samples.get("samples", None)
+
+            self._step(ego_control=ego_control)
