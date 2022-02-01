@@ -186,7 +186,9 @@ def launch_experiments_ngc(script_path: str, cfgs: List[Dict], cfg_paths: List[s
         cmd = [
             "ngc", "batch", "run",
             "--instance", ngc_config["instance"],
-            "--name", cfg.name + "",
+            # "ml-model." prefix a the naming convention required by NGC
+            # see https://confluence.nvidia.com/display/GWE/5.+Job+naming+and+categorization
+            "--name", "ml-model." + cfg.name,
             "--image", ngc_config["docker_image"],
             "--datasetid", "{}:{}".format(ngc_config["dataset_id"], ngc_config["dataset_mounting_point"]),
             "--workspace", "{}:{}".format(ngc_config["workspace_id"], ngc_config["workspace_mounting_point"]),
