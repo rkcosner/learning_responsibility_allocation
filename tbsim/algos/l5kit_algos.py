@@ -35,7 +35,8 @@ class L5TrafficModel(pl.LightningModule):
             num_steps=algo_config.future_num_frames,
             dynamics_type=algo_config.dynamics.type,
             dynamics_kwargs=algo_config.dynamics,
-            step_time=algo_config.step_time
+            step_time=algo_config.step_time,
+            network_kwargs=algo_config.decoder
         )
 
         self.nets["policy"] = RasterizedPlanningModel(

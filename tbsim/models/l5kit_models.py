@@ -269,7 +269,8 @@ class RasterizedVAEModel(nn.Module):
             state_dim=trajectory_shape[-1],
             num_steps=algo_config.future_num_frames,
             dynamics_type=algo_config.dynamics.type,
-            dynamics_kwargs=algo_config.dynamics
+            dynamics_kwargs=algo_config.dynamics,
+            network_kwargs=algo_config.decoder
         )
 
         decoder = base_models.ConditionDecoder(traj_decoder)
