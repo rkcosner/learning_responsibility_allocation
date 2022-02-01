@@ -44,7 +44,15 @@ class ParamConfig(object):
         self.params.append(param)
 
     def __str__(self):
-        return '_'.join([p.alias + str(p.value) for p in self.params])
+        char_to_remove = [" ", "(", ")", ";", "[", "]"]
+        name = []
+        for p in self.params:
+            v_str = str(p.value)
+            for c in char_to_remove:
+                v_str = v_str.replace(c, "")
+            name.append(p.alias + v_str)
+
+        return '_'.join(name)
 
     def generate_config(self, base_cfg: ExperimentConfig):
         cfg = base_cfg.clone()
