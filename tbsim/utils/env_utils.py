@@ -4,13 +4,14 @@ from tbsim.envs.base import BatchedEnv, BaseEnv
 import tbsim.utils.tensor_utils as TensorUtils
 
 
-def rollout_episodes(env, policy, num_episodes):
+def rollout_episodes(env, policy, num_episodes, n_step_action=1):
     """
     Rollout an environment for a number of episodes
     Args:
         env (BaseEnv): a base simulation environment (gym-like)
         policy: a policy that
         num_episodes (int): number of episodes to rollout for
+        n_step_action (int): number of steps to take between querying models
 
     Returns:
         stats (dict): A dictionary of rollout stats for each episode (metrics, rewards, etc.)
@@ -29,7 +30,7 @@ def rollout_episodes(env, policy, num_episodes):
             obs = TensorUtils.to_torch(obs, device=policy.device)
 
             action = policy.get_action(obs, sample=False)
-            env.step(action)
+            env.step(action, num_steps_to_take=n_step_action)
             done = env.is_done()
 
         metrics = env.get_metrics()
@@ -54,12 +55,13 @@ def rollout_episodes(env, policy, num_episodes):
 
 
 class RolloutCallback(pl.Callback):
-    def __init__(self, env, num_episodes=1, every_n_steps=100, warm_start_n_steps=1, verbose=False):
+    def __init__(self, env, num_episodes=1, n_step_action=1, every_n_steps=100, warm_start_n_steps=1, verbose=False):
         self._env = env
         self._num_episodes = num_episodes
         self._every_n_steps = every_n_steps
         self._warm_start_n_steps = warm_start_n_steps
         self._verbose = verbose
+        self._n_step_action = n_step_action
 
     def print_if_verbose(self, msg):
         if self._verbose:
@@ -71,7 +73,12 @@ class RolloutCallback(pl.Callback):
             and trainer.global_step % self._every_n_steps == 0
         )
         if should_run:
-            stats, _ = rollout_episodes(self._env, pl_module, num_episodes=self._num_episodes)
+            stats, _ = rollout_episodes(
+                env=self._env,
+                policy=pl_module,
+                num_episodes=self._num_episodes,
+                n_step_action=self._n_step_action
+            )
             self.print_if_verbose("\nStep %i rollout (%i episodes): " % (trainer.global_step, self._num_episodes))
             for k, v in stats.items():
                 # Set on_step=True and on_epoch=False to force the logger to log stats at the step

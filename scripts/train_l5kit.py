@@ -70,6 +70,7 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
             env=env,
             num_episodes=cfg.train.rollout.num_episodes,
             every_n_steps=cfg.train.rollout.every_n_steps,
+            n_step_action=cfg.train.rollout.n_step_action,
             warm_start_n_steps=cfg.train.rollout.warm_start_n_steps,
             verbose=False
         )

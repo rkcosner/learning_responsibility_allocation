@@ -28,6 +28,7 @@ class TrainConfig(Dict):
         self.rollout.num_scenes = 25                     # number of parallel scenes to run (if applicable)
         self.rollout.every_n_steps = 1000                # do rollouts every @rate epochs
         self.rollout.warm_start_n_steps = 1              # number of steps to wait before starting rollouts
+        self.rollout.n_step_action = 1                   # number of action steps to take between querying the model
 
         ## training config
         self.training.batch_size = 100
