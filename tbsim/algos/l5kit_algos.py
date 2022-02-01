@@ -27,6 +27,7 @@ class L5TrafficModel(pl.LightningModule):
         super(L5TrafficModel, self).__init__()
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
+        assert modality_shapes["image"][0] == 15
 
         traj_decoder = MLPTrajectoryDecoder(
             feature_dim=algo_config.map_feature_dim,
@@ -157,6 +158,7 @@ class L5TrafficModelGC(L5TrafficModel):
         pl.LightningModule.__init__(self)
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
+        assert modality_shapes["image"][0] == 15
 
         traj_decoder = MLPTrajectoryDecoder(
             feature_dim=algo_config.map_feature_dim + algo_config.goal_feature_dim,
@@ -181,6 +183,8 @@ class L5TrafficModelGC(L5TrafficModel):
 class L5VAETrafficModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):
         super(L5VAETrafficModel, self).__init__()
+        assert modality_shapes["image"][0] == 15
+
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
         self.nets["policy"] = RasterizedVAEModel(

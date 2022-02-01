@@ -202,6 +202,12 @@ class L5KitMixedEnvConfig(EnvConfig):
         self.simulation.start_frame_index = 0
 
 
+class L5KitMixedSemanticMapEnvConfig(L5KitMixedEnvConfig):
+    def __init__(self):
+        super(L5KitMixedSemanticMapEnvConfig, self).__init__()
+        self.rasterizer.map_type = "py_semantic"
+
+
 class L5RasterizedPlanningConfig(AlgoConfig):
     def __init__(self):
         super(L5RasterizedPlanningConfig, self).__init__()
