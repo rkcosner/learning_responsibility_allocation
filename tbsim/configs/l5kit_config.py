@@ -230,6 +230,11 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.dynamics.max_speed = 40.0   # roughly 90mph
         self.dynamics.predict_current_states = False
 
+        self.spatial_softmax.enabled = True
+        self.spatial_softmax.kwargs.num_kp = 32
+        self.spatial_softmax.kwargs.temperature = 1.
+        self.spatial_softmax.kwargs.learnable_temperature = False
+
         self.loss_weights.prediction_loss = 1.0
         self.loss_weights.goal_loss = 0.0
         self.loss_weights.collision_loss = 0.0

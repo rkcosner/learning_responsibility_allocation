@@ -105,17 +105,21 @@ class RasterizedPlanningModel(nn.Module):
     def __init__(
             self,
             model_arch: str,
-            num_input_channels: int,
+            input_image_shape,
             map_feature_dim: int,
             weights_scaling: List[float],
             trajectory_decoder: nn.Module,
+            use_spatial_softmax=False,
+            spatial_softmax_kwargs=None,
     ) -> None:
 
         super().__init__()
         self.map_encoder = base_models.RasterizedMapEncoder(
             model_arch=model_arch,
-            num_input_channels=num_input_channels,
+            input_image_shape=input_image_shape,
             feature_dim=map_feature_dim,
+            use_spatial_softmax=use_spatial_softmax,
+            spatial_softmax_kwargs=spatial_softmax_kwargs,
             output_activation=nn.ReLU
         )
         self.traj_decoder = trajectory_decoder
@@ -184,18 +188,22 @@ class RasterizedGCModel(RasterizedPlanningModel):
     def __init__(
             self,
             model_arch: str,
-            num_input_channels: int,
+            input_image_shape: int,
             map_feature_dim: int,
             goal_feature_dim: int,
             weights_scaling: List[float],
             trajectory_decoder: nn.Module,
+            use_spatial_softmax=False,
+            spatial_softmax_kwargs=None,
     ) -> None:
         super(RasterizedGCModel, self).__init__(
             model_arch=model_arch,
-            num_input_channels=num_input_channels,
+            input_image_shape=input_image_shape,
             map_feature_dim=map_feature_dim,
             weights_scaling=weights_scaling,
-            trajectory_decoder=trajectory_decoder
+            trajectory_decoder=trajectory_decoder,
+            use_spatial_softmax=use_spatial_softmax,
+            spatial_softmax_kwargs=spatial_softmax_kwargs,
         )
 
         self.goal_encoder = base_models.MLP(
@@ -234,8 +242,10 @@ class RasterizedVAEModel(nn.Module):
 
         map_encoder = base_models.RasterizedMapEncoder(
             model_arch=algo_config.model_architecture,
-            num_input_channels=modality_shapes["image"][0],
-            feature_dim=algo_config.map_feature_dim
+            input_image_shape=modality_shapes["image"],
+            feature_dim=algo_config.map_feature_dim,
+            use_spatial_softmax=algo_config.spatial_softmax.enabled,
+            spatial_softmax_kwargs=algo_config.spatial_softmax.kwargs,
         )
 
         c_encoder = base_models.ConditionEncoder(

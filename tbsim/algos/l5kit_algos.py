@@ -40,10 +40,12 @@ class L5TrafficModel(pl.LightningModule):
 
         self.nets["policy"] = RasterizedPlanningModel(
             model_arch=algo_config.model_architecture,
-            num_input_channels=modality_shapes["image"][0],  # [C, H, W]
+            input_image_shape=modality_shapes["image"],  # [C, H, W]
             trajectory_decoder=traj_decoder,
             map_feature_dim=algo_config.map_feature_dim,
-            weights_scaling=[1.0, 1.0, 1.0]
+            weights_scaling=[1.0, 1.0, 1.0],
+            use_spatial_softmax=algo_config.spatial_softmax.enabled,
+            spatial_softmax_kwargs=algo_config.spatial_softmax.kwargs,
         )
 
     def forward(self, obs_dict):
@@ -180,11 +182,13 @@ class L5TrafficModelGC(L5TrafficModel):
 
         self.nets["policy"] = RasterizedGCModel(
             model_arch=algo_config.model_architecture,
-            num_input_channels=modality_shapes["image"][0],  # [C, H, W]
+            input_image_shape=modality_shapes["image"],  # [C, H, W]
             trajectory_decoder=traj_decoder,
             map_feature_dim=algo_config.map_feature_dim,
             weights_scaling=[1.0, 1.0, 1.0],
-            goal_feature_dim=algo_config.goal_feature_dim
+            goal_feature_dim=algo_config.goal_feature_dim,
+            use_spatial_softmax=algo_config.spatial_softmax.enabled,
+            spatial_softmax_kwargs=algo_config.spatial_softmax.kwargs,
         )
 
 
