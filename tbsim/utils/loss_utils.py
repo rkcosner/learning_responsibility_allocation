@@ -1,10 +1,20 @@
 """
 This file contains a collection of useful loss functions for use with torch tensors.
-Borrowed from https://github.com/ARISE-Initiative/robomimic/blob/master/robomimic/utils/loss_utils.py
+Partially borrowed from https://github.com/ARISE-Initiative/robomimic/blob/master/robomimic/utils/loss_utils.py
 """
+from typing import Dict, List, Union
 
 import numpy as np
 import torch
+import torch.nn as nn
+import tbsim.utils.tensor_utils as TensorUtils
+import tbsim.utils.l5_utils as L5Utils
+from tbsim.utils.geometry_utils import (
+    VEH_VEH_collision,
+    VEH_PED_collision,
+    PED_VEH_collision,
+    PED_PED_collision,
+)
 
 
 def cosine_loss(preds, labels):
@@ -188,3 +198,90 @@ def project_values_onto_atoms(values, probabilities, atoms):
     delta_hat = (1. - delta_hat).clamp(min=0., max=1.)
     probabilities = probabilities[:, None, :]
     return (delta_hat * probabilities).sum(dim=2)
+
+
+def trajectory_loss(predictions, targets, availabilities, weights_scaling=None, crit=nn.MSELoss(reduction="none")):
+    """
+    Aggregated per-step loss between gt and predicted trajectories
+    Args:
+        predictions (torch.Tensor): predicted trajectory [B, (A), T, D]
+        targets (torch.Tensor): target trajectory [B, (A), T, D]
+        availabilities (torch.Tensor): [B, (A), T]
+        weights_scaling (torch.Tensor): [D]
+        crit (nn.Module): loss function
+
+    Returns:
+        loss (torch.Tensor)
+    """
+    assert availabilities.shape == predictions.shape[:-1]
+    assert predictions.shape == targets.shape
+    if weights_scaling is None:
+        weights_scaling = torch.ones(targets.shape[-1]).to(targets.device)
+    assert weights_scaling.shape[-1] == targets.shape[-1]
+    target_weights = (availabilities.unsqueeze(-1) * weights_scaling)
+    loss = torch.mean(crit(predictions, targets) * target_weights)
+    return loss
+
+
+def goal_reaching_loss(predictions, targets, availabilities, weights_scaling=None, crit=nn.MSELoss(reduction="none")):
+    """
+    Final step loss between gt and predicted trajectories (normally used in conjunction with a forward dynamics model)
+    Args:
+        predictions (torch.Tensor): predicted trajectory [B, (A), T, D]
+        targets (torch.Tensor): target trajectory [B, (A), T, D]
+        availabilities (torch.Tensor): [B, (A), T]
+        weights_scaling (torch.Tensor): [D]
+        crit (nn.Module): loss function
+
+    Returns:
+        loss (torch.Tensor)
+    """
+    # compute loss mask by finding the last available target
+    num_frames = availabilities.shape[-1]
+    inds = torch.arange(0, num_frames).to(targets.device)  # [T]
+    inds = (availabilities > 0).float() * inds  # [B, (A), T] arange indices with unavailable indices set to 0
+    last_inds = inds.max(dim=-1)[1]  # [B, (A)] calculate the index of the last availale frame
+    goal_mask = TensorUtils.to_one_hot(last_inds, num_class=num_frames)  # [B, (A), T] with the last frame set to 1
+    # filter out samples that do not have available frames
+    available_samples_mask = availabilities.sum(-1) > 0  # [B, (A)]
+    goal_mask = goal_mask * available_samples_mask.unsqueeze(-1).float()  # [B, (A), T]
+    goal_loss = trajectory_loss(
+        predictions,
+        targets,
+        availabilities=goal_mask,
+        weights_scaling=weights_scaling,
+        crit=crit
+    )
+    return goal_loss
+
+
+def collision_loss(pred_edges: Dict[str, torch.Tensor], col_funcs=None):
+    """
+    Calculate collision loss among predicted edges along a batch of trajectories
+    Args:
+        pred_edges (dict): A dict that maps collision types to box locations
+        col_funcs (dict): A dict of collision functions (implemented in tbsim.utils.geometric_utils)
+
+    Returns:
+        collision loss (torch.Tensor)
+    """
+    if col_funcs is None:
+        col_funcs = {
+            "VV": VEH_VEH_collision,
+            "VP": VEH_PED_collision,
+            "PV": PED_VEH_collision,
+            "PP": PED_PED_collision,
+        }
+
+    coll_loss = 0
+    for et, fun in col_funcs.items():
+        edges = pred_edges[et]
+        dis = fun(
+            edges[..., 0:3],
+            edges[..., 3:6],
+            edges[..., 6:8],
+            edges[..., 8:],
+        ).min(dim=-1)[0]
+        coll_loss += torch.sum(torch.sigmoid(-dis - 4.0))  # smooth collision loss
+    return coll_loss
+

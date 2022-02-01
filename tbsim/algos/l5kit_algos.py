@@ -8,11 +8,11 @@ import pytorch_lightning as pl
 
 from tbsim.models.l5kit_models import (
     RasterizedPlanningModel,
-    MLPTrajectoryDecoder,
     RasterizedVAEModel,
     RasterizedGCModel,
-    optimize_actions
+    optimize_trajectories
 )
+from tbsim.models.base_models import MLPTrajectoryDecoder
 from tbsim.models.transformer_model import TransformerModel
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.metrics as Metrics
@@ -140,14 +140,22 @@ class L5TrafficModel(pl.LightningModule):
         if not kwargs.get("optimize", False):
             return {"ego": self(obs_dict["ego"])}
         else:
-            optimized_actions, loss = optimize_actions(
-                obs_dict=obs_dict["ego"],
-                model=self.nets["policy"],
+            preds = self.nets["policy"].forward(obs_dict["ego"])
+            init_x = preds["curr_states"]
+            init_u = preds["controls"]
+            # Use GT traj as reference trajs
+            target_trajs = torch.cat((obs_dict["target_positions"], obs_dict["target_yaws"]), dim=2)
+            optimized_trajs, _, losses = optimize_trajectories(
+                init_u=init_u,
+                init_x=init_x,
+                target_trajs=target_trajs,
+                target_avails=obs_dict["target_availabilities"],
+                dynamics_model=self.nets["policy"].traj_decoder.dyn,
                 step_time=self.algo_config.step_time,
-                num_optim_iteration=kwargs.get("num_optim_iterations", 50)
+                num_optim_iterations=kwargs.get("num_optim_iterations", 50)
             )
-            print("Action optim loss=", loss)
-            return {"ego": optimized_actions}
+            print("Action optim loss=", losses)
+            return {"ego": optimized_trajs}
 
 
 class L5TrafficModelGC(L5TrafficModel):
@@ -284,7 +292,7 @@ class L5VAETrafficModel(pl.LightningModule):
             weight_decay=optim_params["regularization"]["L2"],
         )
 
-    def get_action(self, obs_dict, sample=True, num_viz_samples=10):
+    def get_action(self, obs_dict, sample=True, num_viz_samples=10, **kwargs):
         if sample:
             preds = self.nets["policy"].sample(obs_dict["ego"], n=1)["predictions"]  # [B, 1, T, 3]
             preds = TensorUtils.squeeze(preds, dim=1)
