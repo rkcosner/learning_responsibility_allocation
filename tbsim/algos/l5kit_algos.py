@@ -10,13 +10,15 @@ from tbsim.models.l5kit_models import (
     RasterizedPlanningModel,
     RasterizedVAEModel,
     RasterizedGCModel,
-    optimize_trajectories
+    optimize_trajectories,
+    get_current_states
 )
 from tbsim.models.base_models import MLPTrajectoryDecoder
 from tbsim.models.transformer_model import TransformerModel
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.metrics as Metrics
 import tbsim.utils.l5_utils as L5Utils
+import tbsim.dynamics as dynamics
 
 
 class L5TrafficModel(pl.LightningModule):
@@ -140,25 +142,26 @@ class L5TrafficModel(pl.LightningModule):
         )
 
     def get_action(self, obs_dict, **kwargs):
-        if not kwargs.get("optimize", False):
-            return {"ego": self(obs_dict["ego"])}
-        else:
-            preds = self.nets["policy"].forward(obs_dict["ego"])
-            init_x = preds["curr_states"]
-            init_u = preds["controls"]
-            # Use GT traj as reference trajs
-            target_trajs = torch.cat((obs_dict["target_positions"], obs_dict["target_yaws"]), dim=2)
-            optimized_trajs, _, losses = optimize_trajectories(
-                init_u=init_u,
-                init_x=init_x,
-                target_trajs=target_trajs,
-                target_avails=obs_dict["target_availabilities"],
-                dynamics_model=self.nets["policy"].traj_decoder.dyn,
-                step_time=self.algo_config.step_time,
-                num_optim_iterations=kwargs.get("num_optim_iterations", 50)
-            )
-            print("Action optim loss=", losses)
-            return {"ego": optimized_trajs}
+        # if not kwargs.get("optimize", False):
+        return {"ego": self(obs_dict["ego"])}
+        # else:
+        #     preds = self.nets["policy"].forward(obs_dict["ego"])
+        #
+        #     init_x = preds["curr_states"]
+        #     init_u = preds["controls"]
+        #     # Use GT traj as reference trajs
+        #     target_trajs = torch.cat((obs_dict["target_positions"], obs_dict["target_yaws"]), dim=2)
+        #     optimized_trajs, _, losses = optimize_trajectories(
+        #         init_u=init_u,
+        #         init_x=init_x,
+        #         target_trajs=target_trajs,
+        #         target_avails=obs_dict["target_availabilities"],
+        #         dynamics_model=self.nets["policy"].traj_decoder.dyn,
+        #         step_time=self.algo_config.step_time,
+        #         num_optim_iterations=kwargs.get("num_optim_iterations", 50)
+        #     )
+        #     print("Action optim loss=", losses)
+        #     return {"ego": optimized_trajs}
 
 
 class L5TrafficModelGC(L5TrafficModel):

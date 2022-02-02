@@ -1,7 +1,11 @@
 import numpy as np
 import pytorch_lightning as pl
+import torch
+
 from tbsim.envs.base import BatchedEnv, BaseEnv
 import tbsim.utils.tensor_utils as TensorUtils
+import tbsim.dynamics as dynamics
+from tbsim.models.l5kit_models import optimize_trajectories, get_current_states
 
 
 def rollout_episodes(env, policy, num_episodes, n_step_action=1):
@@ -93,7 +97,7 @@ class RolloutWrapper(object):
     def __init__(self, model: pl.LightningModule, num_prediction_steps, action_frequency=1):
         assert action_frequency <= num_prediction_steps
         self.model = model
-        self.device= model.device
+        self.device = model.device
         self.action_freq = action_frequency
         self._action_length =  num_prediction_steps
         self._cached_action = None
@@ -124,3 +128,76 @@ class RolloutWrapper(object):
             num_prediction_steps=model.algo_config.future_num_frames,
             action_frequency=action_frequency
         )
+
+
+class OptimController(object):
+    def __init__(
+            self,
+            dynamics_type,
+            dynamics_kwargs,
+            step_time: float,
+            optimizer_kwargs = None,
+    ):
+        self.step_time = step_time
+        self.optimizer_kwargs = dict() if optimizer_kwargs is None else optimizer_kwargs
+        if dynamics_type in ["Unicycle", dynamics.DynType.UNICYCLE]:
+            self.dyn = dynamics.Unicycle(
+                "dynamics",
+                max_steer=dynamics_kwargs["max_steer"],
+                max_yawvel=dynamics_kwargs["max_yawvel"],
+                acce_bound=dynamics_kwargs["acce_bound"]
+            )
+        elif dynamics_type in ["Bicycle", dynamics.DynType.BICYCLE]:
+            self.dyn = dynamics.Bicycle(
+                acc_bound=dynamics_kwargs["acce_bound"],
+                ddh_bound=dynamics_kwargs["ddh_bound"],
+                max_hdot=dynamics_kwargs["max_yawvel"],
+                max_speed=dynamics_kwargs["max_speed"]
+            )
+        else:
+            raise NotImplementedError("dynamics type {} is not implemented", dynamics_type)
+
+    def get_action(self, obs, targets: torch.Tensor, target_avails=None, init_u=None, **kwargs):
+        device = targets.device
+        num_action_steps = targets.shape[-2]
+        init_x = get_current_states(obs, dyn_type=self.dyn.type())
+        if init_u is None:
+            init_u = torch.randn(*init_x.shape[:-1], num_action_steps, self.dyn.udim).to(device)
+        if target_avails is None:
+            target_avails = torch.ones(targets.shape[:-1]).to(device)
+        assert init_u.shape[-2] == num_action_steps
+        traj, raw_traj, final_u, losses = optimize_trajectories(
+            init_u=init_u,
+            init_x=init_x,
+            target_trajs=targets,
+            target_avails=target_avails,
+            dynamics_model=self.dyn,
+            step_time=self.step_time,
+            **self.optimizer_kwargs
+        )
+        return traj
+
+
+class HierarchicalWrapper(object):
+    def __init__(self, planner, ego_controller=None, agents_controller=None):
+        self.device = planner.device
+        self.planner = planner
+        self.ego_controller = ego_controller
+        self.agents_controller = agents_controller
+
+    def get_action(self, obs, num_steps_to_goal=None, **kwargs):
+        with torch.no_grad():
+            preds = self.planner.get_action(obs, sample=kwargs.get("sample", False))
+        preds = preds["ego"]
+        targets = torch.cat((preds["positions"], preds["yaws"]), dim=-1)
+        if num_steps_to_goal is not None:
+            assert num_steps_to_goal > 0
+            if num_steps_to_goal > targets.shape[-2]:
+                padding = torch.zeros(*targets.shape[:-2], num_steps_to_goal - targets.shape[-2], targets.shape[-1])
+                padding = padding.to(targets.device)
+                targets = torch.cat((padding, targets), dim=-2)
+            else:
+                targets = targets[..., :num_steps_to_goal, :]
+        init_u = preds.get("controls", None)
+        actions = self.ego_controller.get_action(obs["ego"], targets=targets, init_u=init_u)
+        return dict(ego=actions)

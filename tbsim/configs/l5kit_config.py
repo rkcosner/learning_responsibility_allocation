@@ -222,6 +222,8 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.step_time = 0.1
         self.render_ego_history = False
 
+        self.decoder.layer_dims = ()
+
         self.dynamics.type = None
         self.dynamics.max_steer = 0.5
         self.dynamics.max_yawvel = math.pi * 2.0
@@ -230,7 +232,7 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.dynamics.max_speed = 40.0   # roughly 90mph
         self.dynamics.predict_current_states = False
 
-        self.spatial_softmax.enabled = True
+        self.spatial_softmax.enabled = False
         self.spatial_softmax.kwargs.num_kp = 32
         self.spatial_softmax.kwargs.temperature = 1.
         self.spatial_softmax.kwargs.learnable_temperature = False
@@ -254,7 +256,6 @@ class L5RasterizedGCConfig(L5RasterizedPlanningConfig):
         super(L5RasterizedGCConfig, self).__init__()
         self.name = "l5_rasterized_gc"
         self.goal_feature_dim = 32
-        self.decoder.layer_dims = (128, 128)
 
 
 class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):

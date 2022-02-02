@@ -56,14 +56,14 @@ def optimize_trajectories(
                 targets=target_trajs,
                 availabilities=target_avails
             ) * traj_loss_weight
-            total_loss = torch.sum(torch.Tensor(list(losses.values())))
+            total_loss = torch.sum(torch.hstack(list(losses.values())))
 
             # backprop
             total_loss.backward()
             return total_loss
         action_optim.step(closure)
 
-    _, final_pos, final_yaw = dynamics.forward_dynamics(
+    final_raw_trajs, final_pos, final_yaw = dynamics.forward_dynamics(
         dyn_model=dynamics_model,
         initial_states=init_x,
         actions=curr_u,
@@ -82,10 +82,10 @@ def optimize_trajectories(
         availabilities=target_avails
     )
 
-    return dict(positions=final_pos, yaws=final_yaw), curr_u, losses
+    return dict(positions=final_pos, yaws=final_yaw), final_raw_trajs, curr_u, losses
 
 
-def get_current_states(batch: dict, dyn_type: dynamics.DynType):
+def get_current_states(batch: dict, dyn_type: dynamics.DynType) -> torch.Tensor:
     bs = batch["curr_speed"].shape[0]
     if dyn_type == dynamics.DynType.BICYCLE:
         current_states = torch.zeros(bs, 6).to(batch["curr_speed"].device)  # [x, y, yaw, vel, dh, veh_len]
