@@ -299,3 +299,22 @@ def generate_edges(
             edges[et] = torch.cat(v, dim=1)
     return edges
 
+
+def get_edges_from_batch(data_batch, ego_predictions):
+    targets_all = batch_to_target_all_agents(data_batch)
+    raw_type = torch.cat(
+        (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
+        dim=1,
+    ).type(torch.int64)
+
+    # Use predicted ego position to compute future box edges
+    targets_all["target_positions"] [:, 0, :, :] = ego_predictions["positions"]
+    targets_all["target_yaws"][:, 0, :, :] = ego_predictions["yaws"]
+
+    pred_edges = generate_edges(
+        raw_type, targets_all["extents"],
+        pos_pred=targets_all["target_positions"],
+        yaw_pred=targets_all["target_yaws"]
+    )
+    return pred_edges
+

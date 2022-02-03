@@ -23,6 +23,7 @@ def optimize_trajectories(
         target_avails,
         dynamics_model,
         step_time: float,
+        data_batch = None,
         goal_loss_weight=1.0,
         traj_loss_weight=0.0,
         coll_loss_weight=0.0,
@@ -56,7 +57,19 @@ def optimize_trajectories(
                 targets=target_trajs,
                 availabilities=target_avails
             ) * traj_loss_weight
-            total_loss = torch.sum(torch.hstack(list(losses.values())))
+            if coll_loss_weight > 0:
+                assert data_batch is not None
+                coll_edges = L5Utils.get_edges_from_batch(
+                    data_batch,
+                    ego_predictions=dict(positions=pos, yaws=yaw)
+                )
+                for c in coll_edges:
+                    coll_edges[c] = coll_edges[c][:, :target_trajs.shape[-2]]
+                vv_edges = dict(VV=coll_edges["VV"])
+                if vv_edges["VV"].shape[0] > 0:
+                    losses["coll_loss"] = collision_loss(vv_edges) * coll_loss_weight
+
+            total_loss = torch.hstack(list(losses.values())).sum()
 
             # backprop
             total_loss.backward()
@@ -163,20 +176,9 @@ class RasterizedPlanningModel(nn.Module):
         )
 
         # compute collision loss
-        targets_all = L5Utils.batch_to_target_all_agents(data_batch)
-        raw_type = torch.cat(
-            (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
-            dim=1,
-        ).type(torch.int64)
-
-        # Use predicted ego position to compute future box edges
-        targets_all["target_positions"] [:, 0, :, :] = pred_batch["predictions"]["positions"]
-        targets_all["target_yaws"][:, 0, :, :] = pred_batch["predictions"]["yaws"]
-
-        pred_edges = L5Utils.generate_edges(
-            raw_type, targets_all["extents"],
-            pos_pred=targets_all["target_positions"],
-            yaw_pred=targets_all["target_yaws"]
+        pred_edges = L5Utils.get_edges_from_batch(
+            data_batch=data_batch,
+            ego_predictions=pred_batch["predictions"]
         )
 
         coll_loss = collision_loss(pred_edges=pred_edges)
@@ -220,8 +222,10 @@ class RasterizedGCModel(RasterizedPlanningModel):
         goal_feat = self.goal_encoder(goal_state)
         input_feat = torch.cat((map_feat, goal_feat), dim=-1)
 
-        curr_states = torch.zeros(image_batch.shape[0], 4).to(image_batch.device)  # [x, y, vel, yaw]
-        curr_states[:, 2] = data_batch["curr_speed"]
+        if self.traj_decoder.dyn is not None:
+            curr_states = get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
+        else:
+            curr_states = None
         traj = self.traj_decoder.forward(inputs=input_feat, current_states=curr_states)["trajectories"]
 
         pred_positions = traj[:, :, :2]

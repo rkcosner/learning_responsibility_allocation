@@ -275,13 +275,17 @@ def collision_loss(pred_edges: Dict[str, torch.Tensor], col_funcs=None):
 
     coll_loss = 0
     for et, fun in col_funcs.items():
+        if et not in pred_edges:
+            continue
         edges = pred_edges[et]
+        if edges.shape[0] == 0:
+            continue
         dis = fun(
             edges[..., 0:3],
             edges[..., 3:6],
             edges[..., 6:8],
             edges[..., 8:],
-        ).min(dim=-1)[0]
-        coll_loss += torch.sum(torch.sigmoid(-dis - 4.0))  # smooth collision loss
+        ).min(dim=-1)[0]  # take min distance across time steps
+        coll_loss += torch.mean(torch.sigmoid(-dis - 4.0))  # smooth collision loss
     return coll_loss
 
