@@ -10,6 +10,7 @@ from l5kit.geometry import transform_points, rotation33_as_yaw
 
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.envs.base import BaseEnv, BatchedEnv, SimulationException
+from tbsim.utils.geometry_utils import batch_nd_transform_points
 
 
 class EnvL5KitSimulation(BaseEnv, BatchedEnv):
@@ -231,25 +232,24 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         actions = TensorUtils.to_numpy(actions)
 
         obs = self.get_observation()
-        actions_world = dict(ego=dict())
+        actions_world = dict()
         # Convert action to world frame
-        world_from_agent = obs["ego"]["world_from_agent"]
-        actions_world["ego"]["positions"] = transform_points(actions["ego"]["positions"], world_from_agent)
-        actions_world["ego"]["yaws"] = obs["ego"]["yaw"][..., None, None] + actions["ego"]["yaws"]
-
+        actions_world["ego"] = dict(
+            positions=transform_points(actions["ego"]["positions"], obs["ego"]["world_from_agent"]),
+            yaws=obs["ego"]["yaw"][..., None, None] + actions["ego"]["yaws"]
+        )
         for step_i in range(num_steps_to_take):
             step_actions_world = TensorUtils.map_ndarray(actions_world, lambda x: x[..., step_i:, :])
+            obs = self.get_observation()
 
             # transform step action back to the agent frame
-            obs = self.get_observation()
-            agent_from_world = obs["ego"]["agent_from_world"]
-            step_actions = dict(ego=dict())
-            step_actions["ego"]["positions"] = transform_points(step_actions_world["ego"]["positions"], agent_from_world)
-            step_actions["ego"]["yaws"] = step_actions_world["ego"]["yaws"] - obs["ego"]["yaw"][..., None, None]
+            step_actions = dict()
+            for k in step_actions_world:
+                step_actions[k] = dict(
+                    positions=transform_points(step_actions_world[k]["positions"], obs["ego"]["agent_from_world"]),
+                    yaws=step_actions_world[k]["yaws"] - obs["ego"]["yaw"][..., None, None]
+                )
 
             ego_control = step_actions.get("ego", None)
-            # agents_samples = step_actions.get("agents", None)
-            # ego_samples = None if ego_control is None else ego_control.get("samples", None)
-            # agents_samples = None if agents_samples is None else agents_samples.get("samples", None)
-
-            self._step(ego_control=ego_control)
+            ego_samples = step_actions.get("ego_samples", None)
+            self._step(ego_control=ego_control, ego_samples=ego_samples)

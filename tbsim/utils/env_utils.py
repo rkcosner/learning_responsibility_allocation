@@ -173,6 +173,7 @@ class OptimController(object):
             target_avails=target_avails,
             dynamics_model=self.dyn,
             step_time=self.step_time,
+            data_batch=obs,
             **self.optimizer_kwargs
         )
         return traj
@@ -187,8 +188,8 @@ class HierarchicalWrapper(object):
 
     def get_action(self, obs, num_steps_to_goal=None, **kwargs):
         with torch.no_grad():
-            preds = self.planner.get_action(obs, sample=kwargs.get("sample", False))
-        preds = preds["ego"]
+            all_preds = self.planner.get_action(obs, sample=kwargs.get("sample", False))
+        preds = all_preds["ego"]
         targets = torch.cat((preds["positions"], preds["yaws"]), dim=-1)
         if num_steps_to_goal is not None:
             assert num_steps_to_goal > 0
@@ -200,4 +201,7 @@ class HierarchicalWrapper(object):
                 targets = targets[..., :num_steps_to_goal, :]
         init_u = preds.get("controls", None)
         actions = self.ego_controller.get_action(obs["ego"], targets=targets, init_u=init_u)
-        return dict(ego=actions)
+        output = dict(ego=actions)
+        if "ego_samples" in all_preds:
+            output["ego_samples"] = all_preds["ego_samples"]
+        return output
