@@ -2,13 +2,14 @@ import numpy as np
 import math
 import textwrap
 from collections import OrderedDict
-from typing import Dict, Union
+from typing import Dict, Union, List
 from copy import deepcopy
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models.resnet import resnet18, resnet50
+from torchvision.models.feature_extraction import create_feature_extractor
 
 from tbsim.utils.tensor_utils import reshape_dimensions, flatten
 import tbsim.utils.tensor_utils as TensorUtils
@@ -340,18 +341,19 @@ class ConvBlock(nn.Module):
 
 
 class UNetDecoder(nn.Module):
-    def __init__(self, input_channel, up_factor, bilinear, batchnorm):
+    """UNet part based on https://github.com/milesial/Pytorch-UNet/tree/master/unet"""
+    def __init__(self, input_channel, output_channel, encoder_channels, up_factor, bilinear=True, batchnorm=True):
         super(UNetDecoder, self).__init__()
         self.conv1 = nn.Sequential(
             nn.Conv2d(input_channel, 1024, kernel_size=3, stride=1, padding=1, bias=False),
             nn.ReLU(True)
         )
 
-        self.up1 = Up(2048, 512, bilinear=True)
+        self.up1 = Up(1024 + encoder_channels[-1], 512, bilinear=True)
 
-        self.up2 = Up(1024, 512 // up_factor, bilinear)
+        self.up2 = Up(512 + encoder_channels[-2], 512 // up_factor, bilinear)
 
-        self.up3 = Up(512, 256 // up_factor, bilinear)
+        self.up3 = Up(256 + encoder_channels[-3], 256 // up_factor, bilinear)
 
         self.layer1 = nn.Sequential(
             ConvBlock(128, [64, 64, 64], kernel_size=3, stride=1, batchnorm=batchnorm),
@@ -372,14 +374,15 @@ class UNetDecoder(nn.Module):
         )
 
         self.conv2 = nn.Sequential(
-            nn.Conv2d(16, self.output_dim, kernel_size=1)
+            nn.Conv2d(16, output_channel, kernel_size=1)
         )
 
-    def forward(self, feat_to_decode, encoder_feats, target_hw):
+    def forward(self, feat_to_decode: torch.Tensor, encoder_feats: List[torch.Tensor], target_hw: tuple):
+        assert len(encoder_feats) >= 3
         x = self.conv1(feat_to_decode)
-        x = self.up1(x, encoder_feats[-2])
-        x = self.up2(x, encoder_feats[-3])
-        x = self.up3(x, encoder_feats[-4])
+        x = self.up1(x, encoder_feats[-1])
+        x = self.up2(x, encoder_feats[-2])
+        x = self.up3(x, encoder_feats[-3])
 
         for layer in [self.layer1, self.layer2, self.layer3, self.conv2]:
             x = layer(x)
@@ -525,7 +528,7 @@ class RasterizedMapEncoder(nn.Module):
             self,
             model_arch: str,
             input_image_shape: tuple = (3, 224, 224),
-            feature_dim: int = 128,
+            feature_dim: int = None,
             use_spatial_softmax=False,
             spatial_softmax_kwargs=None,
             output_activation = nn.ReLU
@@ -534,44 +537,120 @@ class RasterizedMapEncoder(nn.Module):
         self.model_arch = model_arch
         self.num_input_channels = input_image_shape[0]
         self._feature_dim = feature_dim
-        self._output_activation = output_activation
+        if output_activation is None:
+            self._output_activation = nn.Identity()
+        else:
+            self._output_activation = output_activation()
 
         # configure conv backbone
         if model_arch == "resnet18":
             self.map_model = resnet18()
             out_h = int(math.ceil(input_image_shape[1] / 32.))
             out_w = int(math.ceil(input_image_shape[2] / 32.))
-            conv_out_shape = (2048, out_h, out_w)
+            self.conv_out_shape = (512, out_h, out_w)
         elif model_arch == "resnet50":
             self.map_model = resnet50()
             out_h = int(math.ceil(input_image_shape[1] / 32.))
             out_w = int(math.ceil(input_image_shape[2] / 32.))
-            conv_out_shape = (2048, out_h, out_w)
+            self.conv_out_shape = (2048, out_h, out_w)
         else:
             raise NotImplementedError(f"Model arch {model_arch} unknown")
 
         # configure spatial reduction pooling layer
         if use_spatial_softmax:
-            pooling = SpatialSoftmax(input_shape=conv_out_shape, **spatial_softmax_kwargs)
-            pool_out_dim = int(np.prod(pooling.output_shape(conv_out_shape)))
+            pooling = SpatialSoftmax(input_shape=self.conv_out_shape, **spatial_softmax_kwargs)
+            self.pool_out_dim = int(np.prod(pooling.output_shape(self.conv_out_shape)))
         else:
             pooling = nn.AdaptiveAvgPool2d((1, 1))
-            pool_out_dim = conv_out_shape[0]
+            self.pool_out_dim = self.conv_out_shape[0]
 
         self.map_model.conv1 = nn.Conv2d(
             self.num_input_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False
         )
         self.map_model.avgpool = pooling
-        self.map_model.fc = nn.Linear(in_features=pool_out_dim, out_features=feature_dim)
+        if feature_dim is not None:
+            self.map_model.fc = nn.Linear(in_features=self.pool_out_dim, out_features=feature_dim)
+        else:
+            self.map_model.fc = nn.Identity()
 
     def output_shape(self, input_shape=None):
-        return [self._feature_dim]
+        if self._feature_dim is not None:
+            return [self._feature_dim]
+        else:
+            return [self.pool_out_dim]
+
+    def forward(self, map_inputs) -> torch.Tensor:
+        feat = self.map_model(map_inputs)
+        feat = self._output_activation(feat)
+        return feat
+
+
+class RasterizedMapKeyPointNet(RasterizedMapEncoder):
+    """Predict a list of keypoints [x, y] given a rasterized map"""
+    def __init__(
+            self,
+            model_arch: str,
+            input_image_shape: tuple = (3, 224, 224),
+            spatial_softmax_kwargs=None
+    ) -> None:
+        super().__init__(
+            model_arch=model_arch,
+            input_image_shape=input_image_shape,
+            feature_dim=None,
+            use_spatial_softmax=True,
+            spatial_softmax_kwargs=spatial_softmax_kwargs
+        )
+
+    def forward(self, map_inputs) -> torch.Tensor:
+        outputs = super(RasterizedMapKeyPointNet, self).forward(map_inputs)
+        return outputs.reshape(outputs.shape[0], -1, 2)  # reshape back to kp format
+
+
+class RasterizedMapUNet(nn.Module):
+    """Predict a spatial map same size as the input rasterized map"""
+    def __init__(
+            self,
+            model_arch: str,
+            input_image_shape: tuple = (3, 224, 224),
+            output_channel=1,
+            use_spatial_softmax=False,
+            spatial_softmax_kwargs=None
+    ) -> None:
+        super(RasterizedMapUNet, self).__init__()
+        model = RasterizedMapEncoder(
+            model_arch=model_arch,
+            input_image_shape=input_image_shape,
+            use_spatial_softmax=use_spatial_softmax,
+            spatial_softmax_kwargs=spatial_softmax_kwargs
+        )
+        self.input_image_shape = input_image_shape
+        # build graph for extracting intermediate features
+        feat_nodes = {
+            'map_model.layer1': 'layer1',
+            'map_model.layer2': 'layer2',
+            'map_model.layer3': 'layer3',
+            'map_model.layer4': 'layer4',
+        }
+        self.encoder_heads = create_feature_extractor(model, feat_nodes)
+        if model_arch in ["resnet18", "resnet34"]:
+            encoder_channels = [64, 128, 256, 512]
+        else:
+            encoder_channels = [256, 512, 1024, 2048]
+        self.decoder = UNetDecoder(
+            input_channel=encoder_channels[-1],
+            encoder_channels=encoder_channels[:-1],
+            output_channel=output_channel,
+            up_factor=2
+        )
 
     def forward(self, map_inputs):
-        feat = self.map_model(map_inputs)
-        if self._output_activation is not None:
-            feat = self._output_activation()(feat)
-        return feat
+        encoder_feats = self.encoder_heads(map_inputs)
+        encoder_feats = list(encoder_feats.values())
+        return self.decoder.forward(
+            feat_to_decode=encoder_feats[-1],
+            encoder_feats=encoder_feats[:-1],
+            target_hw=self.input_image_shape[1:]
+        )
 
 
 class RNNTrajectoryEncoder(nn.Module):
@@ -820,3 +899,9 @@ class MLPTrajectoryDecoder(TrajectoryDecoder):
         if "current_states" in preds:
             preds["current_states"][:, [0, 1, 3]] = 0. # ego frame prediction - [x, y, yaw] are 0's
         return preds
+
+
+if __name__ == "__main__":
+    model = RasterizedMapUNet(model_arch="resnet18", input_image_shape=(15, 224, 224), output_channel=4)
+    t = torch.randn(2, 15, 224, 224)
+    print(model(t).shape)

@@ -251,6 +251,15 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.optim_params.policy.regularization.L2 = 0.00  # L2 regularization strength
 
 
+class SpatialPlannerConfig(L5RasterizedPlanningConfig):
+    def __init__(self):
+        super(SpatialPlannerConfig, self).__init__()
+        self.name = "spatial_planner"
+        self.loss_weights.pixel_cls_loss = 1.0
+        self.loss_weights.pixel_res_loss = 1.0
+        self.loss_weights.pixel_yaw_loss = 1.0
+
+
 class L5RasterizedGCConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(L5RasterizedGCConfig, self).__init__()

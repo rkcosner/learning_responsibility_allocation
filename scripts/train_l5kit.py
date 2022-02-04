@@ -85,18 +85,20 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         assert cfg.train.validation.enabled
         assert cfg.train.save.every_n_steps > cfg.train.validation.every_n_steps, \
             "checkpointing frequency needs to be greater than validation frequency"
-        ckpt_valid_callback = pl.callbacks.ModelCheckpoint(
-            dirpath=ckpt_dir,
-            filename="iter{step}_ep{epoch}_valLoss{val/losses_prediction_loss:.2f}",
-            # explicitly spell out metric names, otherwise PL parses '/' in metric names to directories
-            auto_insert_metric_name=False,
-            save_top_k=cfg.train.save.best_k,  # save the best k models
-            monitor="val/losses_prediction_loss",
-            mode="min",
-            every_n_train_steps=cfg.train.save.every_n_steps,
-            verbose=True,
-        )
-        train_callbacks.append(ckpt_valid_callback)
+        for metric_name, metric_key in model.checkpoint_monitor_keys.items():
+            print("Monitoring metrics {} under alias {}".format(metric_key, metric_name))
+            ckpt_valid_callback = pl.callbacks.ModelCheckpoint(
+                dirpath=ckpt_dir,
+                filename="iter{step}_ep{epoch}_%s{%s:.2f}" % (metric_name, metric_key),
+                # explicitly spell out metric names, otherwise PL parses '/' in metric names to directories
+                auto_insert_metric_name=False,
+                save_top_k=cfg.train.save.best_k,  # save the best k models
+                monitor=metric_key,
+                mode="min",
+                every_n_train_steps=cfg.train.save.every_n_steps,
+                verbose=True,
+            )
+            train_callbacks.append(ckpt_valid_callback)
 
     if cfg.train.save.save_best_rollout:
         assert cfg.train.rollout.enabled

@@ -22,6 +22,61 @@ def batch_nd_transform_points(points, Mat):
     ].squeeze(-2)
 
 
+def transform_points_tensor(points: torch.Tensor, transf_matrix: torch.Tensor) -> torch.Tensor:
+    """
+    Transform a set of 2D/3D points using the given transformation matrix.
+    Assumes row major ordering of the input points. The transform function has 3 modes:
+    - points (N, F), transf_matrix (F+1, F+1)
+    all points are transformed using the matrix and the output points have shape (N, F).
+    - points (B, N, F), transf_matrix (F+1, F+1)
+    all sequences of points are transformed using the same matrix and the output points have shape (B, N, F).
+    transf_matrix is broadcasted.
+    - points (B, N, F), transf_matrix (B, F+1, F+1)
+    each sequence of points is transformed using its own matrix and the output points have shape (B, N, F).
+    Note this function assumes points.shape[-1] == matrix.shape[-1] - 1, which means that last
+    rows in the matrices do not influence the final results.
+    For 2D points only the first 2x3 parts of the matrices will be used.
+
+    :param points: Input points of shape (N, F) or (B, N, F)
+        with F = 2 or 3 depending on input points are 2D or 3D points.
+    :param transf_matrix: Transformation matrix of shape (F+1, F+1) or (B, F+1, F+1) with F = 2 or 3.
+    :return: Transformed points of shape (N, F) or (B, N, F) depending on the dimensions of the input points.
+    """
+    points_log = f" received points with shape {points.shape} "
+    matrix_log = f" received matrices with shape {transf_matrix.shape} "
+
+    assert points.ndim in [2, 3], f"points should have ndim in [2,3],{points_log}"
+    assert transf_matrix.ndim in [2, 3], f"matrix should have ndim in [2,3],{matrix_log}"
+    assert points.ndim >= transf_matrix.ndim, f"points ndim should be >= than matrix,{points_log},{matrix_log}"
+
+    points_feat = points.shape[-1]
+    assert points_feat in [2, 3], f"last points dimension must be 2 or 3,{points_log}"
+    assert transf_matrix.shape[-1] == transf_matrix.shape[-2], f"matrix should be a square matrix,{matrix_log}"
+
+    matrix_feat = transf_matrix.shape[-1]
+    assert matrix_feat in [3, 4], f"last matrix dimension must be 3 or 4,{matrix_log}"
+    assert points_feat == matrix_feat - 1, f"points last dim should be one less than matrix,{points_log},{matrix_log}"
+
+    def _transform(points: torch.Tensor, transf_matrix: torch.Tensor) -> torch.Tensor:
+        num_dims = transf_matrix.shape[-1] - 1
+        transf_matrix = torch.permute(transf_matrix, (0, 2, 1))
+        return points @ transf_matrix[:, :num_dims, :num_dims] + transf_matrix[:, -1:, :num_dims]
+
+    if points.ndim == transf_matrix.ndim == 2:
+        points = torch.unsqueeze(points, 0)
+        transf_matrix = torch.unsqueeze(transf_matrix, 0)
+        return _transform(points, transf_matrix)[0]
+
+    elif points.ndim == transf_matrix.ndim == 3:
+        return _transform(points, transf_matrix)
+
+    elif points.ndim == 3 and transf_matrix.ndim == 2:
+        transf_matrix = torch.unsqueeze(transf_matrix, 0)
+        return _transform(points, transf_matrix)
+    else:
+        raise NotImplementedError(f"unsupported case!{points_log},{matrix_log}")
+
+
 def PED_PED_collision(p1, p2, S1, S2):
     if isinstance(p1, torch.Tensor):
 

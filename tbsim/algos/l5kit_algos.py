@@ -13,11 +13,12 @@ from tbsim.models.l5kit_models import (
     optimize_trajectories,
     get_current_states
 )
-from tbsim.models.base_models import MLPTrajectoryDecoder
+from tbsim.models.base_models import MLPTrajectoryDecoder, RasterizedMapUNet, RasterizedMapKeyPointNet
 from tbsim.models.transformer_model import TransformerModel
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.metrics as Metrics
 import tbsim.utils.l5_utils as L5Utils
+from tbsim.utils.geometry_utils import transform_points_tensor
 import tbsim.dynamics as dynamics
 
 
@@ -50,6 +51,12 @@ class L5TrafficModel(pl.LightningModule):
             use_spatial_softmax=algo_config.spatial_softmax.enabled,
             spatial_softmax_kwargs=algo_config.spatial_softmax.kwargs,
         )
+
+    @property
+    def checkpoint_monitor_keys(self):
+        return {
+            "valLoss": "val/losses_prediction_loss"
+        }
 
     def forward(self, obs_dict):
         return self.nets["policy"](obs_dict)["predictions"]
@@ -142,26 +149,7 @@ class L5TrafficModel(pl.LightningModule):
         )
 
     def get_action(self, obs_dict, **kwargs):
-        # if not kwargs.get("optimize", False):
         return {"ego": self(obs_dict["ego"])}
-        # else:
-        #     preds = self.nets["policy"].forward(obs_dict["ego"])
-        #
-        #     init_x = preds["curr_states"]
-        #     init_u = preds["controls"]
-        #     # Use GT traj as reference trajs
-        #     target_trajs = torch.cat((obs_dict["target_positions"], obs_dict["target_yaws"]), dim=2)
-        #     optimized_trajs, _, losses = optimize_trajectories(
-        #         init_u=init_u,
-        #         init_x=init_x,
-        #         target_trajs=target_trajs,
-        #         target_avails=obs_dict["target_availabilities"],
-        #         dynamics_model=self.nets["policy"].traj_decoder.dyn,
-        #         step_time=self.algo_config.step_time,
-        #         num_optim_iterations=kwargs.get("num_optim_iterations", 50)
-        #     )
-        #     print("Action optim loss=", losses)
-        #     return {"ego": optimized_trajs}
 
 
 class L5TrafficModelGC(L5TrafficModel):
@@ -196,6 +184,174 @@ class L5TrafficModelGC(L5TrafficModel):
         )
 
 
+class SpatialPlanner(pl.LightningModule):
+    def __init__(self, algo_config, modality_shapes):
+        super(SpatialPlanner, self).__init__()
+        self.algo_config = algo_config
+        self.nets = nn.ModuleDict()
+        assert modality_shapes["image"][0] == 15
+
+        self.nets["policy"] = RasterizedMapUNet(
+            model_arch=algo_config.model_architecture,
+            input_image_shape=modality_shapes["image"],  # [C, H, W]
+            output_channel=4,  # (pixel, x_residua, y_residua, yaw)
+            use_spatial_softmax=algo_config.spatial_softmax.enabled,
+            spatial_softmax_kwargs=algo_config.spatial_softmax.kwargs,
+        )
+
+    @property
+    def checkpoint_monitor_keys(self):
+        return {
+            "posErr": "val/metrics_goal_pos_err"
+        }
+
+    def decode_spatial_map(self, pred_map):
+        # decode map as predictions
+        b, c, h, w = pred_map.shape
+        pixel_logit, pixel_loc_flat = torch.max(torch.flatten(pred_map[:, 0], start_dim=1), dim=1)
+        pixel_loc_x = torch.remainder(pixel_loc_flat, w)
+        pixel_loc_y = torch.floor(pixel_loc_flat.float() / float(w)).long()
+        pixel_loc = torch.stack((pixel_loc_x, pixel_loc_y), dim=1)  # [B, 2]
+        local_pred = torch.gather(
+            input=torch.flatten(pred_map, 2),  # [B, C, H * W]
+            dim=2,
+            index=TensorUtils.unsqueeze_expand_at(pixel_loc_flat, size=c, dim=1)[:, :, None]  # [B, C, 1]
+        ).squeeze(-1)
+        residual_pred = local_pred[:, 1:3]
+        yaw_pred = local_pred[:, 3:4]
+        pos_pred = pixel_loc + residual_pred
+        return pos_pred, yaw_pred, pixel_logit
+
+    def get_goal_supervision(self, data_batch):
+        b, _, h, w = data_batch["image"].shape  # [B, C, H, W]
+        # create spatial supervisions
+        target_pos_raster = transform_points_tensor(
+            data_batch["target_positions"],
+            data_batch["raster_from_agent"].float()
+        )
+        target_pos_raster[:, 0] = target_pos_raster[:, 0].clip(0, w - 1e-5)
+        target_pos_raster[:, 1] = target_pos_raster[:, 1].clip(0, h - 1e-5)
+
+        goal_index = -1  # TODO
+
+        # use last step as goal location TODO: consider availabilities?
+        goal_pos_raster = target_pos_raster[:, goal_index]  # [B, (x, y)]
+        goal_pos_pixel = torch.floor(goal_pos_raster)  # round down pixels
+        goal_pos_residual = goal_pos_raster - goal_pos_pixel  # compute rounding residuals (range 0-1)
+        # compute flattened pixel location
+        goal_pos_pixel_flat = goal_pos_pixel[:, 1] * w + goal_pos_pixel[:, 0]
+        raster_sup_flat = TensorUtils.to_one_hot(goal_pos_pixel_flat.long(), num_class=h * w)
+        raster_sup = raster_sup_flat.reshape(b, h, w)
+        return {
+            "goal_pos_residual": goal_pos_residual,
+            "goal_spatial_map": raster_sup,
+            "goal_pos_pixel": goal_pos_pixel,
+            "goal_pos_pixel_flat": goal_pos_pixel_flat,
+            "goal_position": data_batch["target_positions"][:, goal_index],
+            "goal_yaw": data_batch["target_yaws"][:, goal_index]
+        }
+
+    def forward(self, obs_dict):
+        pred_map = self.nets["policy"](obs_dict["image"])
+        pred_map[:, 1:3] = torch.sigmoid(pred_map[:, 1:3])  # x, y residuals are within [0, 1]
+        # decode map as predictions
+        pos_pred, yaw_pred, pred_logit = self.decode_spatial_map(pred_map)
+
+        return dict(
+            predictions=dict(
+                positions=pos_pred[:, None],
+                yaws=yaw_pred[:, None]
+            ),
+            confidence=torch.sigmoid(pred_logit),
+            spatial_map=pred_map
+        )
+
+    def _compute_metrics(self, pred_batch, data_batch):
+        metrics = dict()
+        goal_sup = data_batch["goal"]
+        pos_norm_err = torch.norm(pred_batch["predictions"]["positions"] - goal_sup["goal_position"], dim=-1)
+        metrics["goal_pos_err"] = torch.mean(pos_norm_err)
+        metrics["goal_yaw_err"] = torch.mean(torch.abs(pred_batch["predictions"]["yaws"] - goal_sup["goal_yaw"]))
+
+        pixel_pred = torch.argmax(torch.flatten(pred_batch["spatial_map"][:, 0], start_dim=1), dim=1) # [B]
+        metrics["goal_selection_err"] = torch.mean((goal_sup["goal_pos_pixel_flat"].long() == pixel_pred).float())
+        metrics["goal_cls_err"] = torch.mean((pred_batch["confidence"] > 0.5).float())
+        metrics = TensorUtils.to_numpy(metrics)
+        for k, v in metrics.items():
+            metrics[k] = float(v)
+        return metrics
+
+    def _compute_losses(self, pred_batch, data_batch):
+        losses = dict()
+        pred_map = pred_batch["spatial_map"]
+        b, c, h, w = pred_map.shape
+
+        goal_sup = data_batch["goal"]
+        # compute pixel classification loss
+        losses["pixel_cls_loss"] = torch.binary_cross_entropy_with_logits(
+            input=goal_sup["goal_spatial_map"],
+            target=pred_map[:, 0]
+        ).mean()
+
+        # compute residual and yaw loss
+        gather_inds = TensorUtils.unsqueeze_expand_at(goal_sup["goal_pos_pixel_flat"].long(), size=c, dim=1)[..., None]
+        local_pred = torch.gather(
+            input=torch.flatten(pred_map, 2),  # [B, C, H * W]
+            dim=2,
+            index=gather_inds  # [B, C, 1]
+        ).squeeze(-1)
+        residual_pred = local_pred[:, 1:3]
+        yaw_pred = local_pred[:, 3:4]
+        losses["pixel_res_loss"] = torch.nn.MSELoss()(residual_pred, goal_sup["goal_pos_residual"])
+        losses["pixel_yaw_loss"] = torch.nn.MSELoss()(yaw_pred, goal_sup["goal_yaw"])
+
+        return losses
+
+    def training_step(self, batch, batch_idx):
+        pout = self(batch)
+        batch["goal"] = self.get_goal_supervision(batch)
+        losses = self._compute_losses(pout, batch)
+        total_loss = 0.0
+        for lk, l in losses.items():
+            loss = l * self.algo_config.loss_weights[lk]
+            self.log("train/losses_" + lk, loss)
+            total_loss += loss
+
+        metrics = self._compute_metrics(pout, batch)
+        for mk, m in metrics.items():
+            self.log("train/metrics_" + mk, m)
+
+        return total_loss
+
+    def validation_step(self, batch, batch_idx):
+        pout = self(batch)
+        batch["goal"] = self.get_goal_supervision(batch)
+        losses = TensorUtils.detach(self._compute_losses(pout, batch))
+        metrics = self._compute_metrics(pout, batch)
+        return {"losses": losses, "metrics": metrics}
+
+    def validation_epoch_end(self, outputs) -> None:
+        for k in outputs[0]["losses"]:
+            m = torch.stack([o["losses"][k] for o in outputs]).mean()
+            self.log("val/losses_" + k, m)
+
+        for k in outputs[0]["metrics"]:
+            m = np.stack([o["metrics"][k] for o in outputs]).mean()
+            self.log("val/metrics_" + k, m)
+
+    def configure_optimizers(self):
+        optim_params = self.algo_config.optim_params["policy"]
+        return optim.Adam(
+            params=self.parameters(),
+            lr=optim_params["learning_rate"]["initial"],
+            weight_decay=optim_params["regularization"]["L2"],
+        )
+
+    def get_action(self, obs_dict, **kwargs):
+        return {"ego": self(obs_dict["ego"])}
+
+
+
 class L5VAETrafficModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):
         super(L5VAETrafficModel, self).__init__()
@@ -208,6 +364,12 @@ class L5VAETrafficModel(pl.LightningModule):
             modality_shapes=modality_shapes,
             weights_scaling=[1.0, 1.0, 1.0]
         )
+
+    @property
+    def checkpoint_monitor_keys(self):
+        return {
+            "valLoss": "val/losses_prediction_loss"
+        }
 
     def forward(self, obs_dict):
         return self.nets["policy"].predict(obs_dict)["predictions"]
@@ -321,6 +483,12 @@ class L5TransformerTrafficModel(pl.LightningModule):
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
         self.nets["policy"] = TransformerModel(algo_config)
+
+    @property
+    def checkpoint_monitor_keys(self):
+        return {
+            "valLoss": "val/losses_prediction_loss"
+        }
 
     def forward(self, obs_dict):
         return self.nets["policy"](obs_dict)["predictions"]
