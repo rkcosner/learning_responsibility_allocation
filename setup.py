@@ -19,8 +19,9 @@ setup(
         "numpy>=1.19.0",  # need to manually update numpy version to (1.21.4) due to conflict with l5kit's requirement
         "pytorch-lightning",
         "wandb",
-        "torch",
-        "torchvision",
+        "torch==1.10.2",
+        "torchvision==0.11.3",
+        "torchtext"  # weird pytorch-lightning dependency bug
     ],
     eager_resources=["*"],
     include_package_data=True,

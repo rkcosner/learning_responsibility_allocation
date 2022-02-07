@@ -202,7 +202,8 @@ class SpatialPlanner(pl.LightningModule):
     @property
     def checkpoint_monitor_keys(self):
         return {
-            "posErr": "val/metrics_goal_pos_err"
+            "posErr": "val/metrics_goal_pos_err",
+            "valLoss": "val/losses_pixel_cls_loss"
         }
 
     def decode_spatial_map(self, pred_map):
@@ -219,51 +220,97 @@ class SpatialPlanner(pl.LightningModule):
         ).squeeze(-1)
         residual_pred = local_pred[:, 1:3]
         yaw_pred = local_pred[:, 3:4]
-        pos_pred = pixel_loc + residual_pred
-        return pos_pred, yaw_pred, pixel_logit
+        return pixel_loc, residual_pred, yaw_pred, pixel_logit
+
+    def get_last_available_index(self, avails):
+        """
+        Args:
+            avails (torch.Tensor): target availabilities [B, (A), T]
+
+        Returns:
+            last_indices (torch.Tensor): index of the last available frame
+        """
+        num_frames = avails.shape[-1]
+        inds = torch.arange(0, num_frames).to(avails.device)  # [T]
+        inds = (avails > 0).float() * inds  # [B, (A), T] arange indices with unavailable indices set to 0
+        last_inds = inds.max(dim=-1)[1]  # [B, (A)] calculate the index of the last availale frame
+        return last_inds
 
     def get_goal_supervision(self, data_batch):
         b, _, h, w = data_batch["image"].shape  # [B, C, H, W]
+
+        # use last available step as goal location
+        goal_index = self.get_last_available_index(data_batch["target_availabilities"])[:, None, None]
+
+        # gather by goal index
+        goal_pos_agent = torch.gather(
+            data_batch["target_positions"],  # [B, T, 2]
+            dim=1,
+            index=goal_index.expand(-1, 1, data_batch["target_positions"].shape[-1])
+        )  # [B, 1, 2]
+
+        goal_yaw_agent = torch.gather(
+            data_batch["target_yaws"],  # [B, T, 1]
+            dim=1,
+            index=goal_index.expand(-1, 1, data_batch["target_yaws"].shape[-1])
+        )  # [B, 1, 1]
+
         # create spatial supervisions
-        target_pos_raster = transform_points_tensor(
-            data_batch["target_positions"],
+        goal_pos_raster = transform_points_tensor(
+            goal_pos_agent,
             data_batch["raster_from_agent"].float()
-        )
-        target_pos_raster[:, 0] = target_pos_raster[:, 0].clip(0, w - 1e-5)
-        target_pos_raster[:, 1] = target_pos_raster[:, 1].clip(0, h - 1e-5)
+        ).squeeze(1)  # [B, 2]
+        # make sure all pixels are within the raster image
+        goal_pos_raster[:, 0] = goal_pos_raster[:, 0].clip(0, w - 1e-5)
+        goal_pos_raster[:, 1] = goal_pos_raster[:, 1].clip(0, h - 1e-5)
 
-        goal_index = -1  # TODO
-
-        # use last step as goal location TODO: consider availabilities?
-        goal_pos_raster = target_pos_raster[:, goal_index]  # [B, (x, y)]
-        goal_pos_pixel = torch.floor(goal_pos_raster)  # round down pixels
+        goal_pos_pixel = torch.floor(goal_pos_raster).float()  # round down pixels
         goal_pos_residual = goal_pos_raster - goal_pos_pixel  # compute rounding residuals (range 0-1)
         # compute flattened pixel location
         goal_pos_pixel_flat = goal_pos_pixel[:, 1] * w + goal_pos_pixel[:, 0]
         raster_sup_flat = TensorUtils.to_one_hot(goal_pos_pixel_flat.long(), num_class=h * w)
         raster_sup = raster_sup_flat.reshape(b, h, w)
         return {
-            "goal_pos_residual": goal_pos_residual,
-            "goal_spatial_map": raster_sup,
-            "goal_pos_pixel": goal_pos_pixel,
-            "goal_pos_pixel_flat": goal_pos_pixel_flat,
-            "goal_position": data_batch["target_positions"][:, goal_index],
-            "goal_yaw": data_batch["target_yaws"][:, goal_index]
+            "goal_position_residual": goal_pos_residual,  # [B, 2]
+            "goal_spatial_map": raster_sup,  # [B, H, W]
+            "goal_position_pixel": goal_pos_pixel,  # [B, 2]
+            "goal_position_pixel_flat": goal_pos_pixel_flat,  # [B]
+            "goal_position": goal_pos_agent.squeeze(1),  # [B, 2]
+            "goal_yaw": goal_yaw_agent.squeeze(1),  # [B, 1]
+            "goal_index": goal_index.reshape(b)  # [B]
         }
 
     def forward(self, obs_dict):
         pred_map = self.nets["policy"](obs_dict["image"])
         pred_map[:, 1:3] = torch.sigmoid(pred_map[:, 1:3])  # x, y residuals are within [0, 1]
         # decode map as predictions
-        pos_pred, yaw_pred, pred_logit = self.decode_spatial_map(pred_map)
+        pixel_pred, res_pred, yaw_pred, pred_logit = self.decode_spatial_map(pred_map)
+        # transform prediction to agent coordinate
+        pixel_pred = transform_points_tensor(
+            pixel_pred.unsqueeze(1).float(),
+            obs_dict["agent_from_raster"].float()
+        ).squeeze(1)
+        pos_pred = transform_points_tensor(
+            (pixel_pred + res_pred).unsqueeze(1),
+            obs_dict["agent_from_raster"].float()
+        ).squeeze(1)
+
+        # normalize pixel location map
+        location_map = pred_map[:, 0]
+        location_map = torch.softmax(location_map.flatten(1), dim=1).reshape(location_map.shape)
 
         return dict(
             predictions=dict(
-                positions=pos_pred[:, None],
-                yaws=yaw_pred[:, None]
+                positions=pos_pred,
+                yaws=yaw_pred
+            ),
+            pixel_predictions=dict(
+                positions=pixel_pred,
+                yaws=yaw_pred
             ),
             confidence=torch.sigmoid(pred_logit),
-            spatial_map=pred_map
+            spatial_prediction=pred_map,
+            normalized_location_map=location_map
         )
 
     def _compute_metrics(self, pred_batch, data_batch):
@@ -273,9 +320,9 @@ class SpatialPlanner(pl.LightningModule):
         metrics["goal_pos_err"] = torch.mean(pos_norm_err)
         metrics["goal_yaw_err"] = torch.mean(torch.abs(pred_batch["predictions"]["yaws"] - goal_sup["goal_yaw"]))
 
-        pixel_pred = torch.argmax(torch.flatten(pred_batch["spatial_map"][:, 0], start_dim=1), dim=1) # [B]
-        metrics["goal_selection_err"] = torch.mean((goal_sup["goal_pos_pixel_flat"].long() == pixel_pred).float())
-        metrics["goal_cls_err"] = torch.mean((pred_batch["confidence"] > 0.5).float())
+        pixel_pred = torch.argmax(torch.flatten(pred_batch["spatial_prediction"][:, 0], start_dim=1), dim=1) # [B]
+        metrics["goal_selection_err"] = torch.mean((goal_sup["goal_position_pixel_flat"].long() != pixel_pred).float())
+        metrics["goal_cls_err"] = torch.mean((pred_batch["confidence"] < 0.5).float())
         metrics = TensorUtils.to_numpy(metrics)
         for k, v in metrics.items():
             metrics[k] = float(v)
@@ -283,26 +330,35 @@ class SpatialPlanner(pl.LightningModule):
 
     def _compute_losses(self, pred_batch, data_batch):
         losses = dict()
-        pred_map = pred_batch["spatial_map"]
+        pred_map = pred_batch["spatial_prediction"]
         b, c, h, w = pred_map.shape
 
         goal_sup = data_batch["goal"]
         # compute pixel classification loss
-        losses["pixel_cls_loss"] = torch.binary_cross_entropy_with_logits(
-            input=goal_sup["goal_spatial_map"],
-            target=pred_map[:, 0]
+        location_prediction = pred_map[:, 0]
+        losses["pixel_bce_loss"] = torch.binary_cross_entropy_with_logits(
+            input=location_prediction,  # [B, H, W]
+            target=goal_sup["goal_spatial_map"],  # [B, H, W]
         ).mean()
 
+        losses["pixel_ce_loss"] = torch.nn.CrossEntropyLoss()(
+            input=location_prediction.flatten(start_dim=1),  # [B, H * W]
+            target=goal_sup["goal_position_pixel_flat"].long(),  # [B]
+        )
+
         # compute residual and yaw loss
-        gather_inds = TensorUtils.unsqueeze_expand_at(goal_sup["goal_pos_pixel_flat"].long(), size=c, dim=1)[..., None]
+        gather_inds = TensorUtils.unsqueeze_expand_at(
+            goal_sup["goal_position_pixel_flat"].long(), size=c, dim=1
+        )[..., None]  # -> [B, C, 1]
+
         local_pred = torch.gather(
             input=torch.flatten(pred_map, 2),  # [B, C, H * W]
             dim=2,
             index=gather_inds  # [B, C, 1]
-        ).squeeze(-1)
+        ).squeeze(-1)  # -> [B, C]
         residual_pred = local_pred[:, 1:3]
         yaw_pred = local_pred[:, 3:4]
-        losses["pixel_res_loss"] = torch.nn.MSELoss()(residual_pred, goal_sup["goal_pos_residual"])
+        losses["pixel_res_loss"] = torch.nn.MSELoss()(residual_pred, goal_sup["goal_position_residual"])
         losses["pixel_yaw_loss"] = torch.nn.MSELoss()(yaw_pred, goal_sup["goal_yaw"])
 
         return losses

@@ -81,8 +81,7 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
     model = algo_factory(algo_config=cfg.algo, modality_shapes=datamodule.modality_shapes, **model_kwargs)
 
     # Checkpointing
-    if cfg.train.save.save_best_validation:
-        assert cfg.train.validation.enabled
+    if cfg.train.validation.enabled and cfg.train.save.save_best_validation:
         assert cfg.train.save.every_n_steps > cfg.train.validation.every_n_steps, \
             "checkpointing frequency needs to be greater than validation frequency"
         for metric_name, metric_key in model.checkpoint_monitor_keys.items():
@@ -100,8 +99,7 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
             )
             train_callbacks.append(ckpt_valid_callback)
 
-    if cfg.train.save.save_best_rollout:
-        assert cfg.train.rollout.enabled
+    if cfg.train.rollout.enabled and cfg.train.save.save_best_rollout:
         assert cfg.train.save.every_n_steps > cfg.train.rollout.every_n_steps, \
             "checkpointing frequency needs to be greater than rollout frequency"
         ckpt_rollout_callback = pl.callbacks.ModelCheckpoint(

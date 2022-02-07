@@ -255,7 +255,8 @@ class SpatialPlannerConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(SpatialPlannerConfig, self).__init__()
         self.name = "spatial_planner"
-        self.loss_weights.pixel_cls_loss = 1.0
+        self.loss_weights.pixel_bce_loss = 1.0
+        self.loss_weights.pixel_ce_loss = 0.0
         self.loss_weights.pixel_res_loss = 1.0
         self.loss_weights.pixel_yaw_loss = 1.0
 

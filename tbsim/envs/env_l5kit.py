@@ -229,6 +229,13 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         if self._done:
             raise SimulationException("Simulation episode has ended")
 
+        # use dataset actions if we are doing prediction-only rollouts
+        if self._prediction_only:
+            for _ in range(num_steps_to_take):
+                self._step()
+            return
+
+        # otherwise, use @actions to update simulation
         actions = TensorUtils.to_numpy(actions)
 
         obs = self.get_observation()

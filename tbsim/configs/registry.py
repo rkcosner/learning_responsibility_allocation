@@ -32,8 +32,8 @@ EXP_CONFIG_REGISTRY["l5_mixed_gc"] = ExperimentConfig(
 )
 
 EXP_CONFIG_REGISTRY["l5_spatial_planner"] = ExperimentConfig(
-    train_config=L5KitTrainConfig(),
-    env_config=L5KitEnvConfig(),
+    train_config=L5KitMixedTrainConfig(),
+    env_config=L5KitMixedSemanticMapEnvConfig(),
     algo_config=SpatialPlannerConfig(),
     registered_name="l5_spatial_planner"
 )
