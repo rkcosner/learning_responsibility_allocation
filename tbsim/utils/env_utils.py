@@ -157,14 +157,19 @@ class OptimController(object):
         else:
             raise NotImplementedError("dynamics type {} is not implemented", dynamics_type)
 
-    def get_action(self, obs, targets: torch.Tensor, target_avails=None, init_u=None, **kwargs):
-        device = targets.device
-        num_action_steps = targets.shape[-2]
+    def get_action(self, obs, plan, init_u=None, **kwargs):
+        obs = obs["ego"]
+        target_pos = plan["predictions"]["positions"]
+        target_yaw = plan["predictions"]["yaws"]
+        target_avails = plan["availabilities"]
+        device = target_pos.device
+        num_action_steps = target_pos.shape[-2]
         init_x = get_current_states(obs, dyn_type=self.dyn.type())
         if init_u is None:
             init_u = torch.randn(*init_x.shape[:-1], num_action_steps, self.dyn.udim).to(device)
         if target_avails is None:
-            target_avails = torch.ones(targets.shape[:-1]).to(device)
+            target_avails = torch.ones(target_pos.shape[:-1]).to(device)
+        targets = torch.cat((target_pos, target_yaw), dim=-1)
         assert init_u.shape[-2] == num_action_steps
         traj, raw_traj, final_u, losses = optimize_trajectories(
             init_u=init_u,
@@ -176,32 +181,64 @@ class OptimController(object):
             data_batch=obs,
             **self.optimizer_kwargs
         )
-        return traj
+        return dict(ego=traj)
+
+
+class GTPlanner(object):
+    def __init__(self, device):
+        self.device = device
+
+    @staticmethod
+    def get_plan(obs, **kwargs):
+        obs = obs["ego"]
+        plan = dict(
+            predictions=dict(
+                positions=obs["target_positions"],
+                yaws=obs["target_yaws"],
+            ),
+            availabilities=obs["target_availabilities"],
+        )
+        return dict(ego=plan)
 
 
 class HierarchicalWrapper(object):
-    def __init__(self, planner, ego_controller=None, agents_controller=None):
+    def __init__(self, planner, controller=None):
         self.device = planner.device
         self.planner = planner
-        self.ego_controller = ego_controller
-        self.agents_controller = agents_controller
+        self.controller = controller
+
+    @staticmethod
+    def verify_plan(plan):
+        assert "predictions" in plan
+        assert "availabilities" in plan
+        pred = plan["predictions"]
+        assert pred["positions"].ndim == 3  # [B, T, 2]
+        b, t, s = pred["positions"].shape
+        assert s == 2
+        assert pred["yaws"].shape == (b, t, 1)
+        assert plan["availabilities"].shape ==  (b, t)
 
     def get_action(self, obs, num_steps_to_goal=None, **kwargs):
         with torch.no_grad():
-            all_preds = self.planner.get_action(obs, sample=kwargs.get("sample", False))
-        preds = all_preds["ego"]
-        targets = torch.cat((preds["positions"], preds["yaws"]), dim=-1)
+            all_plans = self.planner.get_plan(obs, sample=kwargs.get("sample", False))
+        plan = all_plans["ego"]
+        self.verify_plan(plan)
+        plan_len = plan["predictions"]["positions"].shape[-2]
         if num_steps_to_goal is not None:
             assert num_steps_to_goal > 0
-            if num_steps_to_goal > targets.shape[-2]:
-                padding = torch.zeros(*targets.shape[:-2], num_steps_to_goal - targets.shape[-2], targets.shape[-1])
-                padding = padding.to(targets.device)
-                targets = torch.cat((padding, targets), dim=-2)
+            if num_steps_to_goal > plan_len:
+                n_steps_to_pad = num_steps_to_goal - plan_len
+                plan = TensorUtils.pad_sequence(plan, padding=(n_steps_to_pad, 0), batched=True)
             else:
-                targets = targets[..., :num_steps_to_goal, :]
-        init_u = preds.get("controls", None)
-        actions = self.ego_controller.get_action(obs["ego"], targets=targets, init_u=init_u)
-        output = dict(ego=actions)
-        if "ego_samples" in all_preds:
-            output["ego_samples"] = all_preds["ego_samples"]
+                plan = TensorUtils.map_tensor(plan, func=lambda x: x[:, :num_steps_to_goal])
+        init_u = plan.get("controls", None)
+        actions = self.controller.get_action(
+            obs,
+            plan=plan,
+            init_u=init_u
+        )
+        output = actions
+        output["ego_plan"] = plan
+        if "ego_samples" in all_plans:
+            output["ego_samples"] = all_plans["ego_samples"]
         return output

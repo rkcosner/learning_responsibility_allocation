@@ -148,6 +148,17 @@ class L5TrafficModel(pl.LightningModule):
             weight_decay=optim_params["regularization"]["L2"],
         )
 
+    def get_plan(self, obs_dict, **kwargs):
+        preds = self(obs_dict["ego"])
+        plan = dict(
+            predictions=dict(
+                positions=preds["positions"],
+                yaws=preds["yaws"],
+            ),
+            availabilities=torch.ones(preds["positions"].shape[:-1]).to(preds["positions"].device)  # [B, T]
+        )
+        return dict(eog=plan)
+
     def get_action(self, obs_dict, **kwargs):
         return {"ego": self(obs_dict["ego"])}
 
@@ -182,6 +193,15 @@ class L5TrafficModelGC(L5TrafficModel):
             use_spatial_softmax=algo_config.spatial_softmax.enabled,
             spatial_softmax_kwargs=algo_config.spatial_softmax.kwargs,
         )
+
+    def get_action(self, obs_dict, **kwargs):
+        obs_dict = dict(obs_dict["ego"])
+        if "plan" in kwargs:
+            plan = kwargs["plan"]
+            obs_dict["target_positions"] = plan["predictions"]["positions"]
+            obs_dict["target_yaws"] = plan["predictions"]["yaws"]
+            obs_dict["target_availabilities"] = plan["availabilities"]
+        return {"ego": self(obs_dict)}
 
 
 class SpatialPlanner(pl.LightningModule):
@@ -297,20 +317,21 @@ class SpatialPlanner(pl.LightningModule):
 
         # normalize pixel location map
         location_map = pred_map[:, 0]
-        location_map = torch.softmax(location_map.flatten(1), dim=1).reshape(location_map.shape)
+        norm_location_map = torch.softmax(location_map.flatten(1), dim=1).reshape(location_map.shape)
 
         return dict(
             predictions=dict(
                 positions=pos_pred,
                 yaws=yaw_pred
             ),
-            pixel_predictions=dict(
-                positions=pixel_pred,
+            predictions_no_res=dict(
+                positions=pos_pred_no_res,
                 yaws=yaw_pred
             ),
             confidence=torch.sigmoid(pred_logit),
             spatial_prediction=pred_map,
-            normalized_location_map=location_map
+            location_map=location_map,
+            normalized_location_map=norm_location_map
         )
 
     def _compute_metrics(self, pred_batch, data_batch):
@@ -403,9 +424,14 @@ class SpatialPlanner(pl.LightningModule):
             weight_decay=optim_params["regularization"]["L2"],
         )
 
-    def get_action(self, obs_dict, **kwargs):
-        return {"ego": self(obs_dict["ego"])}
-
+    def get_plan(self, obs_dict, **kwargs):
+        preds = self(obs_dict["ego"])
+        plan = dict(
+            predictions=TensorUtils.to_sequence(preds["predictions"]),
+            availabilities=torch.ones(preds["predictions"]["positions"].shape[0], 1).to(self.device),
+            location_map=preds["location_map"]
+        )
+        return dict(ego=plan)
 
 
 class L5VAETrafficModel(pl.LightningModule):
