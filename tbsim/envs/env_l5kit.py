@@ -9,6 +9,7 @@ from l5kit.cle.metrics import DisplacementErrorL2Metric
 from l5kit.geometry import transform_points, rotation33_as_yaw
 
 import tbsim.utils.tensor_utils as TensorUtils
+from tbsim.utils.vis_utils import render_state_l5kit
 from tbsim.envs.base import BaseEnv, BatchedEnv, SimulationException
 from tbsim.utils.geometry_utils import batch_nd_transform_points
 
@@ -35,6 +36,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         self._npr = np.random.RandomState(seed=seed)
         self.dataset = dataset
+        self.rasterizer = dataset.rasterizer
         self._num_total_scenes = len(dataset.dataset.scenes)
         self._num_scenes = num_scenes
 
@@ -145,8 +147,19 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         # TODO
         return np.zeros(self._num_scenes)
 
-    def render(self):
-        raise NotImplementedError
+    def render(self, actions_to_take, **kwargs):
+        ims = []
+        for i in range(self._num_scenes):
+            im = render_state_l5kit(
+                self,
+                state_obs=self.get_observation(),
+                action=actions_to_take,
+                scene_index=i,
+                step_index=self._frame_index,
+                **kwargs
+            )
+            ims.append(im)
+        return ims
 
     def _get_l5_sim_states(self) -> List[SimulationOutput]:
         simulated_outputs: List[SimulationOutput] = []
@@ -223,8 +236,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                 - agents_control (Dict): a dictionary containing future agent positions and orientations for all scenes
             num_steps_to_take (int): how many env steps to take. Must be less or equal to length of the input actions
         """
-        for k in actions:
-            assert k in ["ego", "agents", "ego_samples", "agents_samples"]
 
         if self._done:
             raise SimulationException("Simulation episode has ended")

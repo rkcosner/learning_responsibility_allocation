@@ -221,10 +221,14 @@ class SpatialPlanner(pl.LightningModule):
 
     @property
     def checkpoint_monitor_keys(self):
-        return {
-            "posErr": "val/metrics_goal_pos_err",
-            "valLoss": "val/losses_pixel_cls_loss"
+        keys = {
+            "posErr": "val/metrics_goal_pos_err"
         }
+        if self.algo_config.loss_weights.pixel_bce_loss > 0:
+            keys["valBCELoss"] = "val/losses_pixel_bce_loss"
+        if self.algo_config.loss_weights.pixel_ce_loss > 0:
+            keys["valCELoss"] = "val/losses_pixel_ce_loss"
+        return keys
 
     def decode_spatial_map(self, pred_map):
         # decode map as predictions
