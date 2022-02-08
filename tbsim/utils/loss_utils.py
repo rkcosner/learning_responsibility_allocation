@@ -238,9 +238,7 @@ def goal_reaching_loss(predictions, targets, availabilities, weights_scaling=Non
     """
     # compute loss mask by finding the last available target
     num_frames = availabilities.shape[-1]
-    inds = torch.arange(0, num_frames).to(targets.device)  # [T]
-    inds = (availabilities > 0).float() * inds  # [B, (A), T] arange indices with unavailable indices set to 0
-    last_inds = inds.max(dim=-1)[1]  # [B, (A)] calculate the index of the last availale frame
+    last_inds = L5Utils.get_last_available_index(availabilities)  # [B, (A)]
     goal_mask = TensorUtils.to_one_hot(last_inds, num_class=num_frames)  # [B, (A), T] with the last frame set to 1
     # filter out samples that do not have available frames
     available_samples_mask = availabilities.sum(-1) > 0  # [B, (A)]

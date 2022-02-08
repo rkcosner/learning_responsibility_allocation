@@ -318,3 +318,17 @@ def get_edges_from_batch(data_batch, ego_predictions):
     )
     return pred_edges
 
+
+def get_last_available_index(avails):
+    """
+    Args:
+        avails (torch.Tensor): target availabilities [B, (A), T]
+
+    Returns:
+        last_indices (torch.Tensor): index of the last available frame
+    """
+    num_frames = avails.shape[-1]
+    inds = torch.arange(0, num_frames).to(avails.device)  # [T]
+    inds = (avails > 0).float() * inds  # [B, (A), T] arange indices with unavailable indices set to 0
+    last_inds = inds.max(dim=-1)[1]  # [B, (A)] calculate the index of the last availale frame
+    return last_inds

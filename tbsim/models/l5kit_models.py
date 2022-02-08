@@ -218,8 +218,13 @@ class RasterizedGCModel(RasterizedPlanningModel):
         image_batch = data_batch["image"]
         map_feat = self.map_encoder(image_batch)
         target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=2)
-        goal_state = target_traj[:, -1]
-        goal_feat = self.goal_encoder(goal_state)
+        goal_inds = L5Utils.get_last_available_index(data_batch["target_availabilities"])
+        goal_state = torch.gather(
+            target_traj,  # [B, T, 3]
+            dim=1,
+            index=goal_inds[:, None, None].expand(-1, 1, target_traj.shape[-1])
+        ).squeeze(1)  # -> [B, 3]
+        goal_feat = self.goal_encoder(goal_state) # -> [B, D]
         input_feat = torch.cat((map_feat, goal_feat), dim=-1)
 
         if self.traj_decoder.dyn is not None:

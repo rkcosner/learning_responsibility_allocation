@@ -240,27 +240,13 @@ class SpatialPlanner(pl.LightningModule):
         ).squeeze(-1)
         residual_pred = local_pred[:, 1:3]
         yaw_pred = local_pred[:, 3:4]
-        return pixel_loc, residual_pred, yaw_pred, pixel_logit
-
-    def get_last_available_index(self, avails):
-        """
-        Args:
-            avails (torch.Tensor): target availabilities [B, (A), T]
-
-        Returns:
-            last_indices (torch.Tensor): index of the last available frame
-        """
-        num_frames = avails.shape[-1]
-        inds = torch.arange(0, num_frames).to(avails.device)  # [T]
-        inds = (avails > 0).float() * inds  # [B, (A), T] arange indices with unavailable indices set to 0
-        last_inds = inds.max(dim=-1)[1]  # [B, (A)] calculate the index of the last availale frame
-        return last_inds
+        return pixel_loc.float(), residual_pred, yaw_pred, pixel_logit
 
     def get_goal_supervision(self, data_batch):
         b, _, h, w = data_batch["image"].shape  # [B, C, H, W]
 
         # use last available step as goal location
-        goal_index = self.get_last_available_index(data_batch["target_availabilities"])[:, None, None]
+        goal_index = L5Utils.get_last_available_index(data_batch["target_availabilities"])[:, None, None]
 
         # gather by goal index
         goal_pos_agent = torch.gather(
@@ -306,12 +292,13 @@ class SpatialPlanner(pl.LightningModule):
         # decode map as predictions
         pixel_pred, res_pred, yaw_pred, pred_logit = self.decode_spatial_map(pred_map)
         # transform prediction to agent coordinate
-        pixel_pred = transform_points_tensor(
-            pixel_pred.unsqueeze(1).float(),
-            obs_dict["agent_from_raster"].float()
-        ).squeeze(1)
         pos_pred = transform_points_tensor(
             (pixel_pred + res_pred).unsqueeze(1),
+            obs_dict["agent_from_raster"].float()
+        ).squeeze(1)
+
+        pos_pred_no_res = transform_points_tensor(
+            pixel_pred.unsqueeze(1),
             obs_dict["agent_from_raster"].float()
         ).squeeze(1)
 
@@ -339,6 +326,8 @@ class SpatialPlanner(pl.LightningModule):
         goal_sup = data_batch["goal"]
         pos_norm_err = torch.norm(pred_batch["predictions"]["positions"] - goal_sup["goal_position"], dim=-1)
         metrics["goal_pos_err"] = torch.mean(pos_norm_err)
+        pos_norm_err_no_res = torch.norm(pred_batch["predictions_no_res"]["positions"] - goal_sup["goal_position"], dim=-1)
+        metrics["goal_pos_no_res_err"] = torch.mean(pos_norm_err_no_res)
         metrics["goal_yaw_err"] = torch.mean(torch.abs(pred_batch["predictions"]["yaws"] - goal_sup["goal_yaw"]))
 
         pixel_pred = torch.argmax(torch.flatten(pred_batch["spatial_prediction"][:, 0], start_dim=1), dim=1) # [B]
