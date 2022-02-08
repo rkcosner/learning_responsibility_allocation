@@ -8,7 +8,7 @@ import tbsim.dynamics as dynamics
 from tbsim.models.l5kit_models import optimize_trajectories, get_current_states
 
 
-def rollout_episodes(env, policy, num_episodes, n_step_action=1):
+def rollout_episodes(env, policy, num_episodes, n_step_action=1, render=False, scene_indices=None):
     """
     Rollout an environment for a number of episodes
     Args:
@@ -16,6 +16,8 @@ def rollout_episodes(env, policy, num_episodes, n_step_action=1):
         policy: a policy that
         num_episodes (int): number of episodes to rollout for
         n_step_action (int): number of steps to take between querying models
+        render (bool): if True, return a sequence of rendered frames
+        scene_indices (tuple, list): (Optional) scenes indices to rollout with
 
     Returns:
         stats (dict): A dictionary of rollout stats for each episode (metrics, rewards, etc.)
@@ -23,18 +25,22 @@ def rollout_episodes(env, policy, num_episodes, n_step_action=1):
     """
     stats = {}
     info = {}
+    renderings = []
     is_batched_env = isinstance(env, BatchedEnv)
 
     for ei in range(num_episodes):
-        env.reset()
+        env.reset(scene_indices=scene_indices)
 
         done = env.is_done()
+        frames = []
         while not done:
             obs = env.get_observation()
             obs = TensorUtils.to_torch(obs, device=policy.device)
 
-            action = policy.get_action(obs, sample=False)
-            env.step(action, num_steps_to_take=n_step_action)
+            action = policy.get_action(obs)
+            ims = env.step(action, num_steps_to_take=n_step_action, render=render)  # List of [num_scene, h, w, 3]
+            if render:
+                frames.extend(ims)
             done = env.is_done()
 
         metrics = env.get_metrics()
@@ -55,11 +61,25 @@ def rollout_episodes(env, policy, num_episodes, n_step_action=1):
             else:
                 info[k].append(v)
 
-    return stats, info
+        if render:
+            frames = np.stack(frames)
+            if is_batched_env:
+                frames = frames.transpose((1, 0, 2, 3, 4))  # [step, scene] -> [scene, step]
+            renderings.append(frames)
+
+    return stats, info, renderings
 
 
 class RolloutCallback(pl.Callback):
-    def __init__(self, env, num_episodes=1, n_step_action=1, every_n_steps=100, warm_start_n_steps=1, verbose=False):
+    def __init__(
+            self,
+            env,
+            num_episodes=1,
+            n_step_action=1,
+            every_n_steps=100,
+            warm_start_n_steps=1,
+            verbose=False,
+    ):
         self._env = env
         self._num_episodes = num_episodes
         self._every_n_steps = every_n_steps
@@ -77,7 +97,7 @@ class RolloutCallback(pl.Callback):
             and trainer.global_step % self._every_n_steps == 0
         )
         if should_run:
-            stats, _ = rollout_episodes(
+            stats, _, _ = rollout_episodes(
                 env=self._env,
                 policy=pl_module,
                 num_episodes=self._num_episodes,
@@ -94,40 +114,20 @@ class RolloutCallback(pl.Callback):
 
 
 class RolloutWrapper(object):
-    def __init__(self, model: pl.LightningModule, num_prediction_steps, action_frequency=1):
-        assert action_frequency <= num_prediction_steps
+    def __init__(self, model, **action_kwargs):
         self.model = model
         self.device = model.device
-        self.action_freq = action_frequency
-        self._action_length =  num_prediction_steps
-        self._cached_action = None
-        self._iter_i = 0
+        self.action_kwargs = action_kwargs
 
-    def reset(self):
-        self._iter_i = 0
-        self._cached_action = None
+    def get_action(self, obs):
+        return self.model.get_action(obs, **self.action_kwargs)
 
-    def get_action(self, obs, **kwargs):
-        if self._iter_i % self.action_freq == 0:
-            self._iter_i = 0
-            self._cached_action = self.model.get_action(obs, **kwargs)
-            assert "agents" not in self._cached_action  # TODO: support agents actions
-
-        def get_step_action(action_tensor):
-            assert action_tensor.shape[-2] == self._action_length
-            return action_tensor[..., self._iter_i:, :]
-
-        step_action = TensorUtils.map_tensor(self._cached_action, get_step_action)
-        self._iter_i += 1
-        return step_action
+    def get_plan(self, obs):
+        return self.model.get_plan(obs, **self.action_kwargs)
 
     @classmethod
-    def wrap(cls, model, action_frequency):
-        return cls(
-            model=model,
-            num_prediction_steps=model.algo_config.future_num_frames,
-            action_frequency=action_frequency
-        )
+    def wrap(cls, model, **action_kwargs):
+        return cls(model=model, action_kwargs=action_kwargs)
 
 
 class OptimController(object):
@@ -218,19 +218,11 @@ class HierarchicalWrapper(object):
         assert pred["yaws"].shape == (b, t, 1)
         assert plan["availabilities"].shape ==  (b, t)
 
-    def get_action(self, obs, num_steps_to_goal=None, **kwargs):
+    def get_action(self, obs, **kwargs):
         with torch.no_grad():
             all_plans = self.planner.get_plan(obs, sample=kwargs.get("sample", False))
         plan = all_plans["ego"]
         self.verify_plan(plan)
-        plan_len = plan["predictions"]["positions"].shape[-2]
-        if num_steps_to_goal is not None:
-            assert num_steps_to_goal > 0
-            if num_steps_to_goal > plan_len:
-                n_steps_to_pad = num_steps_to_goal - plan_len
-                plan = TensorUtils.pad_sequence(plan, padding=(n_steps_to_pad, 0), batched=True)
-            else:
-                plan = TensorUtils.map_tensor(plan, func=lambda x: x[:, :num_steps_to_goal])
         init_u = plan.get("controls", None)
         actions = self.controller.get_action(
             obs,

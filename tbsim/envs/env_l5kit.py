@@ -149,16 +149,18 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
     def render(self, actions_to_take, **kwargs):
         ims = []
-        for i in range(self._num_scenes):
+        for i, si in enumerate(self._current_scene_indices):
             im = render_state_l5kit(
-                self,
+                rasterizer=self.rasterizer,
                 state_obs=self.get_observation(),
                 action=actions_to_take,
                 scene_index=i,
                 step_index=self._frame_index,
+                dataset_scene_index=si,
                 **kwargs
             )
             ims.append(im)
+        ims = np.stack(ims)
         return ims
 
     def _get_l5_sim_states(self) -> List[SimulationOutput]:
@@ -226,7 +228,21 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         else:
             self._frame_index += 1
 
-    def step(self, actions, num_steps_to_take: int = 1):
+    def _pose_world_from_agent(self, act_dict):
+        obs = self.get_observation()
+        return dict(
+            positions=transform_points(act_dict["positions"], obs["ego"]["world_from_agent"]),
+            yaws=obs["ego"]["yaw"][..., None, None] + act_dict["yaws"]
+        )
+
+    def _pose_agent_from_world(self, act_dict):
+        obs = self.get_observation()
+        return dict(
+            positions=transform_points(act_dict["positions"], obs["ego"]["agent_from_world"]),
+            yaws=act_dict["yaws"] - obs["ego"]["yaw"][..., None, None]
+        )
+
+    def step(self, actions, num_steps_to_take: int = 1, render=False):
         """
         Step the simulation with control inputs
 
@@ -235,6 +251,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                 - ego_control (Dict): a dictionary containing future ego position and orientation for all scenes
                 - agents_control (Dict): a dictionary containing future agent positions and orientations for all scenes
             num_steps_to_take (int): how many env steps to take. Must be less or equal to length of the input actions
+            render (bool): whether to render state and actions and return renderings
         """
 
         if self._done:
@@ -249,25 +266,31 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         # otherwise, use @actions to update simulation
         actions = TensorUtils.to_numpy(actions)
 
-        obs = self.get_observation()
         actions_world = dict()
         # Convert action to world frame
-        actions_world["ego"] = dict(
-            positions=transform_points(actions["ego"]["positions"], obs["ego"]["world_from_agent"]),
-            yaws=obs["ego"]["yaw"][..., None, None] + actions["ego"]["yaws"]
-        )
+        actions_world["ego"] = self._pose_world_from_agent(actions["ego"])
+        if "ego_plan" in actions:
+            actions_world["ego_plan"] = dict(
+                predictions=self._pose_world_from_agent(actions["ego_plan"]["predictions"])
+            )
+
+        renderings = []
         for step_i in range(num_steps_to_take):
             step_actions_world = TensorUtils.map_ndarray(actions_world, lambda x: x[..., step_i:, :])
-            obs = self.get_observation()
 
             # transform step action back to the agent frame
             step_actions = dict()
-            for k in step_actions_world:
-                step_actions[k] = dict(
-                    positions=transform_points(step_actions_world[k]["positions"], obs["ego"]["agent_from_world"]),
-                    yaws=step_actions_world[k]["yaws"] - obs["ego"]["yaw"][..., None, None]
+            step_actions["ego"] = self._pose_agent_from_world(step_actions_world["ego"])
+            if "ego_plan" in actions:
+                step_actions["ego_plan"] = dict(
+                    predictions=self._pose_agent_from_world(step_actions_world["ego_plan"]["predictions"]),
+                    location_map=actions["ego_plan"]["location_map"]
                 )
+            if render:
+                renderings.append(self.render(step_actions))
 
             ego_control = step_actions.get("ego", None)
-            ego_samples = step_actions.get("ego_samples", None)
-            self._step(ego_control=ego_control, ego_samples=ego_samples)
+
+            self._step(ego_control=ego_control)
+
+        return renderings

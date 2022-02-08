@@ -3,6 +3,7 @@ from l5kit.geometry import transform_points
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from tbsim.utils.tensor_utils import map_ndarray
+from tbsim.utils.l5_utils import get_last_available_index
 
 
 def agent_to_raster_np(pt_tensor, trans_mat):
@@ -38,24 +39,26 @@ def _render_state(state_image, trans_mat, title="", pred_actions=None, gt_action
         pos_raster = agent_to_raster_np(gt_plan["positions"], trans_mat)[[-1]]
         ax.scatter(pos_raster[:, 0], pos_raster[:, 1], marker='o', color="blue")
 
-    if "location_map" in pred_plan:
+    # visualize plan heat map
+    if pred_plan is not None and "location_map" in pred_plan:
         ax = fig.add_subplot(122)
         ax.imshow(pred_plan["location_map"])
 
     canvas.draw()
-    im = np.asarray(canvas.buffer_rgba())
+    im = np.asarray(canvas.buffer_rgba())[:, :, :3]
     return im
 
 
-def render_state_l5kit(env, state_obs, action, scene_index, step_index):
+def render_state_l5kit(rasterizer, state_obs, action, scene_index, step_index, dataset_scene_index):
     state_obs = state_obs["ego"]
-    state_im = env.rasterizer.to_rgb(state_obs["image"][scene_index].transpose(1, 2, 0))
+    state_im = rasterizer.to_rgb(state_obs["image"][scene_index].transpose(1, 2, 0))
     slice_idx = lambda x:  x[scene_index]
     pred_actions = map_ndarray(action["ego"], slice_idx)
     gt_actions = dict(
         positions=state_obs["target_positions"],
         yaws=state_obs["target_yaws"]
     )
+
     gt_actions = map_ndarray(gt_actions, slice_idx)
     trans_mat = state_obs["raster_from_agent"][scene_index]
     pred_plan = action.get("ego_plan", None)
@@ -68,7 +71,7 @@ def render_state_l5kit(env, state_obs, action, scene_index, step_index):
         pred_actions=pred_actions,
         gt_actions=gt_actions,
         pred_plan=pred_plan,
-        title="scene={}, step={}".format(scene_index, step_index)
+        title="scene={}, step={}".format(dataset_scene_index, step_index)
     )
 
     return im

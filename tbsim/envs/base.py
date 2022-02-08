@@ -21,6 +21,10 @@ class BaseEnv(abc.ABC):
         return
 
     @abc.abstractmethod
+    def render(self, actions_to_take):
+        return
+
+    @abc.abstractmethod
     def get_info(self):
         return
 

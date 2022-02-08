@@ -1,104 +1,131 @@
-import os
-from collections import OrderedDict
-import torch
-import json
-import numpy as np
+import argparse
 
+from collections import OrderedDict
+import os
+import torch
 from l5kit.data import LocalDataManager, ChunkedDataset
 from l5kit.dataset import EgoDataset
 from l5kit.rasterization import build_rasterizer
 from l5kit.vectorization.vectorizer_builder import build_vectorizer
 
-
-from tbsim.external.l5_ego_dataset import EgoDatasetMixed
-from tbsim.algos.l5kit_algos import L5TrafficModel
+from tbsim.algos.l5kit_algos import L5TrafficModel, L5VAETrafficModel, L5TrafficModelGC, SpatialPlanner
 from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.envs.env_l5kit import EnvL5KitSimulation, BatchedEnv
 from tbsim.utils.config_utils import translate_l5kit_cfg, get_experiment_config_from_file
-from tbsim.utils.env_utils import rollout_episodes, RolloutWrapper
-from tbsim.utils.tensor_utils import to_torch
-
-def rollout(env, policy, scene_indices = (), num_episodes=1):
-    stats = {}
-    info = {}
-    is_batched_env = isinstance(env, BatchedEnv)
-
-    for ei in range(num_episodes):
-        env.reset(scene_indices=scene_indices)
-
-        done = env.is_done()
-        while not done:
-            obs = env.get_observation()
-            obs = to_torch(obs, device=policy.device)
-            print('step')
-
-            action = policy.get_action(obs, sample=False)
-            # action = dict(
-            #     ego=dict(
-            #         positions=obs["ego"]["target_positions"],
-            #         yaws=obs["ego"]["target_yaws"]
-            #     )
-            # )
-            env.step(action, num_steps_to_take=10)
-            done = env.is_done()
-
-        metrics = env.get_metrics()
-        for k, v in metrics.items():
-            if k not in stats:
-                stats[k] = []
-            if is_batched_env:
-                stats[k] = np.concatenate([stats[k], v], axis=0)
-            else:
-                stats[k].append(v)
-
-        env_info = env.get_info()
-        for k, v in env_info.items():
-            if k not in info:
-                info[k] = []
-            if is_batched_env:
-                info[k].extend(v)
-            else:
-                info[k].append(v)
-
-    return stats, info
+from tbsim.utils.env_utils import rollout_episodes, RolloutWrapper, OptimController, HierarchicalWrapper, GTPlanner
+from tbsim.utils.tensor_utils import to_torch, to_numpy
+from tbsim.external.l5_ego_dataset import EgoDatasetMixed
+from tbsim.utils.experiment_utils import get_checkpoint
+from imageio import get_writer
 
 
-def main():
-    # set env variable for data
+def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
 
+    policy_ckpt_path, policy_config_path = get_checkpoint(
+        ngc_job_id="2561797", # gc_dynNone_decmlp128,128
+        ckpt_key="iter83999_",
+        ckpt_root_dir=ckpt_dir
+    )
+    policy_cfg = get_experiment_config_from_file(policy_config_path)
+
+    planner_ckpt_path, planner_config_path = get_checkpoint(
+        ngc_job_id="2573128",  # spatial_archresnet50_bs64_pcl1.0_pbl0.0_rlFalse
+        ckpt_key="iter27999_ep0_pos",
+        ckpt_root_dir=ckpt_dir
+    )
+    planner_cfg = get_experiment_config_from_file(planner_config_path)
+
+    data_cfg = policy_cfg
+    assert data_cfg.env.rasterizer.map_type == "py_semantic"
     os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath("/home/danfeix/workspace/lfs/lyft/lyft_prediction/")
-    # config_path = "/home/danfeix/workspace/tbsim/checkpoints/rasterized_currspeed_dynUnicycle/run0/config.json"
-    # ckpt_path = "/home/danfeix/workspace/tbsim/checkpoints/rasterized_currspeed_dynUnicycle/run0/checkpoints/iter43999_ep1_valLoss0.57.ckpt"
-    model_class = L5TrafficModel
-    # cfg = get_experiment_config_from_file(config_path)
-    # cfg = get_experiment_config_from_file("experiments/mapfd/rasterized_nd_mapfd128.json")
-    cfg = get_registered_experiment_config("l5_mixed_plan")
-    cfg.algo.dynamics.type = "Unicycle"
     dm = LocalDataManager(None)
-    l5_config = translate_l5kit_cfg(cfg)
+    l5_config = translate_l5kit_cfg(data_cfg)
     rasterizer = build_rasterizer(l5_config, dm)
     vectorizer = build_vectorizer(l5_config, dm)
-    modality_shapes = OrderedDict(image=(rasterizer.num_channels(), 224, 224))
-
-    eval_zarr = ChunkedDataset(dm.require(cfg.train.dataset_valid_key)).open()
-    raster_dataset = EgoDataset(l5_config, eval_zarr, rasterizer)
-    # mixed_dataset = EgoDatasetMixed(l5_config, eval_zarr, vectorizer, rasterizer)
-
-    raster_env = EnvL5KitSimulation(cfg.env, dataset=raster_dataset, seed=cfg.seed, num_scenes=1)
-    # mixed_env = EnvL5KitSimulation(cfg.env, dataset=mixed_dataset, seed=cfg.seed, num_scenes=1)
+    eval_zarr = ChunkedDataset(dm.require(data_cfg.train.dataset_valid_key)).open()
+    env_dataset = EgoDatasetMixed(l5_config, eval_zarr, vectorizer, rasterizer)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    model = model_class(algo_config=cfg.algo, modality_shapes=modality_shapes)
-    # model = model_class.load_from_checkpoint(
-    #     checkpoint_path=ckpt_path,
-    #     algo_config=cfg.algo,
-    #     modality_shapes=modality_shapes,
-    # )
-    model.to(device)
+    modality_shapes = OrderedDict(image=[rasterizer.num_channels()] + data_cfg.env.rasterizer.raster_size)
 
-    stats, info = rollout(raster_env, policy=model, scene_indices=(10,))
-    print(stats)
+    planner = SpatialPlanner.load_from_checkpoint(
+        planner_ckpt_path,
+        algo_config=planner_cfg.algo,
+        modality_shapes=modality_shapes,
+    ).to(device).eval()
 
+    controller = L5TrafficModelGC.load_from_checkpoint(
+        policy_ckpt_path,
+        algo_config=policy_cfg.algo,
+        modality_shapes=modality_shapes
+    ).to(device).eval()
+
+    policy = HierarchicalWrapper(planner, controller)
+    policy = RolloutWrapper(policy, num_steps_to_goal=planner_cfg.algo.future_num_frames)
+
+    data_cfg.env.simulation.num_simulation_steps = 200
+    env = EnvL5KitSimulation(
+        data_cfg.env,
+        dataset=env_dataset,
+        seed=data_cfg.seed,
+        num_scenes=10,
+        prediction_only=False
+    )
+
+    stats, info, renderings = rollout_episodes(
+        env,
+        policy,
+        num_episodes=1,
+        n_step_action=10,
+        render=True,
+        scene_indices=list(range(50, 60))
+    )
+
+    for i, scene_images in enumerate(renderings[0]):
+        writer = get_writer(os.path.join(video_dir, "{}.mp4".format(i)), fps=10)
+        for im in scene_images:
+            writer.append_data(im)
+        writer.close()
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+
+    # External config file that overwrites default config
+    parser.add_argument(
+        "--ngc_job_id",
+        type=str,
+        default=None,
+        help="ngc job ID to fetch checkpoint from."
+    )
+
+    parser.add_argument(
+        "--ckpt_key",
+        type=str,
+        default=None,
+        help="(Optional) partial string that uniquely identifies a checkpoint, e.g., 'iter17999_ep0_posErr'"
+    )
+
+    parser.add_argument(
+        "--ckpt_root_dir",
+        type=str,
+        default="../checkpoints/",
+        help="(Optional) directory to look for saved checkpoints"
+    )
+
+    parser.add_argument(
+        "--ckpt_path",
+        type=str,
+        default=None,
+        help="(Optional) path to a checkpoint file"
+    )
+
+    parser.add_argument(
+        "--config_path",
+        type=str,
+        default=None,
+        help="(Optional) path to a config file"
+    )
+
+    args = parser.parse_args()
+
+    run_checkpoint()

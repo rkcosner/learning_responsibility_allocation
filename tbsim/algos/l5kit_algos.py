@@ -422,8 +422,11 @@ class SpatialPlanner(pl.LightningModule):
         plan = dict(
             predictions=TensorUtils.to_sequence(preds["predictions"]),
             availabilities=torch.ones(preds["predictions"]["positions"].shape[0], 1).to(self.device),
-            location_map=preds["location_map"]
         )
+        n_steps_to_pad = self.algo_config.future_num_frames - 1
+        plan = TensorUtils.pad_sequence(plan, padding=(n_steps_to_pad, 0), batched=True, pad_values=0.)
+        plan["location_map"] = preds["location_map"]
+
         return dict(ego=plan)
 
 
