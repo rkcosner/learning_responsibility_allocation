@@ -798,7 +798,7 @@ def gather_sequence(seq, indices):
     return gather_along_dim_with_dim(seq, target_dim=1, source_dim=0, indices=indices)
 
 
-def pad_sequence_single(seq, padding, batched=False, pad_same=True, pad_values=None):
+def pad_sequence_single(seq, padding, batched=False, pad_same=False, pad_values=0.):
     """
     Pad input tensor or array @seq in the time dimension (dimension 1).
 
@@ -813,7 +813,7 @@ def pad_sequence_single(seq, padding, batched=False, pad_same=True, pad_values=N
         padded sequence (np.ndarray or torch.Tensor)
     """
     assert isinstance(seq, (np.ndarray, torch.Tensor))
-    assert pad_same or pad_values is not None
+    assert pad_same or (pad_values is not None)
     if pad_values is not None:
         assert isinstance(pad_values, float)
     repeat_func = np.repeat if isinstance(seq, np.ndarray) else torch.repeat_interleave
@@ -825,16 +825,22 @@ def pad_sequence_single(seq, padding, batched=False, pad_same=True, pad_values=N
     end_pad = []
 
     if padding[0] > 0:
-        pad = seq[[0]] if pad_same else ones_like_func(seq[[0]]) * pad_values
+        if batched:
+            pad = seq[:, [0]] if pad_same else ones_like_func(seq[:, [0]]) * pad_values
+        else:
+            pad = seq[[0]] if pad_same else ones_like_func(seq[[0]]) * pad_values
         begin_pad.append(repeat_func(pad, padding[0], seq_dim))
     if padding[1] > 0:
-        pad = seq[[-1]] if pad_same else ones_like_func(seq[[-1]]) * pad_values
+        if batched:
+            pad = seq[:, [-1]] if pad_same else ones_like_func(seq[:, [-1]]) * pad_values
+        else:
+            pad = seq[[-1]] if pad_same else ones_like_func(seq[[-1]]) * pad_values
         end_pad.append(repeat_func(pad, padding[1], seq_dim))
 
     return concat_func(begin_pad + [seq] + end_pad, seq_dim)
 
 
-def pad_sequence(seq, padding, batched=False, pad_same=True, pad_values=None):
+def pad_sequence(seq, padding, batched=False, pad_same=False, pad_values=0.):
     """
     Pad a nested dictionary or list or tuple of sequence tensors in the time dimension (dimension 1).
 
