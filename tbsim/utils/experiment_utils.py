@@ -258,6 +258,9 @@ def _download_from_ngc(ngc_job_id, paths_to_download, target_dir, tmp_dir="/tmp"
         cmd.extend(["--file", fp])
 
     cmd.extend(["--dest", tmp_dir])
+    if os.path.exists(os.path.join(tmp_dir, ngc_job_id + "/")):
+        print("tmp folder with ngc job ID exists, removing ...")
+        shutil.rmtree(os.path.join(tmp_dir, ngc_job_id + "/"))  # otherwise ngc renames the downloaded folder
     subprocess.run(cmd)
 
     os.makedirs(target_dir, exist_ok=True)
