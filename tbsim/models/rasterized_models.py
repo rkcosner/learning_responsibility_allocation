@@ -3,112 +3,15 @@ from collections import OrderedDict
 
 import torch
 import torch.nn as nn
-import torch.optim as optim
 
 import tbsim.models.base_models as base_models
 import tbsim.models.vaes as vaes
-import tbsim.dynamics as dynamics
 import tbsim.utils.l5_utils as L5Utils
 from tbsim.utils.loss_utils import (
     trajectory_loss,
     goal_reaching_loss,
     collision_loss
 )
-
-
-def optimize_trajectories(
-        init_u,
-        init_x,
-        target_trajs,
-        target_avails,
-        dynamics_model,
-        step_time: float,
-        data_batch = None,
-        goal_loss_weight=1.0,
-        traj_loss_weight=0.0,
-        coll_loss_weight=0.0,
-        num_optim_iterations: int = 50
-):
-    curr_u = init_u.detach().clone()
-    curr_u.requires_grad = True
-    action_optim = optim.LBFGS([curr_u], max_iter=20, lr=1.0, line_search_fn='strong_wolfe')
-
-    for oidx in range(num_optim_iterations):
-        def closure():
-            action_optim.zero_grad()
-
-            # get trajectory with current params
-            _, pos, yaw = dynamics.forward_dynamics(
-                dyn_model=dynamics_model,
-                initial_states=init_x,
-                actions=curr_u,
-                step_time=step_time
-            )
-            curr_trajs = torch.cat((pos, yaw), dim=-1)
-            # compute trajectory optimization losses
-            losses = dict()
-            losses["goal_loss"] = goal_reaching_loss(
-                predictions=curr_trajs,
-                targets=target_trajs,
-                availabilities=target_avails
-            ) * goal_loss_weight
-            losses["traj_loss"] = trajectory_loss(
-                predictions=curr_trajs,
-                targets=target_trajs,
-                availabilities=target_avails
-            ) * traj_loss_weight
-            if coll_loss_weight > 0:
-                assert data_batch is not None
-                coll_edges = L5Utils.get_edges_from_batch(
-                    data_batch,
-                    ego_predictions=dict(positions=pos, yaws=yaw)
-                )
-                for c in coll_edges:
-                    coll_edges[c] = coll_edges[c][:, :target_trajs.shape[-2]]
-                vv_edges = dict(VV=coll_edges["VV"])
-                if vv_edges["VV"].shape[0] > 0:
-                    losses["coll_loss"] = collision_loss(vv_edges) * coll_loss_weight
-
-            total_loss = torch.hstack(list(losses.values())).sum()
-
-            # backprop
-            total_loss.backward()
-            return total_loss
-        action_optim.step(closure)
-
-    final_raw_trajs, final_pos, final_yaw = dynamics.forward_dynamics(
-        dyn_model=dynamics_model,
-        initial_states=init_x,
-        actions=curr_u,
-        step_time=step_time
-    )
-    final_trajs = torch.cat((final_pos, final_yaw), dim=-1)
-    losses = dict()
-    losses["goal_loss"] = goal_reaching_loss(
-        predictions=final_trajs,
-        targets=target_trajs,
-        availabilities=target_avails
-    )
-    losses["traj_loss"] = trajectory_loss(
-        predictions=final_trajs,
-        targets=target_trajs,
-        availabilities=target_avails
-    )
-
-    return dict(positions=final_pos, yaws=final_yaw), final_raw_trajs, curr_u, losses
-
-
-def get_current_states(batch: dict, dyn_type: dynamics.DynType) -> torch.Tensor:
-    bs = batch["curr_speed"].shape[0]
-    if dyn_type == dynamics.DynType.BICYCLE:
-        current_states = torch.zeros(bs, 6).to(batch["curr_speed"].device)  # [x, y, yaw, vel, dh, veh_len]
-        current_states[:, 3] = batch["curr_speed"].abs()
-        current_states[:, [4]] = (batch["history_yaws"][:, 0] - batch["history_yaws"][:, 1]).abs()
-        current_states[:, 5] = batch["extent"][:, 0]  # [l, w, h]
-    else:
-        current_states = torch.zeros(bs, 4).to(batch["curr_speed"].device)  # [x, y, vel, yaw]
-        current_states[:, 2] = batch["curr_speed"]
-    return current_states
 
 
 class RasterizedPlanningModel(nn.Module):
@@ -143,7 +46,7 @@ class RasterizedPlanningModel(nn.Module):
         map_feat = self.map_encoder(image_batch)
 
         if self.traj_decoder.dyn is not None:
-            curr_states = get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
+            curr_states = L5Utils.get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
         else:
             curr_states = None
         dec_output = self.traj_decoder.forward(inputs=map_feat, current_states=curr_states)
@@ -228,7 +131,7 @@ class RasterizedGCModel(RasterizedPlanningModel):
         input_feat = torch.cat((map_feat, goal_feat), dim=-1)
 
         if self.traj_decoder.dyn is not None:
-            curr_states = get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
+            curr_states = L5Utils.get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
         else:
             curr_states = None
         traj = self.traj_decoder.forward(inputs=input_feat, current_states=curr_states)["trajectories"]

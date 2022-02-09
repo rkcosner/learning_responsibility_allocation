@@ -5,7 +5,8 @@ import torch
 from tbsim.envs.base import BatchedEnv, BaseEnv
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.dynamics as dynamics
-from tbsim.models.l5kit_models import optimize_trajectories, get_current_states
+from tbsim.utils.l5_utils import get_current_states
+from tbsim.algos.algo_utils import optimize_trajectories
 
 
 def rollout_episodes(env, policy, num_episodes, n_step_action=1, render=False, scene_indices=None):

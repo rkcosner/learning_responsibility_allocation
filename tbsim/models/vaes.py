@@ -315,7 +315,7 @@ class CVAE(nn.Module):
 
 
 def main():
-    import tbsim.models.l5kit_models as l5m
+    import tbsim.models.rasterized_models as l5m
 
     inputs = OrderedDict(trajectories=torch.randn(10, 50, 3))
     condition_inputs = OrderedDict(image=torch.randn(10, 3, 224, 224))

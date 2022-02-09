@@ -3,6 +3,7 @@ import torch.nn.functional as F
 
 import tbsim.dynamics as dynamics
 import tbsim.utils.tensor_utils as TensorUtils
+from tbsim import dynamics as dynamics
 
 
 def get_agent_masks(raw_type):
@@ -332,3 +333,16 @@ def get_last_available_index(avails):
     inds = (avails > 0).float() * inds  # [B, (A), T] arange indices with unavailable indices set to 0
     last_inds = inds.max(dim=-1)[1]  # [B, (A)] calculate the index of the last availale frame
     return last_inds
+
+
+def get_current_states(batch: dict, dyn_type: dynamics.DynType) -> torch.Tensor:
+    bs = batch["curr_speed"].shape[0]
+    if dyn_type == dynamics.DynType.BICYCLE:
+        current_states = torch.zeros(bs, 6).to(batch["curr_speed"].device)  # [x, y, yaw, vel, dh, veh_len]
+        current_states[:, 3] = batch["curr_speed"].abs()
+        current_states[:, [4]] = (batch["history_yaws"][:, 0] - batch["history_yaws"][:, 1]).abs()
+        current_states[:, 5] = batch["extent"][:, 0]  # [l, w, h]
+    else:
+        current_states = torch.zeros(bs, 4).to(batch["curr_speed"].device)  # [x, y, vel, yaw]
+        current_states[:, 2] = batch["curr_speed"]
+    return current_states
