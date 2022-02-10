@@ -12,6 +12,7 @@ from tbsim.configs.l5kit_config import (
     L5KitVectorizedEnvConfig,
     L5KitMixedEnvConfig,
     L5KitMixedSemanticMapEnvConfig,
+    MARasterizedPlanningConfig,
     L5RasterizedVAEConfig
 )
 
@@ -36,6 +37,13 @@ EXP_CONFIG_REGISTRY["l5_spatial_planner"] = ExperimentConfig(
     env_config=L5KitMixedSemanticMapEnvConfig(),
     algo_config=SpatialPlannerConfig(),
     registered_name="l5_spatial_planner"
+)
+
+EXP_CONFIG_REGISTRY["l5_ma_rasterized_plan"] = ExperimentConfig(
+    train_config=L5KitMixedTrainConfig(),
+    env_config=L5KitMixedSemanticMapEnvConfig(),
+    algo_config=MARasterizedPlanningConfig(),
+    registered_name="l5_ma_rasterized_plan"
 )
 
 EXP_CONFIG_REGISTRY["l5_mixed_plan"] = ExperimentConfig(

@@ -261,6 +261,14 @@ class SpatialPlannerConfig(L5RasterizedPlanningConfig):
         self.loss_weights.pixel_yaw_loss = 1.0
 
 
+class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
+    def __init__(self):
+        super(MARasterizedPlanningConfig, self).__init__()
+        self.name = "ma_rasterized"
+        self.agent_feature_dim = 128
+        self.context_size = (30, 30)
+
+
 class L5RasterizedGCConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(L5RasterizedGCConfig, self).__init__()

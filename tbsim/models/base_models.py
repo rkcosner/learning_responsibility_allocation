@@ -2,7 +2,7 @@ import numpy as np
 import math
 import textwrap
 from collections import OrderedDict
-from typing import Dict, Union, List
+from typing import Dict, Union, List, Tuple
 from copy import deepcopy
 
 import torch
@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models.resnet import resnet18, resnet50
 from torchvision.models.feature_extraction import create_feature_extractor
+from torchvision.ops import RoIAlign
 
 from tbsim.utils.tensor_utils import reshape_dimensions, flatten
 import tbsim.utils.tensor_utils as TensorUtils
@@ -531,7 +532,7 @@ class RasterizedMapEncoder(nn.Module):
             feature_dim: int = None,
             use_spatial_softmax=False,
             spatial_softmax_kwargs=None,
-            output_activation = nn.ReLU
+            output_activation=nn.ReLU
     ) -> None:
         super().__init__()
         self.model_arch = model_arch
@@ -579,10 +580,104 @@ class RasterizedMapEncoder(nn.Module):
         else:
             return [self.pool_out_dim]
 
+    def feature_channels(self):
+        if self.model_arch in ["resnet18", "resnet34"]:
+            channels = OrderedDict({
+                "layer1": 64,
+                "layer2": 128,
+                "layer3": 256,
+                "layer4": 512,
+            })
+        else:
+            channels = OrderedDict({
+                "layer1": 256,
+                "layer2": 512,
+                "layer3": 1024,
+                "layer4": 2048,
+            })
+        return channels
+
+    def feature_scales(self):
+        return OrderedDict({
+            "layer1": 1/4,
+            "layer2": 1/8,
+            "layer3": 1/16,
+            "layer4": 1/32
+        })
+
     def forward(self, map_inputs) -> torch.Tensor:
         feat = self.map_model(map_inputs)
         feat = self._output_activation(feat)
         return feat
+
+
+class RasterizeAgentEncoder(nn.Module):
+    """Use RoI Align to crop map feature for each agent"""
+    def __init__(
+            self,
+            model_arch: str,
+            input_image_shape: tuple = (3, 224, 224),
+            agent_feature_dim: int = None,
+            global_feature_dim: int = None,
+            roi_feature_size: tuple = (7, 7),
+            roi_layer_key: str = "layer4",
+            output_activation = nn.ReLU
+    ) -> None:
+        super(RasterizeAgentEncoder, self).__init__()
+        model = RasterizedMapEncoder(
+            model_arch=model_arch,
+            input_image_shape=input_image_shape,
+            feature_dim=global_feature_dim,
+        )
+        feat_nodes = {
+            'map_model.layer1': 'layer1',
+            'map_model.layer2': 'layer2',
+            'map_model.layer3': 'layer3',
+            'map_model.layer4': 'layer4',
+            'map_model.fc': "final"
+        }
+        self.encoder_heads = create_feature_extractor(model, feat_nodes)
+
+        self.roi_layer_key = roi_layer_key
+        roi_scale = model.feature_scales()[roi_layer_key]
+        roi_channel = model.feature_channels()[roi_layer_key]
+        self.roi_align = RoIAlign(
+            output_size=roi_feature_size,
+            sampling_ratio=-1,
+            spatial_scale=roi_scale
+        )
+
+        self.activation = output_activation()
+        if agent_feature_dim is not None:
+            self.agent_net = nn.Sequential(
+                nn.AdaptiveAvgPool2d((1, 1)),  # [B, C, 1, 1]
+                nn.Flatten(start_dim=1),
+                nn.Linear(roi_channel, agent_feature_dim),
+                self.activation
+            )
+        else:
+            self.agent_net = nn.Identity()
+
+
+    def forward(self, map_inputs: torch.Tensor, rois: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+
+        Args:
+            map_inputs (torch.Tensor): [B, C, H, W]
+            rois (torch.Tensor): [num_boxes, 5]
+
+        Returns:
+            agent_feats (torch.Tensor): [num_boxes, ...]
+            roi_feats (torch.Tensor): [num_boxes, ...]
+            global_feats (torch.Tensor): [B, ....]
+        """
+        feats = self.encoder_heads(map_inputs)
+        pre_roi_feats = feats[self.roi_layer_key]
+        roi_feats = self.roi_align(pre_roi_feats, rois)  # [num_boxes, C, H W]
+        agent_feats = self.agent_net(roi_feats)
+        global_feats = feats["final"]
+
+        return agent_feats, roi_feats, self.activation(global_feats)
 
 
 class RasterizedMapKeyPointNet(RasterizedMapEncoder):
@@ -632,10 +727,7 @@ class RasterizedMapUNet(nn.Module):
             'map_model.layer4': 'layer4',
         }
         self.encoder_heads = create_feature_extractor(model, feat_nodes)
-        if model_arch in ["resnet18", "resnet34"]:
-            encoder_channels = [64, 128, 256, 512]
-        else:
-            encoder_channels = [256, 512, 1024, 2048]
+        encoder_channels = list(model.feature_channels().values())
         self.decoder = UNetDecoder(
             input_channel=encoder_channels[-1],
             encoder_channels=encoder_channels[:-1],
@@ -822,7 +914,7 @@ class TrajectoryDecoder(nn.Module):
         self.num_steps = num_steps
         self.step_time = step_time
         self._create_dynamics(dynamics_type, dynamics_kwargs)
-        self._create_networks(network_kwargs, dynamics_kwargs.get("predict_current_states"))
+        self._create_networks(network_kwargs)
 
     def _create_dynamics(self, dynamics_type, dynamics_kwargs):
         if dynamics_type in ["Unicycle", dynamics.DynType.UNICYCLE]:
@@ -842,7 +934,7 @@ class TrajectoryDecoder(nn.Module):
         else:
             self.dyn = None
 
-    def _create_networks(self, network_kwargs, predict_current_states=False):
+    def _create_networks(self, network_kwargs):
         raise NotImplementedError
 
     def _forward_networks(self, inputs, num_steps=None):
@@ -876,7 +968,7 @@ class TrajectoryDecoder(nn.Module):
 
 
 class MLPTrajectoryDecoder(TrajectoryDecoder):
-    def _create_networks(self, net_kwargs, predict_current_states=False):
+    def _create_networks(self, net_kwargs):
         if net_kwargs is None:
             net_kwargs = dict()
         assert isinstance(self.num_steps, int)
@@ -884,8 +976,6 @@ class MLPTrajectoryDecoder(TrajectoryDecoder):
             pred_shapes = OrderedDict(trajectories=(self.num_steps, self.state_dim))
         else:
             pred_shapes = OrderedDict(trajectories=(self.num_steps, self.dyn.udim))
-            if predict_current_states:
-                pred_shapes["current_states"] = (self.dyn.xdim,)
 
         self.mlp = SplitMLP(
             input_dim=self.feature_dim,
@@ -895,13 +985,34 @@ class MLPTrajectoryDecoder(TrajectoryDecoder):
         )
 
     def _forward_networks(self, inputs, num_steps=None):
-        preds = self.mlp(inputs)
-        if "current_states" in preds:
-            preds["current_states"][:, [0, 1, 3]] = 0. # ego frame prediction - [x, y, yaw] are 0's
+        if inputs.ndim == 2:
+            # [B, D]
+            preds = self.mlp(inputs)
+        elif inputs.ndim == 3:
+            # [B, A, D]
+            preds = TensorUtils.time_distributed(inputs, self.mlp)
+        else:
+            raise ValueError("Expecting inputs to have ndim == 2 or 3, got {}".format(inputs.ndim))
         return preds
 
 
 if __name__ == "__main__":
-    model = RasterizedMapUNet(model_arch="resnet18", input_image_shape=(15, 224, 224), output_channel=4)
+    # model = RasterizedMapUNet(model_arch="resnet18", input_image_shape=(15, 224, 224), output_channel=4)
     t = torch.randn(2, 15, 224, 224)
-    print(model(t).shape)
+    centers = torch.randint(low=10, high=214, size=(10, 2)).float()
+    yaws = torch.zeros(size=(10, 1))
+    extents = torch.ones(10, 2) * 2
+    from tbsim.utils.geometry_utils import get_box_world_coords, get_square_upright_box
+    boxes = get_box_world_coords(pos=centers, yaw=yaws, extent=extents)
+    boxes_aligned = torch.flatten(boxes[:, [0, 2], :], start_dim=1)
+    box_aligned = get_square_upright_box(centers, 2)
+    from IPython import embed; embed()
+    boxes_indices = torch.zeros(10, 1)
+    boxes_indices[5:] = 1
+    boxes_indexed = torch.cat((boxes_indices, boxes_aligned), dim=1)
+
+
+    model = RasterizeAgentEncoder(model_arch="resnet50", input_image_shape=(15, 224, 224))
+    output = model(t, boxes_indexed)
+    for f in output:
+        print(f.shape)

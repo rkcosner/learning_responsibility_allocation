@@ -4,7 +4,7 @@ import torch
 
 
 def get_box_world_coords(pos, yaw, extent):
-    corners = (torch.tensor([[-1, -1], [-1, 1], [1, 1], [1, -1]]) * 0.5) * (
+    corners = (torch.tensor([[-1, -1], [-1, 1], [1, 1], [1, -1]]) * 0.5).to(pos.device) * (
         extent.unsqueeze(-2)
     )
     s = torch.sin(yaw).unsqueeze(-1)
@@ -12,6 +12,13 @@ def get_box_world_coords(pos, yaw, extent):
     rotM = torch.cat((torch.cat((c, s), dim=-1), torch.cat((-s, c), dim=-1)), dim=-2)
     rotated_corners = (corners + pos.unsqueeze(-2)) @ rotM
     return rotated_corners
+
+
+def get_upright_box(pos, extent):
+    yaws = torch.zeros(*pos.shape[:-1], 1).to(pos.device)
+    boxes = get_box_world_coords(pos, yaws, extent)
+    upright_boxes = boxes[..., [0, 2], :]
+    return upright_boxes
 
 
 def batch_nd_transform_points(points, Mat):

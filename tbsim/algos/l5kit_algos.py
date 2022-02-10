@@ -155,7 +155,7 @@ class L5TrafficModel(pl.LightningModule):
             ),
             availabilities=torch.ones(preds["positions"].shape[:-1]).to(preds["positions"].device)  # [B, T]
         )
-        return dict(eog=plan)
+        return dict(ego=plan)
 
     def get_action(self, obs_dict, **kwargs):
         return {"ego": self(obs_dict["ego"])}
