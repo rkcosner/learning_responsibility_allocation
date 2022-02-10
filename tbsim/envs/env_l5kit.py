@@ -60,9 +60,11 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         if scene_indices is None:
             # randomly sample a batch of scenes for close-loop rollouts
             all_indices = np.arange(self._num_total_scenes)
-            scene_indices = self._npr.choice(
+            scene_indices = np.random.choice(
                 all_indices, size=(self.num_instances,), replace=False
             )
+            # scene_indices = all_indices[: self.num_instances]
+
         assert len(scene_indices) == self.num_instances
         assert (
             np.max(scene_indices) < self._num_total_scenes
@@ -141,7 +143,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         else:
             agent_obs = None
         ego_obs = self._current_scene_dataset.rasterise_frame_batch(self._frame_index)
-
         ego_obs = default_collate(ego_obs)
         self._cached_observation = TensorUtils.to_numpy(
             {"agents": agent_obs, "ego": ego_obs}

@@ -986,13 +986,4 @@ def time_distributed(
 
 
 def round_2pi(x):
-    minus_flag = x > np.pi
-    while minus_flag.any():
-        x -= minus_flag * 2 * np.pi
-        minus_flag = x > np.pi
-
-    plus_flag = x < -np.pi
-    while plus_flag.any():
-        x += plus_flag * 2 * np.pi
-        plus_flag = x < -np.pi
-    return x
+    return (x + np.pi) % (2 * np.pi) - np.pi

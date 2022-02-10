@@ -2,6 +2,7 @@ from tbsim.dynamics.base import DynType, dynamic
 import torch
 import numpy as np
 from copy import deepcopy
+import pdb
 
 
 class DoubleIntegrator(dynamic):
@@ -57,8 +58,12 @@ class DoubleIntegrator(dynamic):
                 ub = np.ones_like(x[..., 2:]) * self.abound[:, 1]
 
             elif isinstance(x, torch.Tensor):
-                lb = torch.ones_like(x[..., 2:]) * torch.from_numpy(self.abound[:, 0])
-                ub = torch.ones_like(x[..., 2:]) * torch.from_numpy(self.abound[:, 1])
+                lb = torch.ones_like(x[..., 2:]) * torch.from_numpy(
+                    self.abound[:, 0]
+                ).to(x.device)
+                ub = torch.ones_like(x[..., 2:]) * torch.from_numpy(
+                    self.abound[:, 1]
+                ).to(x.device)
 
             else:
                 raise NotImplementedError
@@ -68,12 +73,12 @@ class DoubleIntegrator(dynamic):
                 ub = (x[..., 2:] < self.vbound[:, 1]) * self.abound[:, 1]
 
             elif isinstance(x, torch.Tensor):
-                lb = (x[..., 2:] > self.vbound[:, 0]) * torch.from_numpy(
-                    self.abound[:, 0]
-                )
-                ub = (x[..., 2:] < self.vbound[:, 1]) * torch.from_numpy(
-                    self.abound[:, 1]
-                )
+                lb = (
+                    x[..., 2:] > torch.from_numpy(self.vbound[:, 0]).to(x.device)
+                ) * torch.from_numpy(self.abound[:, 0]).to(x.device)
+                ub = (
+                    x[..., 2:] < torch.from_numpy(self.vbound[:, 1]).to(x.device)
+                ) * torch.from_numpy(self.abound[:, 1]).to(x.device)
             else:
                 raise NotImplementedError
         return lb, ub
@@ -84,4 +89,5 @@ class DoubleIntegrator(dynamic):
 
     @staticmethod
     def state2yaw(x):
-        return torch.atan2(x[..., 3:], x[..., 2:3])
+        # return torch.atan2(x[..., 3:], x[..., 2:3])
+        return torch.zeros_like(x[..., 0:1])

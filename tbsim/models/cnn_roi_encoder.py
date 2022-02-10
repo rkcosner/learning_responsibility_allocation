@@ -1,7 +1,9 @@
+from logging import raiseExceptions
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import pdb
+from tbsim.utils.geometry_utils import batch_nd_transform_points
 
 
 class CNNROIMapEncoder(nn.Module):
@@ -70,7 +72,6 @@ class CNNROIMapEncoder(nn.Module):
             x0 = x
             x = F.leaky_relu(conv(x), 0.2)
             x = bn(x)
-
         x = ROI_align(x, ROI, self.ROI_outdim)
         out = [None] * len(x)
         for i in range(len(x)):
@@ -143,10 +144,15 @@ def bilinear_interpolate(img, x, y, floattype=torch.float):
     Returns:
         torch.Tensor: interpolated value
     """
-    x0 = torch.floor(x).type(torch.cuda.LongTensor)
+    if img.device.type == "cuda":
+        x0 = torch.floor(x).type(torch.cuda.LongTensor)
+        y0 = torch.floor(y).type(torch.cuda.LongTensor)
+    elif img.device.type == "cpu":
+        x0 = torch.floor(x).type(torch.LongTensor)
+        y0 = torch.floor(y).type(torch.LongTensor)
+    else:
+        raise ValueError("device not recognized")
     x1 = x0 + 1
-
-    y0 = torch.floor(y).type(torch.cuda.LongTensor)
     y1 = y0 + 1
 
     x0 = torch.clamp(x0, 0, img.shape[-2] - 1)
@@ -241,6 +247,157 @@ def ROI_align(features, ROI, outdim):
     return res
 
 
+def generate_ROIs(
+    pos,
+    yaw,
+    centroid,
+    raster_from_world,
+    mask,
+    patch_size,
+    mode="last",
+):
+    """
+    This version generates ROI for all agents only at most recent time step unless specified otherwise
+    """
+    if mode == "all":
+        bs = pos.shape[0]
+        yaw = yaw.type(torch.float)
+        s = torch.sin(yaw).unsqueeze(-1)
+        c = torch.cos(yaw).unsqueeze(-1)
+        rotM = torch.cat(
+            (torch.cat((c, -s), dim=-1), torch.cat((s, c), dim=-1)), dim=-2
+        )
+        world_xy = ((pos.unsqueeze(-2)) @ (rotM.transpose(-1, -2))).squeeze(-2)
+        world_xy += centroid.view(-1, 1, 1, 2).type(torch.float)
+        Mat = raster_from_world.view(-1, 1, 1, 3, 3).type(torch.float)
+        raster_xy = batch_nd_transform_points(world_xy, Mat)
+        ROI = [None] * bs
+        index = [None] * bs
+
+        for i in range(bs):
+            ii, jj = torch.where(mask[i])
+            index[i] = (ii, jj)
+            if patch_size.ndim == 1:
+                patches_size = patch_size.repeat(ii.shape[0], 1)
+            else:
+                sizes = patch_size[i, ii]
+                patches_size = torch.cat(
+                    (
+                        sizes[:, 0:1] * 0.5,
+                        sizes[:, 0:1] * 0.5,
+                        sizes[:, 1:2] * 0.5,
+                        sizes[:, 1:2] * 0.5,
+                    ),
+                    dim=-1,
+                )
+            ROI[i] = torch.cat(
+                (
+                    raster_xy[i, ii, jj],
+                    patches_size,
+                    yaw[i, ii, jj],
+                ),
+                dim=-1,
+            ).to(pos.device)
+        return ROI, index
+    elif mode == "last":
+        num = torch.arange(0, mask.shape[2]).view(1, 1, -1).to(mask.device)
+        nummask = num * mask
+        last_idx, _ = torch.max(nummask, dim=2)
+        bs = pos.shape[0]
+        s = torch.sin(yaw).unsqueeze(-1)
+        c = torch.cos(yaw).unsqueeze(-1)
+        rotM = torch.cat(
+            (torch.cat((c, -s), dim=-1), torch.cat((s, c), dim=-1)), dim=-2
+        )
+        world_xy = ((pos.unsqueeze(-2)) @ (rotM.transpose(-1, -2))).squeeze(-2)
+        world_xy += centroid.view(-1, 1, 1, 2).type(torch.float)
+        Mat = raster_from_world.view(-1, 1, 1, 3, 3).type(torch.float)
+        raster_xy = batch_nd_transform_points(world_xy, Mat)
+        agent_mask = mask.any(dim=2)
+        ROI = [None] * bs
+        index = [None] * bs
+        for i in range(bs):
+            ii = torch.where(agent_mask[i])[0]
+            index[i] = ii
+            if patch_size.ndim == 1:
+                patches_size = patch_size.repeat(ii.shape[0], 1)
+            else:
+                sizes = patch_size[i, ii]
+                patches_size = torch.cat(
+                    (
+                        sizes[:, 0:1] * 0.5,
+                        sizes[:, 0:1] * 0.5,
+                        sizes[:, 1:2] * 0.5,
+                        sizes[:, 1:2] * 0.5,
+                    ),
+                    dim=-1,
+                )
+            ROI[i] = torch.cat(
+                (
+                    raster_xy[i, ii, last_idx[i, ii]],
+                    patches_size,
+                    yaw[i, ii, last_idx[i, ii]],
+                ),
+                dim=-1,
+            )
+        return ROI, index
+    else:
+        raise ValueError("mode must be 'all' or 'last'")
+
+
+def Indexing_ROI_result(CNN_out, index, emb_size):
+    """put the lists of ROI align result into embedding tensor with the help of index"""
+    bs = len(CNN_out)
+    map_emb = torch.zeros(emb_size).to(CNN_out[0].device)
+    if map_emb.ndim == 3:
+        for i in range(bs):
+            map_emb[i, index[i]] = CNN_out[i]
+    elif map_emb.ndim == 4:
+        for i in range(bs):
+            ii, jj = index[i]
+            map_emb[i, ii, jj] = CNN_out[i]
+    else:
+        raise ValueError("wrong dimension for the map embedding!")
+
+    return map_emb
+
+
+def obtain_lane_flag(
+    lane_mask, pos, yaw, centroid, raster_from_world, mask, patch_size, out_dim
+):
+    if pos.ndim == 4:
+        ROI, index = generate_ROIs(
+            pos,
+            yaw,
+            centroid,
+            raster_from_world,
+            mask,
+            patch_size,
+            mode="all",
+        )
+        lane_flags = ROI_align(lane_mask.unsqueeze(1), ROI, out_dim)
+        lane_flags = [x.mean([-2, -1]).view(x.size(0), 1) for x in lane_flags]
+        lane_flags = Indexing_ROI_result(lane_flags, index, [*pos.shape[:3], 1])
+    elif pos.ndim == 5:
+        lane_flags = list()
+        emb_size = (*pos[:, 0].shape[:-1], 1)
+        for i in range(pos.size(1)):
+            ROI, index = generate_ROIs(
+                pos[:, i],
+                yaw[:, i],
+                centroid,
+                raster_from_world,
+                mask,
+                patch_size,
+                mode="all",
+            )
+            lane_flag_i = ROI_align(lane_mask.unsqueeze(1), ROI, out_dim)
+            lane_flag_i = [x.mean([-2, -1]).view(x.size(0), 1) for x in lane_flag_i]
+            lane_flags.append(Indexing_ROI_result(lane_flag_i, index, emb_size))
+        lane_flags = torch.stack(lane_flags, dim=1)
+    return lane_flags
+
+
 if __name__ == "__main__":
     import numpy as np
     from torchvision.ops.roi_align import RoIAlign
@@ -261,7 +418,6 @@ if __name__ == "__main__":
     ROI = torch.cat((xy, WH, psi), dim=-1)
     ROI = [ROI[i] for i in range(ROI.shape[0])]
     res1 = ROI_align(features, ROI, 6)[0].transpose(0, 1)
-    pdb.set_trace()
 
     ROI_star = torch.cat((xy - WH[..., [0, 2]], xy + WH[..., [1, 3]]), dim=-1)[0]
 

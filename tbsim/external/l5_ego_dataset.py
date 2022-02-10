@@ -13,6 +13,7 @@ from l5kit.sampling.agent_sampling import generate_agent_sample
 from l5kit.sampling.agent_sampling_vectorized import generate_agent_sample_vectorized
 from tbsim.external.agent_sampling_mixed import generate_agent_sample_mixed
 from l5kit.vectorization.vectorizer import Vectorizer
+import pdb
 
 
 class BaseEgoDataset(Dataset):
@@ -326,6 +327,7 @@ class EgoDatasetMixed(BaseEgoDataset):
             perturbation=self.perturbation,
             vectorizer=self.vectorizer,
             rasterizer=self.rasterizer,
+            vectorize_lane=self.cfg["data_generation_params"]["vectorize_lane"],
         )
 
     def get_scene_dataset(self, scene_index: int) -> "EgoDatasetMixed":

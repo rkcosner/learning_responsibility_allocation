@@ -1,5 +1,7 @@
 from tbsim.configs.base import TrainConfig, EnvConfig, AlgoConfig
 
+MAX_POINTS_LANE = 5
+
 
 class L5KitTrainConfig(TrainConfig):
     def __init__(self):
@@ -71,13 +73,13 @@ class L5KitEnvConfig(EnvConfig):
         self.rasterizer.set_origin_to_bottom = True
 
         #  if a tracked agent is closed than this value to ego, it will be controlled
-        self.simulation.distance_th_far = 30
-
-        #  if a new agent is closer than this value to ego, it will be controlled
         self.simulation.distance_th_close = 15
 
         #  whether to disable agents that are not returned at start_frame_index
         self.simulation.disable_new_agents = True
+
+        # maximum number of simulation steps to run (0.1sec / step)
+        self.simulation.num_simulation_steps = 50
 
         # maximum number of simulation steps to run (0.1sec / step)
         self.simulation.num_simulation_steps = 50
@@ -105,7 +107,7 @@ class L5KitVectorizedEnvConfig(EnvConfig):
         self.data_generation_params.other_agents_num = 20
         self.data_generation_params.max_agents_distance = 50
         self.data_generation_params.lane_params.max_num_lanes = 15
-        self.data_generation_params.lane_params.max_points_per_lane = 5
+        self.data_generation_params.lane_params.max_points_per_lane = MAX_POINTS_LANE
         self.data_generation_params.lane_params.max_points_per_crosswalk = 5
         self.data_generation_params.lane_params.max_retrieval_distance_m = 35
         self.data_generation_params.lane_params.max_num_crosswalks = 20
@@ -149,10 +151,14 @@ class L5KitMixedEnvConfig(EnvConfig):
         self.data_generation_params.other_agents_num = 20
         self.data_generation_params.max_agents_distance = 50
         self.data_generation_params.lane_params.max_num_lanes = 15
-        self.data_generation_params.lane_params.max_points_per_lane = 5
+        self.data_generation_params.lane_params.max_points_per_lane = MAX_POINTS_LANE
         self.data_generation_params.lane_params.max_points_per_crosswalk = 5
         self.data_generation_params.lane_params.max_retrieval_distance_m = 35
         self.data_generation_params.lane_params.max_num_crosswalks = 20
+
+        # step size of lane interpolation
+        self.data_generation_params.lane_params.lane_interp_step_size = 5.0
+        self.data_generation_params.vectorize_lane = True
 
         self.rasterizer.raster_size = (224, 224)
 
@@ -177,13 +183,13 @@ class L5KitMixedEnvConfig(EnvConfig):
         self.rasterizer.set_origin_to_bottom = True
 
         #  if a tracked agent is closed than this value to ego, it will be controlled
-        self.simulation.distance_th_far = 30
+        self.simulation.distance_th_far = 50
 
         #  if a new agent is closer than this value to ego, it will be controlled
-        self.simulation.distance_th_close = 15
+        self.simulation.distance_th_close = 50
 
         #  whether to disable agents that are not returned at start_frame_index
-        self.simulation.disable_new_agents = True
+        self.simulation.disable_new_agents = False
 
         # maximum number of simulation steps to run (0.1sec / step)
         self.simulation.num_simulation_steps = 50
@@ -222,7 +228,7 @@ class L5TransformerPredConfig(AlgoConfig):
         self.history_num_frames = 10
         self.history_num_frames_ego = 10  # this will also create raster history (we need to remove the raster from train/eval dataset - only visualization)
         self.history_num_frames_agents = 10
-        self.future_num_frames = 15
+        self.future_num_frames = 20
         self.step_time = 0.2
         self.N_t = 2
         self.N_a = 1
@@ -232,8 +238,8 @@ class L5TransformerPredConfig(AlgoConfig):
         self.map_emb_dim = 32
         self.d_ff = 256
         self.head = 4
-        self.dropout = 0.1
-        self.XY_step_size = [0.1, 0.1]
+        self.dropout = 0.01
+        self.XY_step_size = [2.0, 2.0]
         self.weights_scaling = [1.0, 1.0, 1.0]
         self.ego_weight = 1.0
         self.all_other_weight = 0.5
@@ -249,19 +255,22 @@ class L5TransformerPredConfig(AlgoConfig):
         self.vmin = -10
         self.reg_weight = 10
         self.calc_likelihood = False
-        self.calc_collision = True
-        self.collision_weight = 0.5
+        self.calc_collision = False
+        self.collision_weight = 1
         self.map_enc_mode = "all"
+        self.temporal_bias = 0.5
+        self.lane_regulation_weight = 1.5
 
         # map encoding parameters
         self.CNN.map_channels = 3
-        self.CNN.hidden_channels = [10, 20, 10, 10]
+        self.CNN.hidden_channels = [10, 20, 20, 10]
         self.CNN.ROI_outdim = 10
         self.CNN.output_size = self.map_emb_dim
         self.CNN.patch_size = [15, 35, 25, 25]
         self.CNN.kernel_size = [5, 5, 5, 3]
         self.CNN.strides = [1, 1, 1, 1]
         self.CNN.input_size = [224, 224]
+        self.CNN.veh_ROI_outdim = 4
 
         # Multi-modal prediction
         self.M = 1
@@ -269,6 +278,8 @@ class L5TransformerPredConfig(AlgoConfig):
         self.Discriminator.N_layer_enc = 1
 
         self.vectorize_map = False
+        self.vectorize_lane = True
+        self.points_per_lane = MAX_POINTS_LANE
 
         self.try_to_use_cuda = True
 
@@ -295,7 +306,7 @@ class L5TransformerGANConfig(L5TransformerPredConfig):
         self.name = "TransformerGAN"
         self.calc_likelihood = True
         self.f_steps = 5
-        self.GAN_weight = 0.3
+        self.GAN_weight = 0.2
         self.GAN_static = True
 
         self.optim_params_discriminator.learning_rate.initial = (
