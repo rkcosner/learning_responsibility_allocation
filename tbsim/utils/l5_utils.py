@@ -301,16 +301,23 @@ def generate_edges(
     return edges
 
 
-def get_edges_from_batch(data_batch, ego_predictions):
-    targets_all = batch_to_target_all_agents(data_batch)
+def get_edges_from_batch(data_batch, ego_predictions=None, all_predictions=None):
     raw_type = torch.cat(
         (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
         dim=1,
     ).type(torch.int64)
 
     # Use predicted ego position to compute future box edges
-    targets_all["target_positions"] [:, 0, :, :] = ego_predictions["positions"]
-    targets_all["target_yaws"][:, 0, :, :] = ego_predictions["yaws"]
+
+    targets_all = batch_to_target_all_agents(data_batch)
+    if ego_predictions is not None:
+        targets_all["target_positions"] [:, 0, :, :] = ego_predictions["positions"]
+        targets_all["target_yaws"][:, 0, :, :] = ego_predictions["yaws"]
+    elif all_predictions is not None:
+        targets_all["target_positions"] = all_predictions["positions"]
+        targets_all["target_yaws"] = all_predictions["yaws"]
+    else:
+        raise ValueError("Please specify either ego prediction or all predictions")
 
     pred_edges = generate_edges(
         raw_type, targets_all["extents"],

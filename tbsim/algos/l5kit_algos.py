@@ -164,7 +164,7 @@ class L5TrafficModel(pl.LightningModule):
                 preds["positions"].device
             ),  # [B, T]
         )
-        return dict(eog=plan)
+        return dict(ego=plan)
 
     def get_action(self, obs_dict, **kwargs):
         return {"ego": self(obs_dict["ego"])}

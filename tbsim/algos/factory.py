@@ -1,18 +1,18 @@
 """Factory methods for creating models"""
 from tbsim.configs.base import AlgoConfig
+
 from tbsim.algos.l5kit_algos import (
     L5TrafficModel,
     L5TransformerTrafficModel,
     L5TransformerGANTrafficModel,
-)
-from tbsim.algos.l5kit_algos import (
-    L5TrafficModel,
-    L5TransformerTrafficModel,
     L5VAETrafficModel,
     L5TrafficModelGC,
     SpatialPlanner,
 )
 
+from tbsim.algos.multiagent_algos import (
+    MATrafficModel
+)
 
 def algo_factory(algo_config: AlgoConfig, modality_shapes, **kwargs):
     """
@@ -40,6 +40,8 @@ def algo_factory(algo_config: AlgoConfig, modality_shapes, **kwargs):
         )
     elif algo_name == "spatial_planner":
         algo = SpatialPlanner(algo_config=algo_config, modality_shapes=modality_shapes)
+    elif algo_name == "ma_rasterized":
+        algo = MATrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "TransformerPred":
         algo = L5TransformerTrafficModel(algo_config=algo_config)
     elif algo_name == "TransformerGAN":
