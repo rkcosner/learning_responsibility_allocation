@@ -11,6 +11,7 @@ from l5kit.geometry import transform_points, rotation33_as_yaw
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.utils.vis_utils import render_state_l5kit
 from tbsim.envs.base import BaseEnv, BatchedEnv, SimulationException
+from tbsim.utils.env_utils import RolloutAction, Action
 from l5kit.geometry import compute_agent_pose
 import pdb
 from tbsim.utils.geometry_utils import batch_nd_transform_points
@@ -35,10 +36,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             start_frame_index=env_config.simulation.start_frame_index,
             show_info=True,
         )
-        if "generate_agent_obs" not in env_config.keys():
-            self.generate_agent_obs = True
-        else:
-            self.generate_agent_obs = env_config.generate_agent_obs
+        
+        self.generate_agent_obs = env_config.get("generate_agent_obs", True)
         self._npr = np.random.RandomState(seed=seed)
         self.dataset = dataset
         self.rasterizer = dataset.rasterizer
@@ -66,11 +65,9 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         if scene_indices is None:
             # randomly sample a batch of scenes for close-loop rollouts
             all_indices = np.arange(self._num_total_scenes)
-            scene_indices = np.random.choice(
+            scene_indices = self._npr.choice(
                 all_indices, size=(self.num_instances,), replace=False
             )
-            # scene_indices = all_indices[: self.num_instances]
-
         assert len(scene_indices) == self.num_instances
         assert (
             np.max(scene_indices) < self._num_total_scenes
@@ -162,7 +159,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         # TODO
         return np.zeros(self._num_scenes)
 
-    def render(self, actions_to_take, **kwargs):
+    def render(self, actions_to_take: RolloutAction, **kwargs):
         ims = []
         for i, si in enumerate(self._current_scene_indices):
             im = render_state_l5kit(
@@ -195,94 +192,42 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
     def horizon(self):
         return len(self._current_scene_dataset)
 
-    def _step(
-        self,
-        ego_control=None,
-        agents_control=None,
-        ego_samples=None,
-        agents_samples=None,
-    ):
+    def _step(self, step_actions: RolloutAction):
         obs = self.get_observation()
-        should_update = (
-            self._frame_index + 1 < self.horizon and not self._prediction_only
-        )
-        if ego_control is not None:
+        should_update = self._frame_index + 1 < self.horizon and not self._prediction_only
+        if step_actions.has_ego:
             if should_update:
                 # update the next frame's ego position and orientation using control input
                 ClosedLoopSimulator.update_ego(
                     dataset=self._current_scene_dataset,
                     frame_idx=self._frame_index + 1,
                     input_dict=obs["ego"],
-                    output_dict=ego_control,
+                    output_dict=step_actions.ego.to_dict(),
                 )
 
             # record state
             ego_in_out = ClosedLoopSimulator.get_ego_in_out(
-                obs["ego"], ego_control, keys_to_exclude=set(("image",))
+                obs["ego"], step_actions.ego.to_dict(), keys_to_exclude=set(("image",))
             )
             for i, scene_idx in enumerate(self._current_scene_indices):
                 # If applicable, insert prediction samples for visualization purposes
-                if ego_samples is not None:
-                    ego_in_out[scene_idx].outputs["samples"] = dict()
-                    for k in ego_samples:
-                        ego_in_out[scene_idx].outputs["samples"][k] = ego_samples[k][i]
+                # if ego_samples is not None:
+                #     ego_in_out[scene_idx].outputs["samples"] = dict()
+                #     for k in ego_samples:
+                #         ego_in_out[scene_idx].outputs["samples"][k] = ego_samples[k][i]
                 self._ego_states[scene_idx].append(ego_in_out[scene_idx])
 
-            # if "all_other_agents_track_id" in ego_control:
-            #     if should_update:
-            #         # batch update all surrounding agents if the model is scene-centric
-            #         for scene_idx in self._current_scene_indices:
-
-            #             in_dict = ego_in_out[scene_idx].inputs
-            #             out_dict = ego_in_out[scene_idx].outputs
-            #             agents_track_id = out_dict["all_other_agents_track_id"]
-            #             idx = np.where(agents_track_id != 0)[0]
-            #             agent_centroid_m = (
-            #                 in_dict["centroid"]
-            #                 + out_dict["all_other_positions"][idx, 0]
-            #             )
-            #             agent_yaw_rad = (
-            #                 in_dict["yaw"] + out_dict["all_other_yaws"][idx, 0, 0]
-            #             )
-            #             world_from_agent = np.zeros([idx.shape[0], 3, 3])
-            #             for j in range(agent_yaw_rad.shape[0]):
-            #                 world_from_agent[j] = compute_agent_pose(
-            #                     agent_centroid_m[j], agent_yaw_rad[j]
-            #                 )
-            #             extents = in_dict["all_other_agents_history_extents"][idx, 0]
-            #             extents = np.hstack(
-            #                 (extents, 1.8 * np.ones((extents.shape[0], 1)))
-            #             )
-            #             agent_obs = {
-            #                 "world_from_agent": world_from_agent,
-            #                 "yaw": np.tile(in_dict["yaw"], idx.shape[0]),
-            #                 "track_id": agents_track_id[idx],
-            #                 "extent": extents,
-            #                 "scene_index": np.tile(scene_idx, idx.shape[0]),
-            #             }
-            #             agent_control = {
-            #                 "positions": out_dict["all_other_positions"][idx],
-            #                 "yaws": out_dict["all_other_yaws"][idx],
-            #             }
-
-            #             ClosedLoopSimulator.update_agents(
-            #                 dataset=self._current_scene_dataset,
-            #                 frame_idx=self._frame_index + 1,
-            #                 input_dict=agent_obs,
-            #                 output_dict=agent_control,
-            #             )
-
-        if agents_control is not None:
+        if step_actions.has_agents:
             if should_update:
                 # update the next frame's agent positions and orientations using control input
                 ClosedLoopSimulator.update_agents(
                     dataset=self._current_scene_dataset,
                     frame_idx=self._frame_index + 1,
                     input_dict=obs["agents"],
-                    output_dict=agents_control,
+                    output_dict=step_actions.agents.to_dict(),
                 )
             agents_in_out = ClosedLoopSimulator.get_agents_in_out(
-                obs["agents"], agents_control, keys_to_exclude=set(("image",))
+                obs["agents"], step_actions.agents.to_dict(), keys_to_exclude=set(("image",))
             )
             for i, scene_idx in enumerate(self._current_scene_indices):
                 self._agents_states[scene_idx].append(agents_in_out.get(scene_idx, []))
@@ -295,32 +240,12 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         else:
             self._frame_index += 1
 
-    def _pose_world_from_agent(self, act_dict):
-        obs = self.get_observation()
-        return dict(
-            positions=transform_points(
-                act_dict["positions"], obs["ego"]["world_from_agent"]
-            ),
-            yaws=obs["ego"]["yaw"][..., None, None] + act_dict["yaws"],
-        )
-
-    def _pose_agent_from_world(self, act_dict):
-        obs = self.get_observation()
-        return dict(
-            positions=transform_points(
-                act_dict["positions"], obs["ego"]["agent_from_world"]
-            ),
-            yaws=act_dict["yaws"] - obs["ego"]["yaw"][..., None, None],
-        )
-
     def step(self, actions, num_steps_to_take: int = 1, render=False):
         """
         Step the simulation with control inputs
 
         Args:
-            actions (Dict): a dictionary containing either or both "ego_control" or "agents_control"
-                - ego_control (Dict): a dictionary containing future ego position and orientation for all scenes
-                - agents_control (Dict): a dictionary containing future agent positions and orientations for all scenes
+            actions (RolloutAction): action for controlling ego and/or agents
             num_steps_to_take (int): how many env steps to take. Must be less or equal to length of the input actions
             render (bool): whether to render state and actions and return renderings
         """
@@ -331,43 +256,56 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         # use dataset actions if we are doing prediction-only rollouts
         if self._prediction_only:
             for _ in range(num_steps_to_take):
-                self._step()
+                self._step(RolloutAction())
             return
 
         # otherwise, use @actions to update simulation
-        actions = TensorUtils.to_numpy(actions)
-
-        actions_world = dict()
-        # Convert action to world frame
-        actions_world["ego"] = self._pose_world_from_agent(actions["ego"])
-        if "ego_plan" in actions:
-            actions_world["ego_plan"] = dict(
-                predictions=self._pose_world_from_agent(
-                    actions["ego_plan"]["predictions"]
-                )
+        actions = actions.to_numpy()
+        # Convert ego actions to world frame
+        obs = self.get_observation()
+        ego_actions_world = None
+        agents_actions_world = None
+        if actions.has_ego:
+            ego_actions_world = actions.ego.transform(
+                trans_mats=obs["ego"]["world_from_agent"], rot_rads=obs["ego"]["yaw"][..., None, None]
+            )
+        if actions.has_agents:
+            agents_actions_world = actions.agents.transform(
+                trans_mats=obs["agents"]["world_from_agent"], rot_rads=obs["agents"]["yaw"][..., None, None]
             )
 
         renderings = []
         for step_i in range(num_steps_to_take):
-            step_actions_world = TensorUtils.map_ndarray(
-                actions_world, lambda x: x[..., step_i:, :]
-            )
-
-            # transform step action back to the agent frame
-            step_actions = dict()
-            step_actions["ego"] = self._pose_agent_from_world(step_actions_world["ego"])
-            if "ego_plan" in actions:
-                step_actions["ego_plan"] = dict(
-                    predictions=self._pose_agent_from_world(
-                        step_actions_world["ego_plan"]["predictions"]
-                    ),
-                    location_map=actions["ego_plan"]["location_map"],
+            obs = self.get_observation()
+            ego_actions_step = None
+            agents_actions_step = None
+            if ego_actions_world is not None:
+                ego_actions_world_step = Action.from_dict(
+                    TensorUtils.map_ndarray(ego_actions_world.to_dict(), lambda x: x[..., step_i:, :])
                 )
+                ego_actions_step = ego_actions_world_step.transform(
+                    trans_mats=obs["ego"]["agent_from_world"], rot_rads= - obs["ego"]["yaw"][..., None, None]
+                )
+
+            if agents_actions_world is not None:
+                agents_actions_world_step = Action.from_dict(
+                    TensorUtils.map_ndarray(agents_actions_world.to_dict(), lambda x: x[..., step_i:, :])
+                )
+                agents_actions_step = agents_actions_world_step.transform(
+                    trans_mats=obs["agents"]["agent_from_world"], rot_rads= - obs["agents"]["yaw"][..., None, None]
+                )
+
+            step_actions = RolloutAction(
+                ego=ego_actions_step,
+                agents=agents_actions_step,
+                ego_info=actions.ego_info,
+                agents_info=actions.agents_info
+
+            )
+            # transform step action back to the agent frame
             if render:
-                renderings.append(self.render(step_actions))
+                renderings.append(self.render(actions_to_take=step_actions))
 
-            ego_control = step_actions.get("ego", None)
-
-            self._step(ego_control=ego_control)
+            self._step(step_actions=step_actions)
 
         return renderings

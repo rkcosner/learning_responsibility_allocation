@@ -13,7 +13,7 @@ class BaseEnv(abc.ABC):
         return
 
     @abc.abstractmethod
-    def step(self, action, num_steps_to_take):
+    def step(self, action, num_steps_to_take, render):
         return
 
     @abc.abstractmethod

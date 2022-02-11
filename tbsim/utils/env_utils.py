@@ -1,12 +1,15 @@
 import numpy as np
 import pytorch_lightning as pl
 import torch
+from typing import Tuple, Dict
 
 from tbsim.envs.base import BatchedEnv, BaseEnv
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.dynamics as dynamics
 from tbsim.utils.l5_utils import get_current_states
 from tbsim.algos.algo_utils import optimize_trajectories
+from tbsim.utils.geometry_utils import transform_points_tensor
+from l5kit.geometry import transform_points
 
 
 def rollout_episodes(
@@ -22,7 +25,7 @@ def rollout_episodes(
     Rollout an environment for a number of episodes
     Args:
         env (BaseEnv): a base simulation environment (gym-like)
-        policy: a policy that
+        policy (RolloutWrapper): a policy that controls agents in the environment
         num_episodes (int): number of episodes to rollout for
         skip_first_n (int): number of steps to skip at the begining
         n_step_action (int): number of steps to take between querying models
@@ -32,6 +35,7 @@ def rollout_episodes(
     Returns:
         stats (dict): A dictionary of rollout stats for each episode (metrics, rewards, etc.)
         info (dict): A dictionary of environment info for each episode
+        renderings (list): A list of rendered frames in the form of np.ndarray, one for each episode
     """
     stats = {}
     info = {}
@@ -49,6 +53,7 @@ def rollout_episodes(
             obs = env.get_observation()
             obs = TensorUtils.to_torch(obs, device=policy.device)
 
+            # skip the first N steps to warm up environment state (velocity, etc.)
             if counter < skip_first_n:
                 fake_action = {
                     "ego": {
@@ -57,16 +62,15 @@ def rollout_episodes(
                     }
                 }
 
-                env.step(fake_action)
+                env.step(fake_action, num_steps_to_take=1, render=False)
             else:
                 action = policy.get_action(obs)
-                env.step(action)
-
-            ims = env.step(
-                action, num_steps_to_take=n_step_action, render=render
-            )  # List of [num_scene, h, w, 3]
-            if render:
-                frames.extend(ims)
+                ims = env.step(
+                    action, num_steps_to_take=n_step_action, render=render
+                )  # List of [num_scene, h, w, 3]
+                if render:
+                    frames.extend(ims)
+                    
             done = env.is_done()
             counter += 1
 
@@ -87,99 +91,25 @@ def rollout_episodes(
                 info[k].extend(v)
             else:
                 info[k].append(v)
+
         if render:
             frames = np.stack(frames)
             if is_batched_env:
-                frames = frames.transpose(
-                    (1, 0, 2, 3, 4)
-                )  # [step, scene] -> [scene, step]
+                frames = frames.transpose((1, 0, 2, 3, 4))  # [step, scene] -> [scene, step]
             renderings.append(frames)
 
     return stats, info, renderings
 
 
-def replay_episodes(env, policy, num_episodes):
-    """
-    replay an environment for a number of episodes
-    Args:
-        env (BaseEnv): a base simulation environment (gym-like)
-        policy: a policy that
-        num_episodes (int): number of episodes to rollout for
-
-    Returns:
-        stats (dict): A dictionary of rollout stats for each episode (metrics, rewards, etc.)
-        info (dict): A dictionary of environment info for each episode
-    """
-    stats = {}
-    info = {}
-    is_batched_env = isinstance(env, BatchedEnv)
-    pred_seq = [list() for i in range(num_episodes * env.num_instances)]
-    for ei in range(num_episodes):
-        env.reset()
-        counter = 0
-        done = env.is_done()
-        while not done:
-
-            obs = env.get_observation()
-            obs = TensorUtils.to_torch(obs, device=policy.device)
-            action = policy.get_action(obs)
-            yaw = action["ego"]["yaws"]
-            yaw += obs["ego"]["yaw"].view(-1, 1, 1)
-            pos = action["ego"]["positions"]
-            s = torch.sin(yaw).unsqueeze(-1)
-            c = torch.cos(yaw).unsqueeze(-1)
-            centroid = obs["ego"]["centroid"]
-            rotM = torch.cat(
-                (torch.cat((c, -s), dim=-1), torch.cat((s, c), dim=-1)), dim=-2
-            )
-            world_xy = ((pos.unsqueeze(-2)) @ (rotM.transpose(-1, -2))).squeeze(-2)
-            world_xy += centroid.view(-1, 1, 2).type(torch.float)
-
-            counter += 1
-            for k in range(env.num_instances):
-                pred_seq[ei * env.num_instances + k].append(
-                    TensorUtils.to_numpy(world_xy[k])
-                )
-            fake_action = {
-                "ego": {
-                    "positions": obs["ego"]["target_positions"],
-                    "yaws": obs["ego"]["target_yaws"],
-                }
-            }
-            env.step(fake_action)
-            done = env.is_done()
-
-        metrics = env.get_metrics()
-        for k, v in metrics.items():
-            if k not in stats:
-                stats[k] = []
-            if is_batched_env:
-                stats[k] = np.concatenate([stats[k], v], axis=0)
-            else:
-                stats[k].append(v)
-
-        env_info = env.get_info()
-        info["predictions"] = pred_seq
-        for k, v in env_info.items():
-            if k not in info:
-                info[k] = []
-            if is_batched_env:
-                info[k].extend(v)
-            else:
-                info[k].append(v)
-
-    return stats, info
-
-
 class RolloutCallback(pl.Callback):
     def __init__(
-        self,
-        env,
-        num_episodes=1,
-        n_step_action=1,
-        every_n_steps=100,
-        warm_start_n_steps=1,
-        verbose=False,
+            self,
+            env,
+            num_episodes=1,
+            n_step_action=1,
+            every_n_steps=100,
+            warm_start_n_steps=1,
+            verbose=False,
     ):
         self._env = env
         self._num_episodes = num_episodes
@@ -200,8 +130,7 @@ class RolloutCallback(pl.Callback):
         if should_run:
             stats, _, _ = rollout_episodes(
                 env=self._env,
-                policy=pl_module,
-                skip_first_n=1,
+                policy=RolloutWrapper(ego_policy=pl_module),
                 num_episodes=self._num_episodes,
                 n_step_action=self._n_step_action,
             )
@@ -219,24 +148,142 @@ class RolloutCallback(pl.Callback):
             self.print_if_verbose("\n")
 
 
-class RolloutWrapper(object):
-    def __init__(self, model, **action_kwargs):
-        self.model = model
-        self.device = model.device
-        self.action_kwargs = action_kwargs
+class Action(object):
+    def __init__(self, positions, yaws):
+        assert positions.ndim == 3  # [B, T, 2]
+        assert positions.shape[:-1] == yaws.shape[:-1]
+        assert positions.shape[-1] == 2
+        assert yaws.shape[-1] == 1
+        self._positions = positions
+        self._yaws = yaws
 
-    def get_action(self, obs):
-        return self.model.get_action(obs, **self.action_kwargs)
+    @property
+    def positions(self):
+        return TensorUtils.clone(self._positions)
 
-    def get_plan(self, obs):
-        return self.model.get_plan(obs, **self.action_kwargs)
+    @property
+    def yaws(self):
+        return TensorUtils.clone(self._yaws)
+
+    def to_dict(self):
+        return dict(
+            positions=self.positions,
+            yaws=self.yaws
+        )
 
     @classmethod
-    def wrap(cls, model, **action_kwargs):
-        return cls(model=model, action_kwargs=action_kwargs)
+    def from_dict(cls, d):
+        return cls(**d)
+
+    def transform(self, trans_mats, rot_rads):
+        if isinstance(self.positions, np.ndarray):
+            pos = transform_points(self.positions, trans_mats)
+        else:
+            pos = transform_points_tensor(self.positions, trans_mats)
+
+        yaw = self.yaws + rot_rads
+        return self.__class__(pos, yaw)
+
+    def to_numpy(self):
+        return self.__class__(**TensorUtils.to_numpy(self.to_dict()))
+
+
+class Plan(object):
+    def __init__(self, positions, yaws, availabilities, controls=None):
+        assert positions.ndim == 3  # [B, T, 2]
+        b, t, s = positions.shape
+        assert s == 2
+        assert yaws.shape == (b, t, 1)
+        assert availabilities.shape ==  (b, t)
+        self._positions = positions
+        self._yaws = yaws
+        self._availabilities = availabilities
+        self._controls = controls
+
+    @property
+    def positions(self):
+        return TensorUtils.clone(self._positions)
+
+    @property
+    def yaws(self):
+        return TensorUtils.clone(self._yaws)
+
+    @property
+    def availabilities(self):
+        return TensorUtils.clone(self._availabilities)
+
+    @property
+    def controls(self):
+        return TensorUtils.clone(self._controls)
+
+    def transform(self, trans_mats, rot_rads):
+        if isinstance(self.positions, np.ndarray):
+            pos = transform_points(self.positions, trans_mats)
+        else:
+            pos = transform_points_tensor(self.positions, trans_mats)
+
+        yaw = self.yaws + rot_rads
+        return self.__class__(pos, yaw, self.availabilities, self.controls)
+
+    def to_dict(self):
+        p = dict(
+            positions=self.positions,
+            yaws=self.yaws,
+            availabilities=self.availabilities,
+        )
+        if self._controls is not None:
+            p["controls"] = self.controls
+        return p
+
+    @classmethod
+    def from_dict(cls, d):
+        return cls(**d)
+
+    def to_numpy(self):
+        return self.__class__(**TensorUtils.to_numpy(self.to_dict()))
+
+
+class RolloutAction(object):
+    def __init__(self, ego=None, ego_info=None, agents=None, agents_info=None):
+        assert ego is None or isinstance(ego, Action)
+        assert agents is None or isinstance(agents, Action)
+        assert ego_info is None or isinstance(ego_info, dict)
+        assert agents_info is None or isinstance(agents_info, dict)
+
+        self.ego = ego
+        self.ego_info = ego_info
+        self.agents = agents
+        self.agents_info = agents_info
+
+    @property
+    def has_ego(self):
+        return self.ego is not None
+
+    @property
+    def has_agents(self):
+        return self.agents is not None
+
+    def to_dict(self):
+        d = dict()
+        if self.has_ego:
+            d["ego"] = self.ego.to_dict()
+            d["ego_info"] = self.ego_info
+        if self.has_agents:
+            d["agents"] = self.agents.to_dict()
+            d["agents_info"] = self.agents_info
+        return d
+
+    def to_numpy(self):
+        return self.__class__(
+            ego=self.ego.to_numpy() if self.has_ego else None,
+            ego_info=TensorUtils.to_numpy(self.ego_info) if self.has_ego else None,
+            agents=self.agents.to_numpy() if self.has_agents else None,
+            agents_info=TensorUtils.to_numpy(self.agents_info) if self.has_agents else None,
+        )
 
 
 class OptimController(object):
+    """An optimization-based controller"""
     def __init__(
         self,
         dynamics_type,
@@ -265,11 +312,10 @@ class OptimController(object):
                 "dynamics type {} is not implemented", dynamics_type
             )
 
-    def get_action(self, obs, plan, init_u=None, **kwargs):
-        obs = obs["ego"]
-        target_pos = plan["predictions"]["positions"]
-        target_yaw = plan["predictions"]["yaws"]
-        target_avails = plan["availabilities"]
+    def get_action(self, obs, plan: Plan, init_u=None, **kwargs) -> Tuple[Action, Dict]:
+        target_pos = plan.positions
+        target_yaw = plan.yaws
+        target_avails = plan.availabilities
         device = target_pos.device
         num_action_steps = target_pos.shape[-2]
         init_x = get_current_states(obs, dyn_type=self.dyn.type())
@@ -281,7 +327,7 @@ class OptimController(object):
             target_avails = torch.ones(target_pos.shape[:-1]).to(device)
         targets = torch.cat((target_pos, target_yaw), dim=-1)
         assert init_u.shape[-2] == num_action_steps
-        traj, raw_traj, final_u, losses = optimize_trajectories(
+        predictions, raw_traj, final_u, losses = optimize_trajectories(
             init_u=init_u,
             init_x=init_x,
             target_trajs=targets,
@@ -291,52 +337,81 @@ class OptimController(object):
             data_batch=obs,
             **self.optimizer_kwargs
         )
-        return dict(ego=traj)
+        action = Action(**predictions)
+        return action, {}
 
 
 class GTPlanner(object):
+    """A (fake) planner tha sets ground truth trajectory as (sub)goal"""
     def __init__(self, device):
         self.device = device
 
     @staticmethod
-    def get_plan(obs, **kwargs):
-        obs = obs["ego"]
-        plan = dict(
-            predictions=dict(
-                positions=obs["target_positions"],
-                yaws=obs["target_yaws"],
-            ),
+    def get_plan(obs, **kwargs) -> Tuple[Plan, Dict]:
+        plan = Plan(
+            positions=obs["target_positions"],
+            yaws=obs["target_yaws"],
             availabilities=obs["target_availabilities"],
         )
-        return dict(ego=plan)
+        return plan, {}
 
 
 class HierarchicalWrapper(object):
-    def __init__(self, planner, controller=None):
+    """A wrapper policy that feeds subgoal from a planner to a controller"""
+    def __init__(self, planner, controller):
         self.device = planner.device
         self.planner = planner
         self.controller = controller
 
-    @staticmethod
-    def verify_plan(plan):
-        assert "predictions" in plan
-        assert "availabilities" in plan
-        pred = plan["predictions"]
-        assert pred["positions"].ndim == 3  # [B, T, 2]
-        b, t, s = pred["positions"].shape
-        assert s == 2
-        assert pred["yaws"].shape == (b, t, 1)
-        assert plan["availabilities"].shape == (b, t)
+    def get_action(self, obs) -> Tuple[Action, Dict]:
+        plan, plan_info = self.planner.get_plan(obs)
+        actions, action_info = self.controller.get_action(
+            obs,
+            plan=plan,
+            init_u=plan.controls
+        )
+        action_info["plan"] = plan.to_dict()
+        action_info["plan_info"] = plan_info
+        return actions, action_info
 
-    def get_action(self, obs, **kwargs):
-        with torch.no_grad():
-            all_plans = self.planner.get_plan(obs, sample=kwargs.get("sample", False))
-        plan = all_plans["ego"]
-        self.verify_plan(plan)
-        init_u = plan.get("controls", None)
-        actions = self.controller.get_action(obs, plan=plan, init_u=init_u)
-        output = actions
-        output["ego_plan"] = plan
-        if "ego_samples" in all_plans:
-            output["ego_samples"] = all_plans["ego_samples"]
-        return output
+
+class PolicyWrapper(object):
+    """A convenient wrapper for specifying run-time keyword arguments"""
+    def __init__(self, model, get_action_kwargs=None, get_plan_kwargs=None):
+        self.model = model
+        self.device = model.device
+        self.action_kwargs = get_action_kwargs
+        self.plan_kwargs = get_plan_kwargs
+
+    def get_action(self, obs) -> Tuple[Action, Dict]:
+        return self.model.get_action(obs, **self.action_kwargs)
+
+    def get_plan(self, obs) -> Tuple[Plan, Dict]:
+        return self.model.get_plan(obs, **self.plan_kwargs)
+
+    @classmethod
+    def wrap_controller(cls, model, **kwargs):
+        return cls(model=model, get_action_kwargs=kwargs)
+
+    @classmethod
+    def wrap_planner(cls, model, **kwargs):
+        return cls(model=model, get_plan_kwargs=kwargs)
+
+
+class RolloutWrapper(object):
+    """A wrapper policy that can (optionally) control both ego and other agents in a scene"""
+    def __init__(self, ego_policy=None, agents_policy=None):
+        self.device = ego_policy.device if agents_policy is None else agents_policy.device
+        self.ego_policy = ego_policy
+        self.agents_policy = agents_policy
+
+    def get_action(self, obs) -> RolloutAction:
+        ego_action = None
+        ego_action_info = None
+        agents_action = None
+        agents_action_info = None
+        if self.ego_policy is not None:
+            ego_action, ego_action_info = self.ego_policy.get_action(obs["ego"])
+        if self.agents_policy is not None:
+            agents_action, agents_action_info = self.agents_policy.get_action(obs["agents"])
+        return RolloutAction(ego_action, ego_action_info, agents_action, agents_action_info)
