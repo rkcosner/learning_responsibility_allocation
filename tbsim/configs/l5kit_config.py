@@ -19,7 +19,7 @@ class L5KitTrainConfig(TrainConfig):
         self.rollout.every_n_steps = 500
         self.rollout.num_episodes = 10
         self.rollout.num_scenes = 3
-        self.rollout.n_step_action = 2
+        self.rollout.n_step_action = 10
 
         ## training config
         self.training.batch_size = 32

@@ -74,6 +74,7 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
     policy = RolloutWrapper(ego_policy=policy, agents_policy=policy)
 
     data_cfg.env.simulation.num_simulation_steps = 200
+    data_cfg.env.generate_agent_obs = True
     env = EnvL5KitSimulation(
         data_cfg.env,
         dataset=env_dataset,

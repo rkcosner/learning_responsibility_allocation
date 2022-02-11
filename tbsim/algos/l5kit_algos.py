@@ -361,7 +361,7 @@ class SpatialPlanner(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         pout = self(batch)
-        batch["goal"] = self.get_goal_supervision(batch)
+        batch["goal"] = AlgoUtils.get_spatial_goal_supervision(batch)
         losses = TensorUtils.detach(self._compute_losses(pout, batch))
         metrics = self._compute_metrics(pout, batch)
         return {"losses": losses, "metrics": metrics}

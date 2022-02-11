@@ -86,8 +86,11 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             self._agents_states[k] = []
 
     def get_random_ego_actions(self):
-        ac = np.random.randn(self._num_scenes, 1, 3)
-        return {"positions": ac[:, :, :2], "yaws": ac[:, :, 2:3]}
+        ac = self._npr.randn(self._num_scenes, 1, 3)
+        return Action(
+            positions=ac[:, :, :2],
+            yaws=ac[:, :, 2:3]
+        )
 
     @property
     def num_instances(self):
@@ -250,7 +253,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             render (bool): whether to render state and actions and return renderings
         """
 
-        if self._done:
+        if self.is_done():
             raise SimulationException("Simulation episode has ended")
 
         # use dataset actions if we are doing prediction-only rollouts
@@ -278,6 +281,9 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         renderings = []
         for step_i in range(num_steps_to_take):
+            if self.is_done():
+                break
+
             obs = self.get_observation()
             ego_actions_step = None
             agents_actions_step = None

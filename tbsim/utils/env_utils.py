@@ -53,16 +53,9 @@ def rollout_episodes(
             obs = env.get_observation()
             obs = TensorUtils.to_torch(obs, device=policy.device)
 
-            # skip the first N steps to warm up environment state (velocity, etc.)
             if counter < skip_first_n:
-                fake_action = {
-                    "ego": {
-                        "positions": obs["ego"]["target_positions"],
-                        "yaws": obs["ego"]["target_yaws"],
-                    }
-                }
-
-                env.step(fake_action, num_steps_to_take=1, render=False)
+                # skip the first N steps to warm up environment state (velocity, etc.)
+                env.step(RolloutAction(), num_steps_to_take=1, render=False)
             else:
                 action = policy.get_action(obs)
                 ims = env.step(
@@ -411,7 +404,9 @@ class RolloutWrapper(object):
         agents_action = None
         agents_action_info = None
         if self.ego_policy is not None:
+            assert obs["ego"] is not None
             ego_action, ego_action_info = self.ego_policy.get_action(obs["ego"])
         if self.agents_policy is not None:
+            assert obs["agents"] is not None
             agents_action, agents_action_info = self.agents_policy.get_action(obs["agents"])
         return RolloutAction(ego_action, ego_action_info, agents_action, agents_action_info)
