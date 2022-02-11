@@ -5,7 +5,7 @@ from l5kit.vectorization.vectorizer import Vectorizer
 
 from l5kit.data import filter_agents_by_labels, PERCEPTION_LABEL_TO_INDEX
 from l5kit.data.filter import filter_agents_by_track_id
-from l5kit.geometry import compute_agent_pose, rotation33_as_yaw
+from l5kit.geometry import compute_agent_pose, rotation33_as_yaw, transform_points, angular_distance
 from l5kit.kinematic import Perturbation
 from l5kit.sampling.agent_sampling import (
     compute_agent_velocity,
@@ -19,6 +19,14 @@ from l5kit.rasterization import (
     Rasterizer,
     RenderContext,
 )
+
+import pdb
+from l5kit.data.map_api import InterpolationMethod, MapAPI
+from l5kit.rasterization.semantic_rasterizer import indices_in_bounds
+from l5kit.geometry import transform_points
+from tbsim.utils.geometry_utils import batch_proj
+from tbsim.utils.tensor_utils import round_2pi
+from scipy.interpolate import interp1d
 
 
 def generate_agent_sample_mixed(
@@ -36,6 +44,7 @@ def generate_agent_sample_mixed(
     rasterizer: Rasterizer,
     render_context: RenderContext,
     perturbation: Optional[Perturbation] = None,
+    vectorize_lane=True,
 ) -> dict:
     """Generates the inputs and targets to train a deep prediction model with vectorized inputs.
     A deep prediction model takes as input the state of the world in vectorized form,
@@ -70,6 +79,7 @@ def generate_agent_sample_mixed(
         the future yaw angular offset, the future_availability as a binary mask,
         the vectorized input representation features, and (optional) a raster image
     """
+
     history_num_frames_max = max(history_num_frames_ego, history_num_frames_agents)
     (
         history_frames,
@@ -129,6 +139,9 @@ def generate_agent_sample_mixed(
     world_from_agent = compute_agent_pose(agent_centroid_m, agent_yaw_rad)
     agent_from_world = np.linalg.inv(world_from_agent)
 
+    raster_from_agent = raster_from_world @ world_from_agent
+    agent_from_raster = np.linalg.inv(raster_from_agent)
+
     (
         future_coords_offset,
         future_yaws_offset,
@@ -168,12 +181,12 @@ def generate_agent_sample_mixed(
     history_vels_mps, future_vels_mps = compute_agent_velocity(
         history_coords_offset, future_coords_offset, step_time
     )
-
     frame_info = {
         "extent": agent_extent_m,
         "type": agent_type_idx,
         "image": input_im,
-        "raster_from_agent": raster_from_world @ world_from_agent,
+        "raster_from_agent": raster_from_agent,
+        "agent_from_raster": agent_from_raster,
         "raster_from_world": raster_from_world,
         "agent_from_world": agent_from_world,
         "world_from_agent": world_from_agent,
@@ -188,7 +201,7 @@ def generate_agent_sample_mixed(
         "centroid": agent_centroid_m,
         "yaw": agent_yaw_rad,
         "speed": np.linalg.norm(future_vels_mps[0]),
-        "curr_speed": np.linalg.norm(history_vels_mps[0])
+        "curr_speed": np.linalg.norm(history_vels_mps[0]),
     }
 
     vectorized_features = vectorizer.vectorize(
@@ -205,5 +218,261 @@ def generate_agent_sample_mixed(
         future_frames,
         future_agents,
     )
+    if vectorize_lane:
+        other_agents_idx = np.where(
+            vectorized_features["all_other_agents_history_availability"][:, 0]
+            & (vectorized_features["all_other_agents_types"] >= 3)
+            & (vectorized_features["all_other_agents_types"] <= 13)
+        )[0]
+        available_other_pos = vectorized_features["all_other_agents_history_positions"][
+            other_agents_idx, 0
+        ]
+        available_other_yaw = vectorized_features["all_other_agents_history_yaws"][
+            other_agents_idx, 0
+        ]
+        local_pos = np.vstack((np.zeros([1, 2]), available_other_pos))
+        local_yaw = np.vstack((np.zeros([1, 1]), available_other_yaw))
+        world_pos = transform_points(local_pos, world_from_agent)
+        world_yaw = (local_yaw + agent_yaw_rad + np.pi) % (2 * np.pi) - np.pi
+
+        agent_lanes = get_lane_info(
+            agent_yaw_rad,
+            vectorizer,
+            world_pos,
+            world_yaw,
+            local_pos,
+            local_yaw,
+            world_from_agent,
+            agent_from_world,
+        )
+        ego_lanes = agent_lanes[0]
+        all_other_agents_lanes = np.zeros(
+            [
+                vectorized_features["all_other_agents_history_positions"].shape[0],
+                *agent_lanes.shape[1:],
+            ]
+        )
+        all_other_agents_lanes[other_agents_idx] = agent_lanes[1:]
+        frame_info["ego_lanes"] = ego_lanes
+        frame_info["all_other_agents_lanes"] = all_other_agents_lanes
+
+    # all_other_agents_curr_pos = vectorized_features["all_other_agents_history_positions"][:, 0]
+    # all_other_agents_curr_yaw = vectorized_features["all_other_agents_history_yaws"][:, 0]
+    #
+    # all_other_agents_curr_pos_world = transform_points(all_other_agents_curr_pos, world_from_agent)
+    # all_other_agents_curr_yaw_world = agent_yaw_rad + all_other_agents_curr_yaw
+    #
+    # num_agents = all_other_agents_curr_pos.shape[0]
+    # all_other_agent_from_agent = np.zeros((num_agents, 3, 3))
+    # for i in range(num_agents):
+    #     world_from_other_agent = compute_agent_pose(
+    #         all_other_agents_curr_pos_world[i],
+    #         all_other_agents_curr_yaw_world[i]
+    #     ).astype(np.float64)
+    #     other_agent_from_world = np.linalg.inv(world_from_other_agent)
+    #     all_other_agent_from_agent[i] = other_agent_from_world @ world_from_agent
+    #
+    # vectorized_features["all_other_agents_future_positions_from_self"] = transform_points(
+    #     vectorized_features["all_other_agents_future_positions"],
+    #     all_other_agent_from_agent
+    # )
+    # vectorized_features["all_other_agents_future_yaws_from_self"] = angular_distance(
+    #     vectorized_features["all_other_agents_future_yaws"],
+    #     all_other_agents_curr_yaw[:, np.newaxis]
+    # )
+    # vectorized_features["all_other_agents_from_agent"] = all_other_agent_from_agent
+
+    # all_other_agents_curr_pos = vectorized_features["all_other_agents_history_positions"][:, 0]
+    # all_other_agents_curr_yaw = vectorized_features["all_other_agents_history_yaws"][:, 0]
+    #
+    # all_other_agents_curr_pos_world = transform_points(all_other_agents_curr_pos, world_from_agent)
+    # all_other_agents_curr_yaw_world = agent_yaw_rad + all_other_agents_curr_yaw
+    #
+    # num_agents = all_other_agents_curr_pos.shape[0]
+    # all_other_agent_from_agent = np.zeros((num_agents, 3, 3))
+    # for i in range(num_agents):
+    #     world_from_other_agent = compute_agent_pose(
+    #         all_other_agents_curr_pos_world[i],
+    #         all_other_agents_curr_yaw_world[i]
+    #     ).astype(np.float64)
+    #     other_agent_from_world = np.linalg.inv(world_from_other_agent)
+    #     all_other_agent_from_agent[i] = other_agent_from_world @ world_from_agent
+    #
+    # vectorized_features["all_other_agents_future_positions_from_self"] = transform_points(
+    #     vectorized_features["all_other_agents_future_positions"],
+    #     all_other_agent_from_agent
+    # )
+    # vectorized_features["all_other_agents_future_yaws_from_self"] = angular_distance(
+    #     vectorized_features["all_other_agents_future_yaws"],
+    #     all_other_agents_curr_yaw[:, np.newaxis]
+    # )
+    # vectorized_features["all_other_agents_from_agent"] = all_other_agent_from_agent
 
     return {**frame_info, **vectorized_features}
+
+
+def get_lane_info(
+    yaw,
+    vectorizer,
+    world_pos,
+    world_yaw,
+    local_pos,
+    local_yaw,
+    world_from_agent,
+    agent_from_world,
+):
+    MAX_LANES = vectorizer.lane_cfg_params["max_num_lanes"]
+    MAX_POINTS_LANES = vectorizer.lane_cfg_params["max_points_per_lane"]
+    # MAX_POINTS_CW = vectorizer.lane_cfg_params["max_points_per_crosswalk"]
+
+    MAX_LANE_DISTANCE = vectorizer.lane_cfg_params["max_retrieval_distance_m"]
+    INTERP_METHOD = (
+        InterpolationMethod.INTER_ENSURE_LEN
+    )  # split lane polyline by fixed number of points
+    STEP_INTERPOLATION = MAX_POINTS_LANES  # number of points along lane
+    MAX_CROSSWALKS = vectorizer.lane_cfg_params["max_num_crosswalks"]
+
+    # lanes_points = np.zeros((MAX_LANES * 2, MAX_POINTS_LANES, 2), dtype=np.float32)
+    # lanes_availabilities = np.zeros((MAX_LANES * 2, MAX_POINTS_LANES), dtype=np.float32)
+
+    # lanes_mid_points = np.zeros((MAX_LANES, MAX_POINTS_LANES, 2), dtype=np.float32)
+    # lanes_mid_availabilities = np.zeros((MAX_LANES, MAX_POINTS_LANES), dtype=np.float32)
+    # lanes_tl_feature = np.zeros((MAX_LANES, MAX_POINTS_LANES, 1), dtype=np.float32)
+
+    # 8505 x 2 x 2
+    lanes_bounds = vectorizer.mapAPI.bounds_info["lanes"]["bounds"]
+
+    # filter first by bounds and then by distance, so that we always take the closest lanes
+
+    N_agent = world_pos.shape[0]
+    curr_lane = [None] * N_agent
+    left_lane = [None] * N_agent
+    right_lane = [None] * N_agent
+    len_curr = [None] * N_agent
+    len_left = [None] * N_agent
+    len_right = [None] * N_agent
+    dx_curr = [None] * N_agent
+    dx_left = [None] * N_agent
+    dx_right = [None] * N_agent
+    agent_lanes = np.zeros([N_agent, 3, MAX_POINTS_LANES, 4], dtype=np.float32)
+    lanes_rec = dict()
+    interp_step_size = vectorizer.lane_cfg_params["lane_interp_step_size"]
+    interp_steps = interp_step_size * np.arange(1, MAX_POINTS_LANES + 1)
+    for i in range(N_agent):
+
+        lanes_indices = indices_in_bounds(world_pos[i], lanes_bounds, 10)
+        distances = list()
+        for k in range(lanes_indices.shape[0]):
+            lane_idx = lanes_indices[k]
+            if lane_idx in lanes_rec:
+                lane = lanes_rec[lane_idx]
+            else:
+                lane_id = vectorizer.mapAPI.bounds_info["lanes"]["ids"][lane_idx]
+
+                lane = vectorizer.mapAPI.get_lane_coords(lane_id)
+                lanes_rec[lane_idx] = lane
+
+                if (
+                    lane["xyz_right"].shape[0] != lane["xyz_left"].shape[0]
+                    or "xyz_midlane" not in lane
+                ):
+                    lane = vectorizer.mapAPI.get_lane_as_interpolation(
+                        lane_id, STEP_INTERPOLATION, INTERP_METHOD
+                    )
+                dx = lane["xyz_right"] - lane["xyz_left"]
+                lane_psi = round_2pi(np.arctan2(dx[:, 1], dx[:, 0]) + np.pi / 2)
+
+                lane["psi"] = lane_psi
+
+            lane_dist = np.linalg.norm(
+                lane["xyz_midlane"][:, :2] - world_pos[i], axis=-1
+            )
+            distances.append(np.min(lane_dist))
+            if distances[-1] < 30.0:
+
+                lane_pts = np.hstack(
+                    (lane["xyz_midlane"][:, :2], lane["psi"].reshape(-1, 1))
+                )
+                x = np.hstack((world_pos[i], world_yaw[i]))
+                delta_x, delta_y, dpsi = batch_proj(x, lane_pts)
+                min_dy = delta_y[abs(delta_y).argmin()]
+                len_cand = -delta_x[-1]
+                if abs(min_dy) < 1.5 and abs(dpsi) < np.pi / 2:
+                    if curr_lane[i] is None or len_curr[i] < len_cand:
+                        curr_lane[i] = lane
+                        dx_curr[i] = -delta_x
+                        len_curr[i] = len_cand
+
+                elif min_dy <= -1.5 and min_dy > -5 and abs(dpsi) < np.pi / 2:
+                    if right_lane[i] is None or len_right[i] < len_cand:
+                        right_lane[i] = lane
+                        dx_right[i] = -delta_x
+                        len_right[i] = len_cand
+
+                elif min_dy >= 1.5 and min_dy < 5 and abs(dpsi) < np.pi / 2:
+                    if left_lane[i] is None or len_left[i] < len_cand:
+                        left_lane[i] = lane
+                        dx_left[i] = -delta_x
+                        len_left[i] = len_cand
+
+        if curr_lane[i] is not None:
+            lane_center = curr_lane[i]["xyz_midlane"][:, :2]
+
+            lane_center = transform_points(lane_center, agent_from_world) - local_pos[i]
+            lane_yaw = curr_lane[i]["psi"] - yaw
+
+            f = interp1d(
+                dx_curr[i],
+                np.hstack(
+                    (
+                        lane_center,
+                        np.cos(lane_yaw).reshape(-1, 1),
+                        np.sin(lane_yaw).reshape(-1, 1),
+                    )
+                ),
+                fill_value="extrapolate",
+                assume_sorted=True,
+                axis=0,
+            )
+            agent_lanes[i, 0] = f(interp_steps)
+        if left_lane[i] is not None:
+            lane_center = left_lane[i]["xyz_midlane"][:, :2]
+
+            lane_center = transform_points(lane_center, agent_from_world) - local_pos[i]
+            lane_yaw = left_lane[i]["psi"] - yaw
+
+            f = interp1d(
+                dx_left[i],
+                np.hstack(
+                    (
+                        lane_center,
+                        np.cos(lane_yaw).reshape(-1, 1),
+                        np.sin(lane_yaw).reshape(-1, 1),
+                    )
+                ),
+                fill_value="extrapolate",
+                assume_sorted=True,
+                axis=0,
+            )
+            agent_lanes[i, 1] = f(interp_steps)
+        if right_lane[i] is not None:
+            lane_center = right_lane[i]["xyz_midlane"][:, :2]
+
+            lane_center = transform_points(lane_center, agent_from_world) - local_pos[i]
+            lane_yaw = right_lane[i]["psi"] - yaw
+
+            f = interp1d(
+                dx_right[i],
+                np.hstack(
+                    (
+                        lane_center,
+                        np.cos(lane_yaw).reshape(-1, 1),
+                        np.sin(lane_yaw).reshape(-1, 1),
+                    )
+                ),
+                fill_value="extrapolate",
+                assume_sorted=True,
+                axis=0,
+            )
+            agent_lanes[i, 2] = f(interp_steps)
+    return agent_lanes

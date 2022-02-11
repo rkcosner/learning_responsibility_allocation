@@ -55,7 +55,11 @@ def get_exp_dir(exp_name, output_dir, save_checkpoints=True, auto_remove_exp_dir
     base_output_dir = os.path.join(base_output_dir, exp_name)
     if os.path.exists(base_output_dir):
         if not auto_remove_exp_dir:
-            ans = input("WARNING: model directory ({}) already exists! \noverwrite? (y/n)\n".format(base_output_dir))
+            ans = input(
+                "WARNING: model directory ({}) already exists! \noverwrite? (y/n)\n".format(
+                    base_output_dir
+                )
+            )
         else:
             ans = "y"
         if ans == "y":
@@ -66,7 +70,11 @@ def get_exp_dir(exp_name, output_dir, save_checkpoints=True, auto_remove_exp_dir
     # version the run
     # t_now = time.time()
     # version_str = datetime.datetime.fromtimestamp(t_now).strftime('%Y%m%d%H%M%S')
-    existing_runs = [a for a in os.listdir(base_output_dir) if os.path.isdir(os.path.join(base_output_dir, a))]
+    existing_runs = [
+        a
+        for a in os.listdir(base_output_dir)
+        if os.path.isdir(os.path.join(base_output_dir, a))
+    ]
     run_counts = [-1]
     for ep in existing_runs:
         m = ep.split("run")

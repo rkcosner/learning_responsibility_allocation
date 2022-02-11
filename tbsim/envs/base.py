@@ -13,11 +13,15 @@ class BaseEnv(abc.ABC):
         return
 
     @abc.abstractmethod
-    def step(self, action, num_steps_to_take):
+    def step(self, action, num_steps_to_take, render):
         return
 
     @abc.abstractmethod
     def get_metrics(self):
+        return
+
+    @abc.abstractmethod
+    def render(self, actions_to_take):
         return
 
     @abc.abstractmethod

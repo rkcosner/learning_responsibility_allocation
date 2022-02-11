@@ -51,3 +51,30 @@ class Dynamics(abc.ABC):
     @staticmethod
     def state2yaw(x):
         return
+
+
+def forward_dynamics(
+    dyn_model: Dynamics,
+    initial_states: torch.Tensor,
+    actions: torch.Tensor,
+    step_time: float,
+):
+    """
+    Integrate the state forward with initial state x0, action u
+    Args:
+        dyn_model (dynamics.Dynamics): dynamics model
+        initial_states (Torch.tensor): state tensor of size [B, (A), 4]
+        actions (Torch.tensor): action tensor of size [B, (A), T, 2]
+        step_time (float): delta time between steps
+    Returns:
+        state tensor of size [B, (A), T, 4]
+    """
+    num_steps = actions.shape[-2]
+    x = [initial_states] + [None] * num_steps
+    for t in range(num_steps):
+        x[t + 1] = dyn_model.step(x[t], actions[..., t, :], step_time)
+
+    x = torch.stack(x[1:], dim=-2)
+    pos = dyn_model.state2pos(x)
+    yaw = dyn_model.state2yaw(x)
+    return x, pos, yaw

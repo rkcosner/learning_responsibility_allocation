@@ -18,6 +18,7 @@ from tbsim.configs.base import ExperimentConfig
 class Param(namedtuple("Param", "config_var alias value")):
     pass
 
+
 class ParamRange(namedtuple("Param", "config_var alias range")):
     def linearize(self):
         return [Param(self.config_var, self.alias, v) for v in self.range]
@@ -44,7 +45,15 @@ class ParamConfig(object):
         self.params.append(param)
 
     def __str__(self):
-        return '_'.join([p.alias + str(p.value) for p in self.params])
+        char_to_remove = [" ", "(", ")", ";", "[", "]"]
+        name = []
+        for p in self.params:
+            v_str = str(p.value)
+            for c in char_to_remove:
+                v_str = v_str.replace(c, "")
+            name.append(p.alias + v_str)
+
+        return "_".join(name)
 
     def generate_config(self, base_cfg: ExperimentConfig):
         cfg = base_cfg.clone()
@@ -55,7 +64,9 @@ class ParamConfig(object):
             for v in var_list[:-1]:
                 assert v in c, "{} is not a valid config variable".format(p.config_var)
                 c = c[v]
-            assert var_list[-1] in c, "{} is not a valid config variable".format(p.config_var)
+            assert var_list[-1] in c, "{} is not a valid config variable".format(
+                p.config_var
+            )
             c[var_list[-1]] = p.value
         cfg.name = str(self)
         return cfg
@@ -95,7 +106,9 @@ class ParamSearchPlan(object):
     @staticmethod
     def compose_zip(param_ranges: List[ParamRange]):
         l = len(param_ranges[0])
-        assert all(len(pr) == l for pr in param_ranges), "All param_range must be the same length"
+        assert all(
+            len(pr) == l for pr in param_ranges
+        ), "All param_range must be the same length"
         prs = [pr.linearize() for pr in param_ranges]
         return [ParamConfig(prz) for prz in zip(*prs)]
 
@@ -106,7 +119,14 @@ class ParamSearchPlan(object):
         return [pc.generate_config(base_cfg) for pc in self.param_configs]
 
 
-def create_configs(configs_to_search_fn, config_name, config_file, config_dir, prefix, delete_config_dir=True):
+def create_configs(
+    configs_to_search_fn,
+    config_name,
+    config_file,
+    config_dir,
+    prefix,
+    delete_config_dir=True,
+):
     if config_name is not None:
         cfg = get_registered_experiment_config(config_name)
         print("Generating configs for {}".format(config_name))
@@ -150,7 +170,9 @@ def read_configs(config_dir):
     return configs, config_fns
 
 
-def launch_experiments_ngc(script_path: str, cfgs: List[Dict], cfg_paths: List[str], ngc_config: dict):
+def launch_experiments_ngc(
+    script_path: str, cfgs: List[Dict], cfg_paths: List[str], ngc_config: dict
+):
     """
     Launch one or more experiments on NGC
     Args:
@@ -163,7 +185,9 @@ def launch_experiments_ngc(script_path: str, cfgs: List[Dict], cfg_paths: List[s
         None
     """
     for cfg, cpath in zip(cfgs, cfg_paths):
-        ngc_cpath = os.path.join(ngc_config["workspace_mounting_point_local"], "tbsim/", cpath)
+        ngc_cpath = os.path.join(
+            ngc_config["workspace_mounting_point_local"], "tbsim/", cpath
+        )
         ngc_cdir = Path(ngc_cpath).parent
         os.makedirs(ngc_cdir, exist_ok=True)
         print("copying {} to {}".format(cpath, ngc_cpath))
@@ -172,27 +196,50 @@ def launch_experiments_ngc(script_path: str, cfgs: List[Dict], cfg_paths: List[s
         py_cmd = [
             "export WANDB_APIKEY={};".format(ngc_config["wandb_apikey"]),
             "cd {}/tbsim;".format(ngc_config["workspace_mounting_point"]),
-            "pip install -e .; pip install numpy==1.21.4;"
+            "pip install -e .; pip install numpy==1.21.4;",
         ]
-        py_cmd.extend([
-            "python", script_path,
-            "--config_file", cpath,
-            "--output_dir", ngc_config["result_dir"],
-            "--dataset_path", ngc_config["dataset_path"],
-            "--wandb_project_name", ngc_config["wandb_project_name"],
-            "--remove_exp_dir"
-        ])
+        py_cmd.extend(
+            [
+                "python",
+                script_path,
+                "--config_file",
+                cpath,
+                "--output_dir",
+                ngc_config["result_dir"],
+                "--dataset_path",
+                ngc_config["dataset_path"],
+                "--wandb_project_name",
+                ngc_config["wandb_project_name"],
+                "--remove_exp_dir",
+            ]
+        )
         py_cmd = " ".join(py_cmd)
         cmd = [
-            "ngc", "batch", "run",
-            "--instance", ngc_config["instance"],
-            "--name", cfg.name + "",
-            "--image", ngc_config["docker_image"],
-            "--datasetid", "{}:{}".format(ngc_config["dataset_id"], ngc_config["dataset_mounting_point"]),
-            "--workspace", "{}:{}".format(ngc_config["workspace_id"], ngc_config["workspace_mounting_point"]),
-            "--result", ngc_config["result_dir"],
-            "--total-runtime", ngc_config["total_runtime"],
-            "--commandline", py_cmd
+            "ngc",
+            "batch",
+            "run",
+            "--instance",
+            ngc_config["instance"],
+            # "ml-model." prefix a the naming convention required by NGC
+            # see https://confluence.nvidia.com/display/GWE/5.+Job+naming+and+categorization
+            "--name",
+            "ml-model." + cfg.name,
+            "--image",
+            ngc_config["docker_image"],
+            "--datasetid",
+            "{}:{}".format(
+                ngc_config["dataset_id"], ngc_config["dataset_mounting_point"]
+            ),
+            "--workspace",
+            "{}:{}".format(
+                ngc_config["workspace_id"], ngc_config["workspace_mounting_point"]
+            ),
+            "--result",
+            ngc_config["result_dir"],
+            "--total-runtime",
+            ngc_config["total_runtime"],
+            "--commandline",
+            py_cmd,
         ]
         print(cmd)
         subprocess.run(cmd)
@@ -211,21 +258,23 @@ def upload_codebase_to_ngc_workspace(ngc_config):
     dir_list = ["scripts/", "tbsim/"]
     for d in dir_list:
         print("uploading {}".format(d))
-        shutil.copytree(os.path.join(local_path, d), os.path.join(ngc_path, d), dirs_exist_ok=True)
+        shutil.copytree(
+            os.path.join(local_path, d), os.path.join(ngc_path, d), dirs_exist_ok=True
+        )
     file_list = ["setup.py"]
     for f in file_list:
         print("uploading {}".format(f))
         shutil.copy(os.path.join(local_path, f), os.path.join(ngc_path, f))
 
 
-def launch_experiments_local(script_path, cfgs, cfg_paths, extra_args = []):
+def launch_experiments_local(script_path, cfgs, cfg_paths, extra_args=[]):
     for cfg, cpath in zip(cfgs, cfg_paths):
         cmd = ["python", script_path, "--config_file", cpath] + extra_args
         subprocess.run(cmd)
 
 
 def get_results_info_ngc(ngc_job_id):
-    cmd = ['ngc', 'result', 'info', str(ngc_job_id), '--files']
+    cmd = ["ngc", "result", "info", str(ngc_job_id), "--files"]
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     outs, errs = process.communicate()
     if len(errs) > 0:
@@ -236,7 +285,7 @@ def get_results_info_ngc(ngc_job_id):
     cfg_path = [l.strip(" ") for l in outs if l.endswith(".json")]
     assert len(cfg_path) == 1
     cfg_path = cfg_path[0]
-    job_name = cfg_path.split('/')[1]
+    job_name = cfg_path.split("/")[1]
     return ckpt_paths, cfg_path, job_name
 
 
@@ -248,6 +297,11 @@ def _download_from_ngc(ngc_job_id, paths_to_download, target_dir, tmp_dir="/tmp"
         cmd.extend(["--file", fp])
 
     cmd.extend(["--dest", tmp_dir])
+    if os.path.exists(os.path.join(tmp_dir, ngc_job_id + "/")):
+        print("tmp folder with ngc job ID exists, removing ...")
+        shutil.rmtree(
+            os.path.join(tmp_dir, ngc_job_id + "/")
+        )  # otherwise ngc renames the downloaded folder
     subprocess.run(cmd)
 
     os.makedirs(target_dir, exist_ok=True)
@@ -259,7 +313,9 @@ def _download_from_ngc(ngc_job_id, paths_to_download, target_dir, tmp_dir="/tmp"
     shutil.rmtree(os.path.join(tmp_dir, ngc_job_id + "/"))
 
 
-def download_checkpoints_from_ngc(ngc_job_id, ckpt_root_dir, ckpt_path_func=None, tmp_dir='/tmp'):
+def download_checkpoints_from_ngc(
+    ngc_job_id, ckpt_root_dir, ckpt_path_func=None, tmp_dir="/tmp"
+):
     assert os.path.exists(ckpt_root_dir)
     ckpt_paths, cfg_path, job_name = get_results_info_ngc(ngc_job_id)
 
@@ -280,7 +336,9 @@ def get_local_checkpoint_dir(ngc_job_id, ckpt_root_dir):
     return None
 
 
-def get_checkpoint(ngc_job_id, ckpt_key, ckpt_root_dir="checkpoints/", download_tmp_dir="/tmp"):
+def get_checkpoint(
+    ngc_job_id, ckpt_key, ckpt_root_dir="checkpoints/", download_tmp_dir="/tmp"
+):
     ckpt_path_func = lambda paths: [p for p in paths if ckpt_key in p]
     local_dir = get_local_checkpoint_dir(ngc_job_id, ckpt_root_dir)
     if local_dir is None:
@@ -289,7 +347,7 @@ def get_checkpoint(ngc_job_id, ckpt_key, ckpt_root_dir="checkpoints/", download_
             ngc_job_id=ngc_job_id,
             ckpt_root_dir=ckpt_root_dir,
             ckpt_path_func=ckpt_path_func,
-            tmp_dir=download_tmp_dir
+            tmp_dir=download_tmp_dir,
         )
     else:
         ckpt_paths = glob(local_dir + "/*.ckpt")
@@ -299,12 +357,14 @@ def get_checkpoint(ngc_job_id, ckpt_key, ckpt_root_dir="checkpoints/", download_
                 ngc_job_id=ngc_job_id,
                 ckpt_root_dir=ckpt_root_dir,
                 ckpt_path_func=ckpt_path_func,
-                tmp_dir=download_tmp_dir
+                tmp_dir=download_tmp_dir,
             )
         else:
             ckpt_dir = local_dir
     ckpt_paths = ckpt_path_func(glob(ckpt_dir + "/*.ckpt"))
-    assert len(ckpt_paths) > 0, "Could not find a checkpoint that has key {}".format(ckpt_key)
+    assert len(ckpt_paths) > 0, "Could not find a checkpoint that has key {}".format(
+        ckpt_key
+    )
     assert len(ckpt_paths) == 1, "More than one checkpoint found"
     cfg_path = os.path.join(ckpt_dir, "config.json")
     return ckpt_paths[0], cfg_path

@@ -7,5 +7,6 @@ from tbsim.configs.l5kit_config import (
     L5TransformerPredConfig,
     L5KitVectorizedEnvConfig,
     L5KitMixedEnvConfig,
-    L5RasterizedVAEConfig
+    L5TransformerGANConfig,
+    L5RasterizedVAEConfig,
 )
