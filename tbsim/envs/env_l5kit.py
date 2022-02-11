@@ -12,8 +12,6 @@ import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.utils.vis_utils import render_state_l5kit
 from tbsim.envs.base import BaseEnv, BatchedEnv, SimulationException
 from tbsim.utils.env_utils import RolloutAction, Action
-from l5kit.geometry import compute_agent_pose
-import pdb
 from tbsim.utils.geometry_utils import batch_nd_transform_points
 
 
@@ -36,7 +34,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             start_frame_index=env_config.simulation.start_frame_index,
             show_info=True,
         )
-        
+
         self.generate_agent_obs = env_config.get("generate_agent_obs", True)
         self._npr = np.random.RandomState(seed=seed)
         self.dataset = dataset
