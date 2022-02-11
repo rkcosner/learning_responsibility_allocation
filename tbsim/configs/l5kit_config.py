@@ -22,7 +22,7 @@ class L5KitTrainConfig(TrainConfig):
         self.rollout.n_step_action = 10
 
         ## training config
-        self.training.batch_size = 32
+        self.training.batch_size = 100
         self.training.num_steps = 200000
         self.training.num_data_workers = 4
 
