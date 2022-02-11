@@ -1,5 +1,6 @@
 TransformerGAN_trained_models/
 TransformerPred_trained_models/
+l5_rasterized_vae_trained_models/
 wandb/
 tbsim-ws/
 

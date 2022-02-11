@@ -118,11 +118,7 @@ class TransformerModel(nn.Module):
             21,
             algo_config.d_model,
         ).cuda()
-        # self.MLP = simplelinear(
-        #     (algo_config.history_num_frames + 1) * algo_config.d_model,
-        #     algo_config.future_num_frames * algo_config.d_model,
-        #     hidden_dim=[algo_config.d_model * algo_config.future_num_frames] * 3,
-        # ).cuda()
+
         "CNN for map encoding"
         self.CNNmodel = CNNROIMapEncoder(
             algo_config.CNN.map_channels,
@@ -393,13 +389,6 @@ class TransformerModel(nn.Module):
     def forward(
         self, data_batch: Dict[str, torch.Tensor], batch_idx: int = None
     ) -> Dict[str, torch.Tensor]:
-        # if batch_idx is not None:
-        #     self.training_num += 1
-        #     tgt_mask_p = 1 - min(1.0, float(self.training_num / self.training_num_N))
-        # else:
-        #     tgt_mask_p = 0.0
-
-        tgt_mask_p = 0.0
 
         device = data_batch["history_positions"].device
         raw_type = torch.cat(
@@ -480,7 +469,7 @@ class TransformerModel(nn.Module):
             torch.tensor(self.algo_config.CNN.patch_size).to(device),
             mode=self.map_enc_mode,
         )
-        image = data_batch["image"].permute(0, 3, 1, 2)
+        image = data_batch["image"]
         CNN_out = self.CNNmodel(image, ROI)
         if self.map_enc_mode == "all":
             emb_size = (*src.shape[:-1], self.algo_config.CNN.output_size)
@@ -525,7 +514,6 @@ class TransformerModel(nn.Module):
         curr_pos_yaw = torch.cat((curr_state[..., 0:2], curr_yaw), dim=-1)
 
         # masking part of the target and gradually increase the masked length until the whole target is masked
-        # tgt_mask_hint = self.tgt_temporal_mask(tgt_mask_p, tgt_mask)
         tgt_mask_hint = torch.zeros_like(tgt_mask)
 
         tgt = tgt - curr_pos_yaw.repeat(1, 1, tgt.size(2), 1) * tgt_mask.unsqueeze(-1)
@@ -540,25 +528,19 @@ class TransformerModel(nn.Module):
         # tgt_mask = tgt_mask.unsqueeze(-1).repeat(
         #     1, 1, 1, tgt.size(-2)
         # ) * seq_mask.unsqueeze(0)
-        tgt_mask1 = tgt_mask_agent.unsqueeze(-1) * seq_mask.unsqueeze(0)
+        tgt_mask_dec = tgt_mask_agent.unsqueeze(-1) * seq_mask.unsqueeze(0)
 
         out, prob = self.Transformermodel.forward(
             src,
             tgt_hint,
             src_mask,
-            tgt_mask1,
+            tgt_mask_dec,
             tgt_mask_agent,
             dyn_type,
             map_emb,
         )
-        # out = self.MLP(out.reshape(*out.shape[:-2], -1)).view(
-        #     *out.shape[:-2], self.algo_config.future_num_frames, -1
-        # )
 
         u_pred = self.Transformermodel.generator(out)
-        # x_pred = self.Transformermodel.generator(out)
-        # pos_pred = self.dyn_list[DynType.UNICYCLE].state2pos(x_pred)
-        # yaw_pred = self.dyn_list[DynType.UNICYCLE].state2yaw(x_pred)
 
         if self.M > 1:
             curr_state = curr_state.unsqueeze(1).repeat(1, self.M, 1, 1, 1)
@@ -608,10 +590,6 @@ class TransformerModel(nn.Module):
             "curr_pos_yaw": curr_pos_yaw,
         }
 
-        # if "all_other_agents_track_id" in data_batch.keys():
-        #     out_dict["predictions"]["all_other_agents_track_id"] = data_batch[
-        #         "all_other_agents_track_id"
-        #     ]
         if self.algo_config.calc_collision:
             out_dict["scene_predictions"]["edges"] = self.generate_edges(
                 raw_type, extents, pos_pred, yaw_pred

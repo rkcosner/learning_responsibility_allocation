@@ -139,6 +139,9 @@ def generate_agent_sample_mixed(
     world_from_agent = compute_agent_pose(agent_centroid_m, agent_yaw_rad)
     agent_from_world = np.linalg.inv(world_from_agent)
 
+    raster_from_agent = raster_from_world @ world_from_agent
+    agent_from_raster = np.linalg.inv(raster_from_agent)
+
     (
         future_coords_offset,
         future_yaws_offset,
@@ -182,7 +185,8 @@ def generate_agent_sample_mixed(
         "extent": agent_extent_m,
         "type": agent_type_idx,
         "image": input_im,
-        "raster_from_agent": raster_from_world @ world_from_agent,
+        "raster_from_agent": raster_from_agent,
+        "agent_from_raster": agent_from_raster,
         "raster_from_world": raster_from_world,
         "agent_from_world": agent_from_world,
         "world_from_agent": world_from_agent,
@@ -196,7 +200,8 @@ def generate_agent_sample_mixed(
         "history_availabilities": history_availability.astype(np.bool),
         "centroid": agent_centroid_m,
         "yaw": agent_yaw_rad,
-        "speed": np.linalg.norm(history_vels_mps[0]),
+        "speed": np.linalg.norm(future_vels_mps[0]),
+        "curr_speed": np.linalg.norm(history_vels_mps[0]),
     }
 
     vectorized_features = vectorizer.vectorize(

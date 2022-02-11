@@ -12,6 +12,7 @@ import tbsim.utils.train_utils as TrainUtils
 from tbsim.envs.env_l5kit import EnvL5KitSimulation
 from tbsim.utils.env_utils import RolloutCallback
 from tbsim.configs.registry import get_registered_experiment_config
+from tbsim.utils.config_utils import get_experiment_config_from_file
 from tbsim.datasets.factory import datamodule_factory
 from tbsim.utils.config_utils import get_experiment_config_from_file
 from tbsim.algos.factory import algo_factory
@@ -29,6 +30,9 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         save_checkpoints=cfg.train.save.enabled,
         auto_remove_exp_dir=auto_remove_exp_dir,
     )
+    # Save experiment config to the training dir
+    cfg.dump(os.path.join(root_dir, version_key, "config.json"))
+
     # Save experiment config to the training dir
     cfg.dump(os.path.join(root_dir, version_key, "config.json"))
 
@@ -79,6 +83,7 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
             env=env,
             num_episodes=cfg.train.rollout.num_episodes,
             every_n_steps=cfg.train.rollout.every_n_steps,
+            n_step_action=cfg.train.rollout.n_step_action,
             warm_start_n_steps=cfg.train.rollout.warm_start_n_steps,
             verbose=False,
         )
@@ -91,36 +96,43 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
     )
 
     # Checkpointing
-    assert (
-        cfg.train.save.every_n_steps > cfg.train.validation.every_n_steps
-    ), "checkpointing frequency needs to be greater than rollout frequency"
-    ckpt_ade_callback = pl.callbacks.ModelCheckpoint(
-        dirpath=ckpt_dir,
-        filename="iter{step}_ep{epoch}_simADE{rollout/metrics_ego_ADE:.2f}",
-        # explicitly spell out metric names, otherwise PL parses '/' in metric names to directories
-        auto_insert_metric_name=False,
-        save_top_k=cfg.train.save.best_k,  # save the best k models
-        monitor="rollout/metrics_ego_ADE",
-        mode="min",
-        every_n_train_steps=cfg.train.save.every_n_steps,
-        verbose=True,
-    )
-    assert (
-        cfg.train.save.every_n_steps > cfg.train.rollout.every_n_steps
-    ), "checkpointing frequency needs to be greater than rollout frequency"
-    ckpt_loss_callback = pl.callbacks.ModelCheckpoint(
-        dirpath=ckpt_dir,
-        filename="iter{step}_ep{epoch}_valLoss{val/losses_prediction_loss:.2f}",
-        # explicitly spell out metric names, otherwise PL parses '/' in metric names to directories
-        auto_insert_metric_name=False,
-        save_top_k=cfg.train.save.best_k,  # save the best k models
-        monitor="val/losses_prediction_loss",
-        mode="min",
-        every_n_train_steps=cfg.train.save.every_n_steps,
-        verbose=True,
-    )
+    if cfg.train.validation.enabled and cfg.train.save.save_best_validation:
+        assert (
+            cfg.train.save.every_n_steps > cfg.train.validation.every_n_steps
+        ), "checkpointing frequency needs to be greater than validation frequency"
+        for metric_name, metric_key in model.checkpoint_monitor_keys.items():
+            print(
+                "Monitoring metrics {} under alias {}".format(metric_key, metric_name)
+            )
+            ckpt_valid_callback = pl.callbacks.ModelCheckpoint(
+                dirpath=ckpt_dir,
+                filename="iter{step}_ep{epoch}_%s{%s:.2f}" % (metric_name, metric_key),
+                # explicitly spell out metric names, otherwise PL parses '/' in metric names to directories
+                auto_insert_metric_name=False,
+                save_top_k=cfg.train.save.best_k,  # save the best k models
+                monitor=metric_key,
+                mode="min",
+                every_n_train_steps=cfg.train.save.every_n_steps,
+                verbose=True,
+            )
+            train_callbacks.append(ckpt_valid_callback)
 
-    train_callbacks.extend([ckpt_ade_callback, ckpt_loss_callback])
+    if cfg.train.rollout.enabled and cfg.train.save.save_best_rollout:
+        assert (
+            cfg.train.save.every_n_steps > cfg.train.rollout.every_n_steps
+        ), "checkpointing frequency needs to be greater than rollout frequency"
+        ckpt_rollout_callback = pl.callbacks.ModelCheckpoint(
+            dirpath=ckpt_dir,
+            filename="iter{step}_ep{epoch}_simADE{rollout/metrics_ego_ADE:.2f}",
+            # explicitly spell out metric names, otherwise PL parses '/' in metric names to directories
+            auto_insert_metric_name=False,
+            save_top_k=cfg.train.save.best_k,  # save the best k models
+            monitor="rollout/metrics_ego_ADE",
+            mode="min",
+            every_n_train_steps=cfg.train.save.every_n_steps,
+            verbose=True,
+        )
+        train_callbacks.append(ckpt_rollout_callback)
 
     # Logging
     assert not (cfg.train.logging.log_tb and cfg.train.logging.log_wandb)
@@ -236,9 +248,6 @@ if __name__ == "__main__":
         default_config = get_registered_experiment_config(args.config_name)
     elif args.config_file is not None:
         # Update default config with external json file
-        # ext_cfg = json.load(open(args.config_file, "r"))
-        # default_config = get_registered_experiment_config(ext_cfg["registered_name"])
-        # default_config.update(**ext_cfg)
         default_config = get_experiment_config_from_file(args.config_file)
     else:
         raise Exception(
@@ -256,6 +265,11 @@ if __name__ == "__main__":
 
     if args.wandb_project_name is not None:
         default_config.train.logging.wandb_project_name = args.wandb_project_name
+
+    if args.debug:
+        # Test policy rollout
+        default_config.train.rollout.every_n_steps = 100
+        default_config.train.rollout.num_episodes = 1
 
     default_config.lock()  # Make config read-only
     main(default_config, auto_remove_exp_dir=args.remove_exp_dir, debug=args.debug)

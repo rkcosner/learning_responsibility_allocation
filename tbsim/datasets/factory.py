@@ -5,7 +5,9 @@ from tbsim.datasets.l5kit_datamodules import L5MixedDataModule, L5RasterizedData
 
 def datamodule_factory(cls_name: str, config, **kwargs):
     """
-    A factory for creating pl.DataModule
+    A factory for creating pl.DataModule.
+
+    Valid module class names: "L5MixedDataModule", "L5RasterizedDataModule"
     Args:
         cls_name (str): name of the datamodule class
         config (Config): an Experiment config object

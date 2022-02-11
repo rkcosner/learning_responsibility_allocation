@@ -1,11 +1,11 @@
-from tbsim.dynamics.base import DynType, dynamic
+from tbsim.dynamics.base import DynType, Dynamics
 import torch
 import numpy as np
 from copy import deepcopy
 import pdb
 
 
-class Unicycle(dynamic):
+class Unicycle(Dynamics):
     def __init__(
         self, name, max_steer=0.5, max_yawvel=8, acce_bound=[-6, 4], vbound=[-10, 30]
     ):

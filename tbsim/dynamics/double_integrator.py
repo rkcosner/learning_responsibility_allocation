@@ -1,11 +1,11 @@
-from tbsim.dynamics.base import DynType, dynamic
+from tbsim.dynamics.base import DynType, Dynamics
 import torch
 import numpy as np
 from copy import deepcopy
 import pdb
 
 
-class DoubleIntegrator(dynamic):
+class DoubleIntegrator(Dynamics):
     def __init__(self, name, abound, vbound=None):
         self._name = name
         self._type = DynType.DI
@@ -36,8 +36,7 @@ class DoubleIntegrator(dynamic):
         elif isinstance(x, torch.Tensor):
             if bound:
                 lb, ub = self.ubound(x)
-                s = (u - lb) / torch.clip(ub - lb, min=1e-3)
-                u = lb + (ub - lb) * torch.sigmoid(s)
+                u = torch.clip(u, min=lb, max=ub)
             xn = torch.clone(x)
             xn[..., 0:2] += (x[..., 2:4] + 0.5 * u * dt) * dt
             xn[..., 2:4] += u * dt

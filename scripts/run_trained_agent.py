@@ -1,61 +1,131 @@
-import torch
+import argparse
 
-from l5kit.configs import load_config_data
-from l5kit.data import LocalDataManager, ChunkedDataset, filter_agents_by_frames
+from collections import OrderedDict
+import os
+import torch
+from l5kit.data import LocalDataManager, ChunkedDataset
 from l5kit.dataset import EgoDataset
 from l5kit.rasterization import build_rasterizer
+from l5kit.vectorization.vectorizer_builder import build_vectorizer
 
-from l5kit.cle.closed_loop_evaluator import ClosedLoopEvaluator, EvaluationPlan
-from l5kit.cle.metrics import (CollisionFrontMetric, CollisionRearMetric, CollisionSideMetric,
-                               DisplacementErrorL2Metric, DistanceToRefTrajectoryMetric)
-from l5kit.cle.validators import RangeValidator, ValidationCountingAggregator
-from l5kit.simulation.dataset import SimulationConfig
-from l5kit.simulation.unroll import ClosedLoopSimulator
-import os
-from collections import defaultdict
-import numpy as np
-import matplotlib.pyplot as plt
-from prettytable import PrettyTable
-from l5kit.visualization.visualizer.zarr_utils import simulation_out_to_visualizer_scene
-from l5kit.visualization.visualizer.visualizer import visualize
-from bokeh.io import output_notebook, show
-from l5kit.data import MapAPI
+from tbsim.algos.l5kit_algos import L5TrafficModel, L5VAETrafficModel, L5TrafficModelGC, SpatialPlanner
+from tbsim.configs.registry import get_registered_experiment_config
+from tbsim.envs.env_l5kit import EnvL5KitSimulation, BatchedEnv
+from tbsim.utils.config_utils import translate_l5kit_cfg, get_experiment_config_from_file
+from tbsim.utils.env_utils import rollout_episodes, RolloutWrapper, OptimController, HierarchicalWrapper, GTPlanner
+from tbsim.utils.tensor_utils import to_torch, to_numpy
+from tbsim.external.l5_ego_dataset import EgoDatasetMixed
+from tbsim.utils.experiment_utils import get_checkpoint
+from imageio import get_writer
 
 
-def main():
-    # set env variable for data
-    os.environ["L5KIT_DATA_FOLDER"] = "/home/danfeix/workspace/lfs/lyft/lyft_prediction"
+def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
+
+    policy_ckpt_path, policy_config_path = get_checkpoint(
+        ngc_job_id="2561797", # gc_dynNone_decmlp128,128
+        ckpt_key="iter83999_",
+        ckpt_root_dir=ckpt_dir
+    )
+    policy_cfg = get_experiment_config_from_file(policy_config_path)
+
+    planner_ckpt_path, planner_config_path = get_checkpoint(
+        ngc_job_id="2573128",  # spatial_archresnet50_bs64_pcl1.0_pbl0.0_rlFalse
+        ckpt_key="iter27999_ep0_pos",
+        ckpt_root_dir=ckpt_dir
+    )
+    planner_cfg = get_experiment_config_from_file(planner_config_path)
+
+    data_cfg = policy_cfg
+    assert data_cfg.env.rasterizer.map_type == "py_semantic"
+    os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath("/home/danfeix/workspace/lfs/lyft/lyft_prediction/")
     dm = LocalDataManager(None)
-    # get config
-    cfg = load_config_data("/home/danfeix/workspace/l5kit/examples/simulation/config.yaml")
+    l5_config = translate_l5kit_cfg(data_cfg)
+    rasterizer = build_rasterizer(l5_config, dm)
+    vectorizer = build_vectorizer(l5_config, dm)
+    eval_zarr = ChunkedDataset(dm.require(data_cfg.train.dataset_valid_key)).open()
+    env_dataset = EgoDatasetMixed(l5_config, eval_zarr, vectorizer, rasterizer)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    modality_shapes = OrderedDict(image=[rasterizer.num_channels()] + data_cfg.env.rasterizer.raster_size)
 
-    simulation_model_path = "/home/danfeix/workspace/l5kit/checkpoints/sim_pt/simulation_model_20210416_5steps.pt"
-    simulation_model = torch.load(simulation_model_path).to(device)
-    simulation_model = simulation_model.eval()
+    planner = SpatialPlanner.load_from_checkpoint(
+        planner_ckpt_path,
+        algo_config=planner_cfg.algo,
+        modality_shapes=modality_shapes,
+    ).to(device).eval()
 
-    ego_model_path = "/home/danfeix/workspace/l5kit/checkpoints/sim_pt/planning_model_20210421_5steps.pt"
-    ego_model = torch.load(ego_model_path).to(device)
-    ego_model = ego_model.eval()
+    controller = L5TrafficModelGC.load_from_checkpoint(
+        policy_ckpt_path,
+        algo_config=policy_cfg.algo,
+        modality_shapes=modality_shapes
+    ).to(device).eval()
 
-    torch.set_grad_enabled(False)
+    policy = HierarchicalWrapper(planner, controller)
+    policy = RolloutWrapper(policy, num_steps_to_goal=planner_cfg.algo.future_num_frames)
 
-    eval_cfg = cfg["val_data_loader"]
-    eval_cfg["key"] = "scenes/validate.zarr"
-    rasterizer = build_rasterizer(cfg, dm)
-    eval_zarr = ChunkedDataset(dm.require(eval_cfg["key"])).open()
-    eval_dataset = EgoDataset(cfg, eval_zarr, rasterizer)
-    print(eval_dataset)
+    data_cfg.env.simulation.num_simulation_steps = 200
+    env = EnvL5KitSimulation(
+        data_cfg.env,
+        dataset=env_dataset,
+        seed=data_cfg.seed,
+        num_scenes=10,
+        prediction_only=False
+    )
 
-    scenes_to_unroll = [30, 31, 32]
+    stats, info, renderings = rollout_episodes(
+        env,
+        policy,
+        num_episodes=1,
+        n_step_action=10,
+        render=True,
+        scene_indices=list(range(50, 60))
+    )
 
-    sim_cfg = SimulationConfig(use_ego_gt=False, use_agents_gt=False, disable_new_agents=True,
-                               distance_th_far=30, distance_th_close=15, num_simulation_steps=50,
-                               start_frame_index=0, show_info=True)
-
-    sim_loop = ClosedLoopSimulator(sim_cfg, eval_dataset, device, model_ego=ego_model, model_agents=simulation_model)
-    sim_outs = sim_loop.unroll(scenes_to_unroll)
+    for i, scene_images in enumerate(renderings[0]):
+        writer = get_writer(os.path.join(video_dir, "{}.mp4".format(i)), fps=10)
+        for im in scene_images:
+            writer.append_data(im)
+        writer.close()
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+
+    # External config file that overwrites default config
+    parser.add_argument(
+        "--ngc_job_id",
+        type=str,
+        default=None,
+        help="ngc job ID to fetch checkpoint from."
+    )
+
+    parser.add_argument(
+        "--ckpt_key",
+        type=str,
+        default=None,
+        help="(Optional) partial string that uniquely identifies a checkpoint, e.g., 'iter17999_ep0_posErr'"
+    )
+
+    parser.add_argument(
+        "--ckpt_root_dir",
+        type=str,
+        default="../checkpoints/",
+        help="(Optional) directory to look for saved checkpoints"
+    )
+
+    parser.add_argument(
+        "--ckpt_path",
+        type=str,
+        default=None,
+        help="(Optional) path to a checkpoint file"
+    )
+
+    parser.add_argument(
+        "--config_path",
+        type=str,
+        default=None,
+        help="(Optional) path to a config file"
+    )
+
+    args = parser.parse_args()
+
+    run_checkpoint()

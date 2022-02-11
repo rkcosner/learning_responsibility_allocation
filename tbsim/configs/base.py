@@ -1,4 +1,5 @@
 from tbsim.configs.config import Dict
+from copy import deepcopy
 
 
 class TrainConfig(Dict):
@@ -15,6 +16,8 @@ class TrainConfig(Dict):
         self.save.enabled = True  # whether model saving should be enabled or disabled
         self.save.every_n_steps = 100  # save model every n epochs
         self.save.best_k = 5
+        self.save.save_best_rollout = True
+        self.save.save_best_validation = True
 
         ## rendering config ##
         self.render.on_screen = False  # render on-screen or not
@@ -35,7 +38,7 @@ class TrainConfig(Dict):
         self.training.num_data_workers = 0
 
         ## validation config
-        self.validation.enabled = False
+        self.validation.enabled = True
         self.validation.batch_size = 100
         self.validation.num_data_workers = 0
         self.validation.every_n_steps = 1000
@@ -92,3 +95,11 @@ class ExperimentConfig(Dict):
         self.seed = 1  # seed for everything (for reproducibility)
 
         self.devices.num_gpus = 1  # Set to 0 to use CPU
+
+    def clone(self):
+        return self.__class__(
+            train_config=deepcopy(self.train),
+            env_config=deepcopy(self.env),
+            algo_config=deepcopy(self.algo),
+            registered_name=self.registered_name,
+        )

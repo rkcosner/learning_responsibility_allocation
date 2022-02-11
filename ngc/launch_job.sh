@@ -77,6 +77,8 @@ python scripts/train_l5kit.py --config_file=/workspace/tbsim-ws/experiments/temp
 & tensorboard --logdir $RESULT_DIR --bind_all"
 fi 
 
+echo "$CMD"
+
 ngc batch run \
  --instance "$INS" \
  --name "$NAME" \

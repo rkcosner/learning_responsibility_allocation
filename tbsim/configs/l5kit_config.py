@@ -1,3 +1,5 @@
+import math
+
 from tbsim.configs.base import TrainConfig, EnvConfig, AlgoConfig
 
 MAX_POINTS_LANE = 5
@@ -7,7 +9,7 @@ class L5KitTrainConfig(TrainConfig):
     def __init__(self):
         super(L5KitTrainConfig, self).__init__()
 
-        self.dataset_path = "/home/chenyx/repos/l5kit/prediction-dataset"
+        self.dataset_path = "YOUR_DAFA_FOLDER"
         self.dataset_valid_key = "scenes/validate.zarr"
         self.dataset_train_key = "scenes/train.zarr"
         self.dataset_meta_key = "meta.json"
@@ -17,9 +19,10 @@ class L5KitTrainConfig(TrainConfig):
         self.rollout.every_n_steps = 500
         self.rollout.num_episodes = 10
         self.rollout.num_scenes = 3
+        self.rollout.n_step_action = 2
 
         ## training config
-        self.training.batch_size = 64
+        self.training.batch_size = 32
         self.training.num_steps = 200000
         self.training.num_data_workers = 4
 
@@ -27,7 +30,7 @@ class L5KitTrainConfig(TrainConfig):
 
         ## validation config
         self.validation.enabled = True
-        self.validation.batch_size = 64
+        self.validation.batch_size = 32
         self.validation.num_data_workers = 4
         self.validation.every_n_steps = 500
         self.validation.num_steps_per_epoch = 100
@@ -42,6 +45,8 @@ class L5KitMixedTrainConfig(L5KitTrainConfig):
 class L5KitEnvConfig(EnvConfig):
     def __init__(self):
         super(L5KitEnvConfig, self).__init__()
+
+        self.name = "l5_rasterized"
 
         # raster image size [pixels]
         self.rasterizer.raster_size = (224, 224)
@@ -74,6 +79,7 @@ class L5KitEnvConfig(EnvConfig):
 
         #  if a tracked agent is closed than this value to ego, it will be controlled
         self.simulation.distance_th_close = 15
+        self.simulation.distance_th_far = 50
 
         #  whether to disable agents that are not returned at start_frame_index
         self.simulation.disable_new_agents = True
@@ -91,6 +97,7 @@ class L5KitEnvConfig(EnvConfig):
 class L5KitVectorizedEnvConfig(EnvConfig):
     def __init__(self):
         super(L5KitVectorizedEnvConfig, self).__init__()
+        self.name = "l5_vectorized"
 
         # the keys are relative to the dataset environment variable
         self.rasterizer.semantic_map_key = "semantic_map/semantic_map.pb"
@@ -133,6 +140,7 @@ class L5KitMixedEnvConfig(EnvConfig):
 
     def __init__(self):
         super(L5KitMixedEnvConfig, self).__init__()
+        self.name = "l5_mixed"
 
         # the keys are relative to the dataset environment variable
         self.rasterizer.semantic_map_key = "semantic_map/semantic_map.pb"
@@ -198,16 +206,44 @@ class L5KitMixedEnvConfig(EnvConfig):
         self.simulation.start_frame_index = 0
 
 
+class L5KitMixedSemanticMapEnvConfig(L5KitMixedEnvConfig):
+    def __init__(self):
+        super(L5KitMixedSemanticMapEnvConfig, self).__init__()
+        self.rasterizer.map_type = "py_semantic"
+
+
 class L5RasterizedPlanningConfig(AlgoConfig):
     def __init__(self):
         super(L5RasterizedPlanningConfig, self).__init__()
 
         self.name = "l5_rasterized"
         self.model_architecture = "resnet50"
+        self.map_feature_dim = 256
         self.history_num_frames = 5
+        self.history_num_frames_ego = 5
+        self.history_num_frames_agents = 5
         self.future_num_frames = 50
         self.step_time = 0.1
         self.render_ego_history = False
+
+        self.decoder.layer_dims = ()
+
+        self.dynamics.type = None
+        self.dynamics.max_steer = 0.5
+        self.dynamics.max_yawvel = math.pi * 2.0
+        self.dynamics.acce_bound = (-10, 8)
+        self.dynamics.ddh_bound = (-math.pi * 2.0, math.pi * 2.0)
+        self.dynamics.max_speed = 40.0  # roughly 90mph
+        self.dynamics.predict_current_states = False
+
+        self.spatial_softmax.enabled = False
+        self.spatial_softmax.kwargs.num_kp = 32
+        self.spatial_softmax.kwargs.temperature = 1.0
+        self.spatial_softmax.kwargs.learnable_temperature = False
+
+        self.loss_weights.prediction_loss = 1.0
+        self.loss_weights.goal_loss = 0.0
+        self.loss_weights.collision_loss = 0.0
 
         self.optim_params.policy.learning_rate.initial = 1e-3  # policy learning rate
         self.optim_params.policy.learning_rate.decay_factor = (
@@ -217,6 +253,39 @@ class L5RasterizedPlanningConfig(AlgoConfig):
             []
         )  # epochs where LR decay occurs
         self.optim_params.policy.regularization.L2 = 0.00  # L2 regularization strength
+
+
+class SpatialPlannerConfig(L5RasterizedPlanningConfig):
+    def __init__(self):
+        super(SpatialPlannerConfig, self).__init__()
+        self.name = "spatial_planner"
+        self.loss_weights.pixel_bce_loss = 0.0
+        self.loss_weights.pixel_ce_loss = 1.0
+        self.loss_weights.pixel_res_loss = 1.0
+        self.loss_weights.pixel_yaw_loss = 1.0
+
+
+class L5RasterizedGCConfig(L5RasterizedPlanningConfig):
+    def __init__(self):
+        super(L5RasterizedGCConfig, self).__init__()
+        self.name = "l5_rasterized_gc"
+        self.goal_feature_dim = 32
+
+
+class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
+    def __init__(self):
+        super(L5RasterizedVAEConfig, self).__init__()
+        self.name = "l5_rasterized_vae"
+        self.map_feature_dim = 256
+        self.vae.latent_dim = 2
+        self.vae.condition_dim = 128
+        self.vae.num_eval_samples = 10
+        self.vae.encoder.rnn_hidden_size = 100
+        self.vae.encoder.mlp_layer_dims = (128, 128)
+        self.vae.decoder.rnn_hidden_size = 100
+        self.vae.decoder.mlp_layer_dims = (128, 128)
+
+        self.loss_weights.kl_loss = 1e-4
 
 
 class L5TransformerPredConfig(AlgoConfig):

@@ -5,6 +5,7 @@ of numpy arrays and torch tensors.
 import collections
 import numpy as np
 import torch
+import torch.nn as nn
 
 
 def recursive_dict_list_tuple_apply(x, type_func_dict):
@@ -23,8 +24,10 @@ def recursive_dict_list_tuple_apply(x, type_func_dict):
     assert list not in type_func_dict
     assert tuple not in type_func_dict
     assert dict not in type_func_dict
+    assert nn.ParameterDict not in type_func_dict
+    assert nn.ParameterList not in type_func_dict
 
-    if isinstance(x, (dict, collections.OrderedDict)):
+    if isinstance(x, (dict, collections.OrderedDict, nn.ParameterDict)):
         new_x = (
             collections.OrderedDict()
             if isinstance(x, collections.OrderedDict)
@@ -33,7 +36,7 @@ def recursive_dict_list_tuple_apply(x, type_func_dict):
         for k, v in x.items():
             new_x[k] = recursive_dict_list_tuple_apply(v, type_func_dict)
         return new_x
-    elif isinstance(x, (list, tuple)):
+    elif isinstance(x, (list, tuple, nn.ParameterList)):
         ret = [recursive_dict_list_tuple_apply(v, type_func_dict) for v in x]
         if isinstance(x, tuple):
             ret = tuple(ret)
@@ -232,6 +235,28 @@ def unsqueeze(x, dim):
         {
             torch.Tensor: lambda x: x.unsqueeze(dim=dim),
             np.ndarray: lambda x: np.expand_dims(x, axis=dim),
+            type(None): lambda x: x,
+        },
+    )
+
+
+def squeeze(x, dim):
+    """
+    Reduce dimension of size 1 at dimension @dim in all torch tensors and numpy arrays
+    in nested dictionary or list or tuple and returns a new nested structure.
+
+    Args:
+        x (dict or list or tuple): a possibly nested dictionary or list or tuple
+        dim (int): dimension
+
+    Returns:
+        y (dict or list or tuple): new nested dict-list-tuple
+    """
+    return recursive_dict_list_tuple_apply(
+        x,
+        {
+            torch.Tensor: lambda x: x.squeeze(dim=dim),
+            np.ndarray: lambda x: np.squeeze(x, axis=dim),
             type(None): lambda x: x,
         },
     )
@@ -496,16 +521,16 @@ def reshape_dimensions_single(x, begin_axis, end_axis, target_dims):
     Returns:
         y (torch.Tensor): reshaped tensor
     """
-    assert begin_axis <= end_axis
+    assert begin_axis < end_axis
     assert begin_axis >= 0
-    assert end_axis < len(x.shape)
+    assert end_axis <= len(x.shape)
     assert isinstance(target_dims, (tuple, list))
     s = x.shape
     final_s = []
     for i in range(len(s)):
         if i == begin_axis:
             final_s.extend(target_dims)
-        elif i < begin_axis or i > end_axis:
+        elif i < begin_axis or i >= end_axis:
             final_s.append(s[i])
     return x.reshape(*final_s)
 
@@ -518,7 +543,7 @@ def reshape_dimensions(x, begin_axis, end_axis, target_dims):
     Args:
         x (dict or list or tuple): a possibly nested dictionary or list or tuple
         begin_axis (int): begin dimension
-        end_axis (int): end dimension
+        end_axis (int): end dimension (excluding the dimension)
         target_dims (tuple or list): target shape for the range of dimensions
             (@begin_axis, @end_axis)
 
@@ -547,7 +572,7 @@ def join_dimensions(x, begin_axis, end_axis):
     Args:
         x (dict or list or tuple): a possibly nested dictionary or list or tuple
         begin_axis (int): begin dimension
-        end_axis (int): end dimension
+        end_axis (int): end dimension (excluding the dimension)
 
     Returns:
         y (dict or list or tuple): new nested dict-list-tuple
@@ -630,7 +655,7 @@ def repeat_by_expand_at(x, repeats, dim):
         y (dict or list or tuple): new nested dict-list-tuple
     """
     x = unsqueeze_expand_at(x, repeats, dim + 1)
-    return join_dimensions(x, dim, dim + 1)
+    return join_dimensions(x, dim, dim + 2)
 
 
 def named_reduce_single(x, reduction, dim):
@@ -773,7 +798,7 @@ def gather_sequence(seq, indices):
     return gather_along_dim_with_dim(seq, target_dim=1, source_dim=0, indices=indices)
 
 
-def pad_sequence_single(seq, padding, batched=False, pad_same=True, pad_values=None):
+def pad_sequence_single(seq, padding, batched=False, pad_same=False, pad_values=0.):
     """
     Pad input tensor or array @seq in the time dimension (dimension 1).
 
@@ -788,7 +813,7 @@ def pad_sequence_single(seq, padding, batched=False, pad_same=True, pad_values=N
         padded sequence (np.ndarray or torch.Tensor)
     """
     assert isinstance(seq, (np.ndarray, torch.Tensor))
-    assert pad_same or pad_values is not None
+    assert pad_same or (pad_values is not None)
     if pad_values is not None:
         assert isinstance(pad_values, float)
     repeat_func = np.repeat if isinstance(seq, np.ndarray) else torch.repeat_interleave
@@ -800,16 +825,22 @@ def pad_sequence_single(seq, padding, batched=False, pad_same=True, pad_values=N
     end_pad = []
 
     if padding[0] > 0:
-        pad = seq[[0]] if pad_same else ones_like_func(seq[[0]]) * pad_values
+        if batched:
+            pad = seq[:, [0]] if pad_same else ones_like_func(seq[:, [0]]) * pad_values
+        else:
+            pad = seq[[0]] if pad_same else ones_like_func(seq[[0]]) * pad_values
         begin_pad.append(repeat_func(pad, padding[0], seq_dim))
     if padding[1] > 0:
-        pad = seq[[-1]] if pad_same else ones_like_func(seq[[-1]]) * pad_values
+        if batched:
+            pad = seq[:, [-1]] if pad_same else ones_like_func(seq[:, [-1]]) * pad_values
+        else:
+            pad = seq[[-1]] if pad_same else ones_like_func(seq[[-1]]) * pad_values
         end_pad.append(repeat_func(pad, padding[1], seq_dim))
 
     return concat_func(begin_pad + [seq] + end_pad, seq_dim)
 
 
-def pad_sequence(seq, padding, batched=False, pad_same=True, pad_values=None):
+def pad_sequence(seq, padding, batched=False, pad_same=False, pad_values=0.):
     """
     Pad a nested dictionary or list or tuple of sequence tensors in the time dimension (dimension 1).
 
@@ -969,7 +1000,7 @@ def time_distributed(
         outputs (dict or list or tuple): new nested dict-list-tuple with tensors of leading dimension [B, T].
     """
     batch_size, seq_len = flatten_nested_dict_list(inputs)[0][1].shape[:2]
-    inputs = join_dimensions(inputs, 0, 1)
+    inputs = join_dimensions(inputs, 0, 2)
     if inputs_as_kwargs:
         outputs = op(**inputs, **kwargs)
     elif inputs_as_args:
@@ -980,7 +1011,7 @@ def time_distributed(
     if activation is not None:
         outputs = map_tensor(outputs, activation)
     outputs = reshape_dimensions(
-        outputs, begin_axis=0, end_axis=0, target_dims=(batch_size, seq_len)
+        outputs, begin_axis=0, end_axis=1, target_dims=(batch_size, seq_len)
     )
     return outputs
 

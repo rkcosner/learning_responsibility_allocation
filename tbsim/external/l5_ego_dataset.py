@@ -339,3 +339,11 @@ class EgoDatasetMixed(BaseEgoDataset):
             self.rasterizer,
             self.perturbation,
         )
+
+    def get_frame(
+            self, scene_index: int, state_index: int, track_id: Optional[int] = None
+    ) -> dict:
+        data = super().get_frame(scene_index, state_index, track_id=track_id)
+        # TODO (@lberg): this should not be here but in the rasterizer
+        data["image"] = data["image"].transpose(2, 0, 1)  # 0,1,C -> C,0,1
+        return data
