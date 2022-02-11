@@ -7,17 +7,63 @@ from tbsim.utils.experiment_utils import create_configs, ParamSearchPlan, ParamR
 def configs_to_search(base_cfg):
     """Override this with your hyperparameter search plan"""
     plan = ParamSearchPlan()
-    plan.add_const_param(Param("algo.dynamics.type", alias="dyn", value="Unicycle"))
+    # plan.add_const_param(Param("algo.dynamics.type", alias="dyn", value="Unicycle"))
+    #
+    # plan.extend(plan.compose_cartesian([
+    #     ParamRange("algo.optim_params.policy.learning_rate.initial", alias="lr", range=[1e-3, 1e-4]),
+    #     ParamRange("train.training.batch_size", alias="bs", range=[50, 100]),
+    # ]))
+    #
+    # plan.extend(plan.compose_zip([
+    #     ParamRange("algo.optim_params.policy.learning_rate.initial", alias="lr", range=[1e-3, 1e-4]),
+    #     ParamRange("algo.model_architecture", alias="arch", range=["resnet50", "resnet18"]),
+    # ]))
 
+    # plan.extend(plan.compose_cartesian([
+    #     ParamRange("algo.dynamics.type", alias="dyn", range=[None, "Bicycle", "Unicycle"]),
+    #     ParamRange("algo.spatial_softmax.enabled", alias="ssmax", range=[False, True]),
+    #     ParamRange("algo.map_feature_dim", alias="mapfd", range=[64])
+    # ]))
+
+    # plan.extend(plan.compose_cartesian([
+    #     ParamRange("algo.spatial_softmax.enabled", alias="ssmax", range=[True]),
+    #     ParamRange("algo.spatial_softmax.kwargs.num_kp", alias="kp", range=[32, 64]),
+    #     ParamRange("algo.map_feature_dim", alias="mapfd", range=[64, 256]),
+    #     ParamRange("algo.decoder.layer_dims", alias="decmlp", range=[[], [128, 128]])
+    # ]))
+    # plan.extend(plan.compose_cartesian([
+    #     ParamRange("algo.spatial_softmax.enabled", alias="ssmax", range=[False]),
+    #     ParamRange("algo.decoder.layer_dims", alias="decmlp", range=[[], [128, 128]])
+    # ]))
+
+    # plan.extend(plan.compose_cartesian([
+    #     ParamRange("algo.dynamics.type", alias="dyn", range=["Bicycle", "Unicycle"]),
+    #     ParamRange("algo.loss_weights.collision_loss", alias="clw", range=[1.0]),
+    #     ParamRange("algo.loss_weights.goal_loss", alias="glw", range=[1.0]),
+    #     ParamRange("algo.loss_weights.prediction_loss", alias="plw", range=[0.0, 0.1])
+    # ]))
+
+    # plan.add_const_param(Param("train.rollout.enabled", alias="rl", value=False))
+    #
+    # plan.extend(plan.compose_zip([
+    #     ParamRange("algo.model_architecture", alias="arch", range=["resnet50", "resnet50"]),
+    #     ParamRange("train.training.batch_size", alias="bs", range=[64, 64]),
+    #     ParamRange("algo.loss_weights.pixel_ce_loss", alias="pcl", range=[0.0, 1.0]),
+    #     ParamRange("algo.loss_weights.pixel_bce_loss", alias="pbl", range=[1.0, 0.0]),
+    # ]))
+
+    # plan.extend(plan.compose_cartesian([
+    #     ParamRange("algo.dynamics.type", alias="dyn", range=[None, "Bicycle", "Unicycle"]),
+    #     ParamRange("algo.decoder.layer_dims", alias="decmlp", range=[[128, 128]])
+    # ]))
+
+    plan.add_const_param(Param("train.rollout.enabled", alias="rl", value=False))
     plan.extend(plan.compose_cartesian([
-        ParamRange("algo.optim_params.policy.learning_rate.initial", alias="lr", range=[1e-3, 1e-4]),
-        ParamRange("train.training.batch_size", alias="bs", range=[50, 100]),
+        ParamRange("algo.model_architecture", alias="arch", range=["resnet50"]),
+        ParamRange("train.training.batch_size", alias="bs", range=[64, 80]),
+        ParamRange("algo.optim_params.policy.learning_rate.initial", alias="lr", range=[5e-5, 1e-4, 3e-4]),
     ]))
 
-    plan.extend(plan.compose_zip([
-        ParamRange("algo.optim_params.policy.learning_rate.initial", alias="lr", range=[1e-3, 1e-4]),
-        ParamRange("algo.model_architecture", alias="arch", range=["resnet50", "resnet18"]),
-    ]))
 
     return plan.generate_configs(base_cfg=base_cfg)
 

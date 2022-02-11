@@ -643,8 +643,9 @@ class RasterizeAgentEncoder(nn.Module):
         roi_channel = model.feature_channels()[roi_layer_key]
         self.roi_align = RoIAlign(
             output_size=roi_feature_size,
+            spatial_scale=roi_scale,
             sampling_ratio=-1,
-            spatial_scale=roi_scale
+            aligned=True
         )
 
         self.activation = output_activation()

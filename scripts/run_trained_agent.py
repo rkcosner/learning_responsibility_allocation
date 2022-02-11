@@ -9,10 +9,11 @@ from l5kit.rasterization import build_rasterizer
 from l5kit.vectorization.vectorizer_builder import build_vectorizer
 
 from tbsim.algos.l5kit_algos import L5TrafficModel, L5VAETrafficModel, L5TrafficModelGC, SpatialPlanner
+from tbsim.algos.multiagent_algos import MATrafficModel
 from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.envs.env_l5kit import EnvL5KitSimulation, BatchedEnv
 from tbsim.utils.config_utils import translate_l5kit_cfg, get_experiment_config_from_file
-from tbsim.utils.env_utils import rollout_episodes, RolloutWrapper, OptimController, HierarchicalWrapper, GTPlanner
+from tbsim.utils.env_utils import rollout_episodes, PolicyWrapper, OptimController, HierarchicalWrapper, GTPlanner, RolloutWrapper
 from tbsim.utils.tensor_utils import to_torch, to_numpy
 from tbsim.external.l5_ego_dataset import EgoDatasetMixed
 from tbsim.utils.experiment_utils import get_checkpoint
@@ -24,13 +25,15 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
     policy_ckpt_path, policy_config_path = get_checkpoint(
         ngc_job_id="2561797", # gc_dynNone_decmlp128,128
         ckpt_key="iter83999_",
+        # ngc_job_id="2580486", # gc_dynNone_decmlp128,128
+        # ckpt_key="iter33999_ep0_valLoss",
         ckpt_root_dir=ckpt_dir
     )
     policy_cfg = get_experiment_config_from_file(policy_config_path)
 
     planner_ckpt_path, planner_config_path = get_checkpoint(
         ngc_job_id="2573128",  # spatial_archresnet50_bs64_pcl1.0_pbl0.0_rlFalse
-        ckpt_key="iter27999_ep0_pos",
+        ckpt_key="iter55999_",
         ckpt_root_dir=ckpt_dir
     )
     planner_cfg = get_experiment_config_from_file(planner_config_path)
@@ -61,14 +64,21 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
     ).to(device).eval()
 
     policy = HierarchicalWrapper(planner, controller)
-    policy = RolloutWrapper(policy, num_steps_to_goal=planner_cfg.algo.future_num_frames)
+
+    # policy = MATrafficModel.load_from_checkpoint(
+    #     policy_ckpt_path,
+    #     algo_config=policy_cfg.algo,
+    #     modality_shapes=modality_shapes
+    # ).to(device).eval()
+
+    policy = RolloutWrapper(ego_policy=policy, agents_policy=policy)
 
     data_cfg.env.simulation.num_simulation_steps = 200
     env = EnvL5KitSimulation(
         data_cfg.env,
         dataset=env_dataset,
         seed=data_cfg.seed,
-        num_scenes=10,
+        num_scenes=3,
         prediction_only=False
     )
 
@@ -78,7 +88,8 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
         num_episodes=1,
         n_step_action=10,
         render=True,
-        scene_indices=list(range(50, 60))
+        # scene_indices=[11, 16, 35, 38, 45, 58, 150, 152, 154, 156],
+        scene_indices=[38, 45, 58]
     )
 
     for i, scene_images in enumerate(renderings[0]):

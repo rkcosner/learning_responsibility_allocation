@@ -254,6 +254,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         obs = self.get_observation()
         ego_actions_world = None
         agents_actions_world = None
+
+        # TODO: transform plans too
         if actions.has_ego:
             ego_actions_world = actions.ego.transform(
                 trans_mats=obs["ego"]["world_from_agent"], rot_rads=obs["ego"]["yaw"][..., None, None]
