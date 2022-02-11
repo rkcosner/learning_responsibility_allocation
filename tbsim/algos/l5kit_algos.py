@@ -16,6 +16,7 @@ from tbsim.models.transformer_model import TransformerModel
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.metrics as Metrics
 import tbsim.utils.l5_utils as L5Utils
+from tbsim.utils.env_utils import Plan, Action
 import tbsim.algos.algo_utils as AlgoUtils
 from tbsim.utils.geometry_utils import transform_points_tensor
 
@@ -147,18 +148,21 @@ class L5TrafficModel(pl.LightningModule):
         )
 
     def get_plan(self, obs_dict, **kwargs):
-        preds = self(obs_dict["ego"])
-        plan = dict(
-            predictions=dict(
-                positions=preds["positions"],
-                yaws=preds["yaws"],
-            ),
+        preds = self(obs_dict)
+        plan = Plan(
+            positions=preds["positions"],
+            yaws=preds["yaws"],
             availabilities=torch.ones(preds["positions"].shape[:-1]).to(preds["positions"].device)  # [B, T]
         )
-        return dict(ego=plan)
+        return plan, {}
 
     def get_action(self, obs_dict, **kwargs):
-        return {"ego": self(obs_dict["ego"])}
+        preds = self(obs_dict)
+        action = Action(
+            positions=preds["positions"],
+            yaws=preds["yaws"]
+        )
+        return action, {}
 
 
 class L5TrafficModelGC(L5TrafficModel):
@@ -193,13 +197,19 @@ class L5TrafficModelGC(L5TrafficModel):
         )
 
     def get_action(self, obs_dict, **kwargs):
-        obs_dict = dict(obs_dict["ego"])
+        obs_dict = dict(obs_dict)
         if "plan" in kwargs:
             plan = kwargs["plan"]
-            obs_dict["target_positions"] = plan["predictions"]["positions"]
-            obs_dict["target_yaws"] = plan["predictions"]["yaws"]
-            obs_dict["target_availabilities"] = plan["availabilities"]
-        return {"ego": self(obs_dict)}
+            assert isinstance(plan, Plan)
+            obs_dict["target_positions"] = plan.positions
+            obs_dict["target_yaws"] = plan.yaws
+            obs_dict["target_availabilities"] = plan.availabilities
+        preds = self(obs_dict)
+        action = Action(
+            positions=preds["positions"],
+            yaws=preds["yaws"]
+        )
+        return action, {}
 
 
 class SpatialPlanner(pl.LightningModule):
@@ -356,16 +366,20 @@ class SpatialPlanner(pl.LightningModule):
         )
 
     def get_plan(self, obs_dict, **kwargs):
-        preds = self(obs_dict["ego"])
-        plan = dict(
+        preds = self(obs_dict)
+        plan_dict = dict(
             predictions=TensorUtils.to_sequence(preds["predictions"]),
             availabilities=torch.ones(preds["predictions"]["positions"].shape[0], 1).to(self.device),
         )
         n_steps_to_pad = self.algo_config.future_num_frames - 1
-        plan = TensorUtils.pad_sequence(plan, padding=(n_steps_to_pad, 0), batched=True, pad_values=0.)
-        plan["location_map"] = preds["location_map"]
+        plan_dict = TensorUtils.pad_sequence(plan_dict, padding=(n_steps_to_pad, 0), batched=True, pad_values=0.)
+        plan = Plan(
+            positions=plan_dict["predictions"]["positions"],
+            yaws=plan_dict["predictions"]["yaws"],
+            availabilities=plan_dict["availabilities"]
+        )
 
-        return dict(ego=plan)
+        return plan, dict(location_map=preds["location_map"])
 
 
 class L5VAETrafficModel(pl.LightningModule):
@@ -480,14 +494,18 @@ class L5VAETrafficModel(pl.LightningModule):
 
     def get_action(self, obs_dict, sample=True, num_viz_samples=10, **kwargs):
         if sample:
-            preds = self.nets["policy"].sample(obs_dict["ego"], n=1)["predictions"]  # [B, 1, T, 3]
+            preds = self.nets["policy"].sample(obs_dict, n=1)["predictions"]  # [B, 1, T, 3]
             preds = TensorUtils.squeeze(preds, dim=1)
         else:
-            preds = self.nets["policy"].predict(obs_dict["ego"])["predictions"]
+            preds = self.nets["policy"].predict(obs_dict)["predictions"]
 
         # get trajectory samples for visualization purposes
-        ego_samples = self.nets["policy"].sample(obs_dict["ego"], n=num_viz_samples)["predictions"]
-        return {"ego": preds, "ego_samples": ego_samples}
+        samples = self.nets["policy"].sample(obs_dict, n=num_viz_samples)["predictions"]
+        action = Action(
+            positions=preds["positions"],
+            yaws=preds["yaws"]
+        )
+        return action, dict(samples=samples)
 
 
 class L5TransformerTrafficModel(pl.LightningModule):
@@ -564,4 +582,9 @@ class L5TransformerTrafficModel(pl.LightningModule):
         )
 
     def get_action(self, obs_dict, **kwargs):
-        return {"ego": self(obs_dict["ego"])}
+        preds = self(obs_dict)
+        action = Action(
+            positions=preds["positions"],
+            yaws=preds["yaws"]
+        )
+        return action, {}

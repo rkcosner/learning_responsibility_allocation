@@ -10,10 +10,7 @@ from tbsim.models.multiagent_models import (
     MultiAgentRasterizedModel
 )
 import tbsim.utils.tensor_utils as TensorUtils
-import tbsim.utils.metrics as Metrics
-import tbsim.utils.l5_utils as L5Utils
-import tbsim.algos.algo_utils as AlgoUtils
-from tbsim.utils.geometry_utils import transform_points_tensor
+from tbsim.utils.env_utils import Action, Plan
 
 
 class MATrafficModel(pl.LightningModule):
@@ -83,13 +80,23 @@ class MATrafficModel(pl.LightningModule):
         )
 
     def get_plan(self, obs_dict, **kwargs):
-        preds = self(obs_dict["ego"])
-        ego_plan = self.model.get_ego_predictions(preds)
-        ego_plan["availabilities"] = torch.ones(ego_plan["predictions"]["positions"].shape[:-1]).to(ego_plan["predictions"]["positions"].device)
+        preds = self(obs_dict)
+        ego_preds = self.model.get_ego_predictions(preds)
+        avails = torch.ones(ego_preds["predictions"]["positions"].shape[:-1]).to(ego_preds["predictions"]["positions"].device)
 
-        return dict(ego=ego_plan)
+        plan = Plan(
+            positions=ego_preds["predictions"]["positions"],
+            yaws=ego_preds["predictions"]["yaws"],
+            availabilities=avails
+        )
+
+        return plan, {}
 
     def get_action(self, obs_dict, **kwargs):
-        preds = self(obs_dict["ego"])
-        ego_actions = self.model.get_ego_predictions(preds)["predictions"]
-        return dict(ego=ego_actions)
+        preds = self(obs_dict)
+        ego_preds = self.model.get_ego_predictions(preds)
+        action = Action(
+            positions=ego_preds["predictions"]["positions"],
+            yaws=ego_preds["predictions"]["yaws"]
+        )
+        return action, {}
