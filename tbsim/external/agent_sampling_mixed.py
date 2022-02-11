@@ -5,7 +5,7 @@ from l5kit.vectorization.vectorizer import Vectorizer
 
 from l5kit.data import filter_agents_by_labels, PERCEPTION_LABEL_TO_INDEX
 from l5kit.data.filter import filter_agents_by_track_id
-from l5kit.geometry import compute_agent_pose, rotation33_as_yaw
+from l5kit.geometry import compute_agent_pose, rotation33_as_yaw, transform_points, angular_distance
 from l5kit.kinematic import Perturbation
 from l5kit.sampling.agent_sampling import (
     compute_agent_velocity,
@@ -255,6 +255,32 @@ def generate_agent_sample_mixed(
         all_other_agents_lanes[other_agents_idx] = agent_lanes[1:]
         frame_info["ego_lanes"] = ego_lanes
         frame_info["all_other_agents_lanes"] = all_other_agents_lanes
+
+    # all_other_agents_curr_pos = vectorized_features["all_other_agents_history_positions"][:, 0]
+    # all_other_agents_curr_yaw = vectorized_features["all_other_agents_history_yaws"][:, 0]
+    #
+    # all_other_agents_curr_pos_world = transform_points(all_other_agents_curr_pos, world_from_agent)
+    # all_other_agents_curr_yaw_world = agent_yaw_rad + all_other_agents_curr_yaw
+    #
+    # num_agents = all_other_agents_curr_pos.shape[0]
+    # all_other_agent_from_agent = np.zeros((num_agents, 3, 3))
+    # for i in range(num_agents):
+    #     world_from_other_agent = compute_agent_pose(
+    #         all_other_agents_curr_pos_world[i],
+    #         all_other_agents_curr_yaw_world[i]
+    #     ).astype(np.float64)
+    #     other_agent_from_world = np.linalg.inv(world_from_other_agent)
+    #     all_other_agent_from_agent[i] = other_agent_from_world @ world_from_agent
+    #
+    # vectorized_features["all_other_agents_future_positions_from_self"] = transform_points(
+    #     vectorized_features["all_other_agents_future_positions"],
+    #     all_other_agent_from_agent
+    # )
+    # vectorized_features["all_other_agents_future_yaws_from_self"] = angular_distance(
+    #     vectorized_features["all_other_agents_future_yaws"],
+    #     all_other_agents_curr_yaw[:, np.newaxis]
+    # )
+    # vectorized_features["all_other_agents_from_agent"] = all_other_agent_from_agent
 
     return {**frame_info, **vectorized_features}
 
