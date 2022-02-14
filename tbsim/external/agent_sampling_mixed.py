@@ -113,6 +113,7 @@ def generate_agent_sample_mixed(
             (EGO_EXTENT_LENGTH, EGO_EXTENT_WIDTH, EGO_EXTENT_HEIGHT)
         )
         agent_type_idx = PERCEPTION_LABEL_TO_INDEX["PERCEPTION_LABEL_CAR"]
+        selected_agent = None
     else:
         # this will raise IndexError if the agent is not in the frame or under agent-threshold
         # this is a strict error, we cannot recover from this situation
@@ -129,8 +130,9 @@ def generate_agent_sample_mixed(
         agent_yaw_rad = float(agent["yaw"])
         agent_extent_m = agent["extent"]
         agent_type_idx = np.argmax(agent["label_probabilities"])
+        selected_agent = agent
 
-    input_im = rasterizer.rasterize(history_frames, history_agents, history_tl_faces)
+    input_im = rasterizer.rasterize(history_frames, history_agents, history_tl_faces, selected_agent)
 
     raster_from_world = render_context.raster_from_world(
         agent_centroid_m, agent_yaw_rad
