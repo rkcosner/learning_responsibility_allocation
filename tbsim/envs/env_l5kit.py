@@ -12,7 +12,7 @@ import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.utils.vis_utils import render_state_l5kit
 from tbsim.envs.base import BaseEnv, BatchedEnv, SimulationException
 from tbsim.utils.env_utils import RolloutAction, Action
-from tbsim.utils.geometry_utils import batch_nd_transform_points
+import tbsim.envs.env_metrics as EnvMetrics
 
 
 class EnvL5KitSimulation(BaseEnv, BatchedEnv):
@@ -53,6 +53,11 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self._ego_states = dict()
         self._agents_states = dict()
 
+        self._metrics = dict(
+            ego_off_road_rate=EnvMetrics.OffRoadRate(),
+            agents_off_road_rate=EnvMetrics.OffRoadRate(),
+        )
+
     def reset(self, scene_indices: List = None):
         """
         Reset the previous simulation episode. Randomly sample a batch of new scenes unless specified in @scene_indices
@@ -79,6 +84,10 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self._frame_index = 0
         self._cached_observation = None
         self._done = False
+
+        for v in self._metrics.values():
+            v.reset()
+
         for k in self._current_scene_indices:
             self._ego_states[k] = []
             self._agents_states[k] = []
@@ -100,6 +109,29 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             "l5_scene_indices": deepcopy(self._current_scene_indices),
         }
 
+    @property
+    def agents_to_scene_index(self):
+        """Get the corresponding scene index (start from 0) for each agent in the obs"""
+        obs = self.get_observation()
+        scene_index = obs["agents"]["scene_index"].copy()
+        for i, s in enumerate(scene_index):
+            scene_index[i] = np.where(self._current_scene_indices == s)[0]
+        return scene_index
+
+    @property
+    def scene_to_agents_index(self):
+        """Return a list of agent indices for each scene"""
+        obs = self.get_observation()
+        scene_index = obs["agents"]["scene_index"]
+        agent_indices = []
+        for si in self._current_scene_indices:
+            agent_indices.append(np.where(scene_index == si)[0])
+        return agent_indices
+
+    @property
+    def scene_to_ego_index(self):
+        return np.split(np.arange(self.num_instances), self.num_instances)
+
     def get_metrics(self):
         """
         Get metrics of the current episode (may compute before is_done==True)
@@ -118,10 +150,18 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         # TODO: compute agent metrics
 
-        return {
+        metrics = {
             "ego_ADE": ego_ade,
             "ego_FDE": ego_fde,
         }
+
+        # aggregate per-step metrics
+        self._add_per_step_metrics(self.get_observation())
+        for met_name, met in self._metrics.items():
+            assert len(met) == self._frame_index + 1
+            metrics[met_name] = met.get_episode_metrics()
+
+        return metrics
 
     def get_state(self):
         """Get the current raw state of the scenes (ego and agents)"""
@@ -193,22 +233,37 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
     def horizon(self):
         return len(self._current_scene_dataset)
 
+    def _add_per_step_metrics(self, obs):
+        for k, v in self._metrics.items():
+            if len(v) >= self._frame_index + 1:
+                return
+            if k.startswith("ego"):
+                v.add_step(obs["ego"], self.scene_to_ego_index)
+            elif k.startswith("agents"):
+                v.add_step(obs["agents"], self.scene_to_agents_index)
+            else:
+                raise KeyError("Invalid metrics name {}".format(k))
+
     def _step(self, step_actions: RolloutAction):
         obs = self.get_observation()
+        self._add_per_step_metrics(obs)
+
         should_update = self._frame_index + 1 < self.horizon and not self._prediction_only
         if step_actions.has_ego:
+            ego_obs = dict(obs["ego"])
+            ego_obs.pop("image")  # reduce memory consumption
             if should_update:
                 # update the next frame's ego position and orientation using control input
                 ClosedLoopSimulator.update_ego(
                     dataset=self._current_scene_dataset,
                     frame_idx=self._frame_index + 1,
-                    input_dict=obs["ego"],
+                    input_dict=ego_obs,
                     output_dict=step_actions.ego.to_dict(),
                 )
 
             # record state
             ego_in_out = ClosedLoopSimulator.get_ego_in_out(
-                obs["ego"], step_actions.ego.to_dict(), keys_to_exclude=set(("image",))
+                ego_obs, step_actions.ego.to_dict(), keys_to_exclude=set(("image",))
             )
             for i, scene_idx in enumerate(self._current_scene_indices):
                 # If applicable, insert prediction samples for visualization purposes
@@ -219,16 +274,18 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                 self._ego_states[scene_idx].append(ego_in_out[scene_idx])
 
         if step_actions.has_agents:
+            agent_obs = dict(obs["agents"])
+            agent_obs.pop("image")  # reduce memory consumption
             if should_update:
                 # update the next frame's agent positions and orientations using control input
                 ClosedLoopSimulator.update_agents(
                     dataset=self._current_scene_dataset,
                     frame_idx=self._frame_index + 1,
-                    input_dict=obs["agents"],
+                    input_dict=agent_obs,
                     output_dict=step_actions.agents.to_dict(),
                 )
             agents_in_out = ClosedLoopSimulator.get_agents_in_out(
-                obs["agents"], step_actions.agents.to_dict(), keys_to_exclude=set(("image",))
+                agent_obs, step_actions.agents.to_dict(), keys_to_exclude=set(("image",))
             )
             for i, scene_idx in enumerate(self._current_scene_indices):
                 self._agents_states[scene_idx].append(agents_in_out.get(scene_idx, []))
