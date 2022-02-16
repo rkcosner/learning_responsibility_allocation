@@ -56,6 +56,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self._metrics = dict(
             ego_off_road_rate=EnvMetrics.OffRoadRate(),
             agents_off_road_rate=EnvMetrics.OffRoadRate(),
+            all_collision_rate=EnvMetrics.CollisionRate()
         )
 
     def reset(self, scene_indices: List = None):
@@ -71,6 +72,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             scene_indices = self._npr.choice(
                 all_indices, size=(self.num_instances,), replace=False
             )
+        else:
+            scene_indices = np.array(scene_indices)
         assert len(scene_indices) == self.num_instances
         assert (
             np.max(scene_indices) < self._num_total_scenes
@@ -100,13 +103,17 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         )
 
     @property
+    def current_scene_indices(self):
+        return self._current_scene_indices.copy()
+
+    @property
     def num_instances(self):
         return self._num_scenes
 
     def get_info(self):
         return {
             "l5_sim_states": self._get_l5_sim_states(),
-            "l5_scene_indices": deepcopy(self._current_scene_indices),
+            "l5_scene_indices": deepcopy(self.current_scene_indices),
         }
 
     @property
@@ -115,7 +122,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         obs = self.get_observation()
         scene_index = obs["agents"]["scene_index"].copy()
         for i, s in enumerate(scene_index):
-            scene_index[i] = np.where(self._current_scene_indices == s)[0]
+            scene_index[i] = np.where(self.current_scene_indices == s)[0]
         return scene_index
 
     @property
@@ -124,7 +131,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         obs = self.get_observation()
         scene_index = obs["agents"]["scene_index"]
         agent_indices = []
-        for si in self._current_scene_indices:
+        for si in self.current_scene_indices:
             agent_indices.append(np.where(scene_index == si)[0])
         return agent_indices
 
@@ -158,9 +165,13 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         # aggregate per-step metrics
         self._add_per_step_metrics(self.get_observation())
         for met_name, met in self._metrics.items():
-            assert len(met) == self._frame_index + 1
-            metrics[met_name] = met.get_episode_metrics()
-
+            assert len(met) == self._frame_index + 1, len(met)
+            met_vals = met.get_episode_metrics()
+            if isinstance(met_vals, dict):
+                for k, v in met_vals.items():
+                    metrics[met_name + "_" + k] = v
+            else:
+                metrics[met_name] = met_vals
         return metrics
 
     def get_state(self):
@@ -193,6 +204,16 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         )
         return self._cached_observation
 
+    def combine_observations(self, obs):
+        """Get a combined observation by concatenating ego and agents"""
+        if obs is None:
+            return None
+
+        combined = dict()
+        for k in obs["ego"].keys():
+            combined[k] = np.concatenate((obs["ego"][k], obs["agents"][k]), axis=0)
+        return combined
+
     def is_done(self):
         return self._done
 
@@ -202,7 +223,11 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
     def render(self, actions_to_take: RolloutAction, **kwargs):
         ims = []
-        for i, si in enumerate(self._current_scene_indices):
+        _, coll_counts_per_scene = self._metrics["all_collision_rate"].compute_per_step(
+            self.combine_observations(self.get_observation()),
+            all_scene_index=self.current_scene_indices
+        )
+        for i, si in enumerate(self.current_scene_indices):
             im = render_state_l5kit(
                 rasterizer=self.rasterizer,
                 state_obs=self.get_observation(),
@@ -210,6 +235,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                 scene_index=i,
                 step_index=self._frame_index,
                 dataset_scene_index=si,
+                step_metrics=TensorUtils.map_ndarray(coll_counts_per_scene, lambda x: x[i]),
                 **kwargs
             )
             ims.append(im)
@@ -218,7 +244,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
     def _get_l5_sim_states(self) -> List[SimulationOutput]:
         simulated_outputs: List[SimulationOutput] = []
-        for scene_idx in self._current_scene_indices:
+        for scene_idx in self.current_scene_indices:
             simulated_outputs.append(
                 SimulationOutput(
                     scene_idx,
@@ -238,9 +264,11 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             if len(v) >= self._frame_index + 1:
                 return
             if k.startswith("ego"):
-                v.add_step(obs["ego"], self.scene_to_ego_index)
+                v.add_step(obs["ego"], self.current_scene_indices)
             elif k.startswith("agents"):
-                v.add_step(obs["agents"], self.scene_to_agents_index)
+                v.add_step(obs["agents"], self.current_scene_indices)
+            elif k.startswith("all"):
+                v.add_step(self.combine_observations(obs), self.current_scene_indices)
             else:
                 raise KeyError("Invalid metrics name {}".format(k))
 
@@ -265,12 +293,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             ego_in_out = ClosedLoopSimulator.get_ego_in_out(
                 ego_obs, step_actions.ego.to_dict(), keys_to_exclude=set(("image",))
             )
-            for i, scene_idx in enumerate(self._current_scene_indices):
-                # If applicable, insert prediction samples for visualization purposes
-                # if ego_samples is not None:
-                #     ego_in_out[scene_idx].outputs["samples"] = dict()
-                #     for k in ego_samples:
-                #         ego_in_out[scene_idx].outputs["samples"][k] = ego_samples[k][i]
+            for i, scene_idx in enumerate(self.current_scene_indices):
                 self._ego_states[scene_idx].append(ego_in_out[scene_idx])
 
         if step_actions.has_agents:
@@ -287,7 +310,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             agents_in_out = ClosedLoopSimulator.get_agents_in_out(
                 agent_obs, step_actions.agents.to_dict(), keys_to_exclude=set(("image",))
             )
-            for i, scene_idx in enumerate(self._current_scene_indices):
+            for i, scene_idx in enumerate(self.current_scene_indices):
                 self._agents_states[scene_idx].append(agents_in_out.get(scene_idx, []))
 
         # TODO: accumulate sim trajectories

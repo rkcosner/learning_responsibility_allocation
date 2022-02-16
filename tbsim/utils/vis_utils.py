@@ -11,10 +11,21 @@ def agent_to_raster_np(pt_tensor, trans_mat):
     return pos_raster
 
 
-def _render_state(state_image, trans_mat, title="", pred_actions=None, gt_actions=None, pred_plan=None, gt_plan=None, pred_plan_info=None):
+def _render_state(
+        state_image,
+        trans_mat,
+        title="",
+        text=None,
+        pred_actions=None,
+        gt_actions=None,
+        pred_plan=None,
+        gt_plan=None,
+        pred_plan_info=None
+):
     fig = Figure(figsize=(10, 8), dpi=100)
     canvas = FigureCanvasAgg(fig)
-
+    if text is not None:
+        fig.text(x=10, y=10, s=text)
     ax = fig.add_subplot(121)
     ax.imshow(state_image)
     fig.suptitle(title)
@@ -49,7 +60,7 @@ def _render_state(state_image, trans_mat, title="", pred_actions=None, gt_action
     return im
 
 
-def render_state_l5kit(rasterizer, state_obs, action, scene_index, step_index, dataset_scene_index):
+def render_state_l5kit(rasterizer, state_obs, action, scene_index, step_index, dataset_scene_index, step_metrics=None):
     state_obs = state_obs["ego"]
     state_im = rasterizer.to_rgb(state_obs["image"][scene_index].transpose(1, 2, 0))
     slice_idx = lambda x:  x[scene_index]
@@ -67,14 +78,19 @@ def render_state_l5kit(rasterizer, state_obs, action, scene_index, step_index, d
         pred_plan = map_ndarray(pred_plan, slice_idx)
         pred_plan_info = map_ndarray(pred_plan_info, slice_idx)
 
+    msg = ""
+    if step_metrics is not None:
+        for k in step_metrics:
+            msg += "{}={}\n".format(k, step_metrics[k])
+
     im = _render_state(
         state_image=state_im,
         trans_mat=trans_mat,
         pred_actions=pred_actions,
-        gt_actions=gt_actions,
+        # gt_actions=gt_actions,
         pred_plan=pred_plan,
         pred_plan_info=pred_plan_info,
-        title="scene={}, step={}".format(dataset_scene_index, step_index)
+        title="scene={}, step={}".format(dataset_scene_index, step_index) + "\n" + msg,
     )
 
     return im
