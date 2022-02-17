@@ -16,7 +16,6 @@ from l5kit.dataset import EgoDataset, AgentDataset
 
 from tbsim.configs.base import TrainConfig
 from tbsim.external.l5_ego_dataset import (
-    EgoDatasetVectorized,
     EgoDatasetMixed,
 )
 

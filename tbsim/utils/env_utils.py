@@ -10,7 +10,7 @@ from tbsim.utils.l5_utils import get_current_states
 from tbsim.algos.algo_utils import optimize_trajectories
 from tbsim.utils.geometry_utils import transform_points_tensor
 from l5kit.geometry import transform_points
-
+from tbsim.utils.timer import Timers
 
 def rollout_episodes(
     env,
@@ -41,6 +41,7 @@ def rollout_episodes(
     info = {}
     renderings = []
     is_batched_env = isinstance(env, BatchedEnv)
+    timers = Timers()
 
     for ei in range(num_episodes):
         env.reset(scene_indices=scene_indices)
@@ -49,21 +50,26 @@ def rollout_episodes(
         counter = 0
         frames = []
         while not done:
-
-            obs = env.get_observation()
-            obs = TensorUtils.to_torch(obs, device=policy.device)
+            with timers.timed("obs"):
+                obs = env.get_observation()
+            with timers.timed("to_torch"):
+                obs = TensorUtils.to_torch(obs, device=policy.device)
 
             if counter < skip_first_n:
                 # skip the first N steps to warm up environment state (velocity, etc.)
                 env.step(RolloutAction(), num_steps_to_take=1, render=False)
             else:
-                action = policy.get_action(obs)
-                ims = env.step(
-                    action, num_steps_to_take=n_step_action, render=render
-                )  # List of [num_scene, h, w, 3]
+                with timers.timed("network"):
+                    action = policy.get_action(obs)
+
+                with timers.timed("step"):
+                    ims = env.step(
+                        action, num_steps_to_take=n_step_action, render=render
+                    )  # List of [num_scene, h, w, 3]
                 if render:
                     frames.extend(ims)
-                    
+            # print(timers)
+
             done = env.is_done()
             counter += 1
 

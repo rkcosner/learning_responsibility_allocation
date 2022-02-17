@@ -51,7 +51,7 @@ def _render_state(
         ax.scatter(pos_raster[:, 0], pos_raster[:, 1], marker='o', color="blue")
 
     # visualize plan heat map
-    if "location_map" in pred_plan_info:
+    if pred_plan_info is not None and "location_map" in pred_plan_info:
         ax = fig.add_subplot(122)
         ax.imshow(pred_plan_info["location_map"])
 
@@ -64,7 +64,6 @@ def render_state_l5kit(rasterizer, state_obs, action, scene_index, step_index, d
     state_obs = state_obs["ego"]
     state_im = rasterizer.to_rgb(state_obs["image"][scene_index].transpose(1, 2, 0))
     slice_idx = lambda x:  x[scene_index]
-    pred_actions = map_ndarray(action.ego.to_dict(), slice_idx)
     gt_actions = dict(
         positions=state_obs["target_positions"],
         yaws=state_obs["target_yaws"]
@@ -72,8 +71,15 @@ def render_state_l5kit(rasterizer, state_obs, action, scene_index, step_index, d
 
     gt_actions = map_ndarray(gt_actions, slice_idx)
     trans_mat = state_obs["raster_from_agent"][scene_index]
-    pred_plan = action.ego_info.get("plan", None)
-    pred_plan_info = action.ego_info.get("plan_info", None)
+    if action.ego is not None:
+        pred_actions = map_ndarray(action.ego.to_dict(), slice_idx)
+        pred_plan = action.ego_info.get("plan", None)
+        pred_plan_info = action.ego_info.get("plan_info", None)
+    else:
+        pred_actions = None
+        pred_plan = None
+        pred_plan_info = None
+
     if pred_plan is not None:
         pred_plan = map_ndarray(pred_plan, slice_idx)
         pred_plan_info = map_ndarray(pred_plan_info, slice_idx)

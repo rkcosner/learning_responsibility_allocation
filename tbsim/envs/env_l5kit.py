@@ -13,6 +13,7 @@ from tbsim.utils.vis_utils import render_state_l5kit
 from tbsim.envs.base import BaseEnv, BatchedEnv, SimulationException
 from tbsim.utils.env_utils import RolloutAction, Action
 import tbsim.envs.env_metrics as EnvMetrics
+from tbsim.utils.timer import Timers
 
 
 class EnvL5KitSimulation(BaseEnv, BatchedEnv):
@@ -52,6 +53,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         self._ego_states = dict()
         self._agents_states = dict()
+
+        self.timers = Timers()
 
         self._metrics = dict(
             ego_off_road_rate=EnvMetrics.OffRoadRate(),
@@ -189,6 +192,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         if self._cached_observation is not None:
             return self._cached_observation
+
+        self.timers.tic("get_obs")
         if self.generate_agent_obs:
             agent_obs = self._current_scene_dataset.rasterise_agents_frame_batch(
                 self._frame_index
@@ -202,6 +207,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self._cached_observation = TensorUtils.to_numpy(
             {"agents": agent_obs, "ego": ego_obs}
         )
+        self.timers.toc("get_obs")
         return self._cached_observation
 
     def combine_observations(self, obs):
@@ -223,7 +229,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
     def render(self, actions_to_take: RolloutAction, **kwargs):
         ims = []
-        _, coll_counts_per_scene = self._metrics["all_collision_rate"].compute_per_step(
+        _, metrics_to_vis = self._metrics["all_collision_rate"].compute_per_step(
             self.combine_observations(self.get_observation()),
             all_scene_index=self.current_scene_indices
         )
@@ -235,7 +241,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                 scene_index=i,
                 step_index=self._frame_index,
                 dataset_scene_index=si,
-                step_metrics=TensorUtils.map_ndarray(coll_counts_per_scene, lambda x: x[i]),
+                step_metrics=TensorUtils.map_ndarray(metrics_to_vis, lambda x: x[i]),
                 **kwargs
             )
             ims.append(im)
@@ -274,9 +280,12 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
     def _step(self, step_actions: RolloutAction):
         obs = self.get_observation()
+        self.timers.tic("metrics")
         self._add_per_step_metrics(obs)
+        self.timers.toc("metrics")
 
         should_update = self._frame_index + 1 < self.horizon and not self._prediction_only
+        self.timers.tic("update")
         if step_actions.has_ego:
             ego_obs = dict(obs["ego"])
             ego_obs.pop("image")  # reduce memory consumption
@@ -312,6 +321,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             )
             for i, scene_idx in enumerate(self.current_scene_indices):
                 self._agents_states[scene_idx].append(agents_in_out.get(scene_idx, []))
+        self.timers.toc("update")
 
         # TODO: accumulate sim trajectories
         self._cached_observation = None
@@ -320,6 +330,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             self._done = True
         else:
             self._frame_index += 1
+        # print(self.timers)
 
     def step(self, actions, num_steps_to_take: int = 1, render=False):
         """
@@ -333,12 +344,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         if self.is_done():
             raise SimulationException("Simulation episode has ended")
-
-        # use dataset actions if we are doing prediction-only rollouts
-        if self._prediction_only:
-            for _ in range(num_steps_to_take):
-                self._step(RolloutAction())
-            return
 
         # otherwise, use @actions to update simulation
         actions = actions.to_numpy()
@@ -388,7 +393,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                 agents_info=actions.agents_info
 
             )
-            # transform step action back to the agent frame
             if render:
                 renderings.append(self.render(actions_to_take=step_actions))
 
