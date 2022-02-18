@@ -411,8 +411,10 @@ class RolloutWrapper(object):
         agents_action_info = None
         if self.ego_policy is not None:
             assert obs["ego"] is not None
-            ego_action, ego_action_info = self.ego_policy.get_action(obs["ego"])
+            with torch.no_grad():
+                ego_action, ego_action_info = self.ego_policy.get_action(obs["ego"])
         if self.agents_policy is not None:
             assert obs["agents"] is not None
-            agents_action, agents_action_info = self.agents_policy.get_action(obs["agents"])
+            with torch.no_grad():
+                agents_action, agents_action_info = self.agents_policy.get_action(obs["agents"])
         return RolloutAction(ego_action, ego_action_info, agents_action, agents_action_info)

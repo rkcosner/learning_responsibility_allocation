@@ -58,8 +58,9 @@ class Unicycle(Dynamics):
             assert isinstance(u, torch.Tensor)
             if bound:
                 lb, ub = self.ubound(x)
-                s = (u - lb) / torch.clip(ub - lb, min=1e-3)
-                u = lb + (ub - lb) * torch.sigmoid(s)
+                # s = (u - lb) / torch.clip(ub - lb, min=1e-3)
+                # u = lb + (ub - lb) * torch.sigmoid(s)
+                u = torch.clip(u, lb, ub)
 
             theta = x[..., 3:4]
             dxdt = torch.cat(

@@ -83,9 +83,8 @@ class RasterizedPlanningModel(nn.Module):
             data_batch=data_batch,
             ego_predictions=pred_batch["predictions"]
         )
-
-        coll_loss = collision_loss(pred_edges=pred_edges)
-        losses = OrderedDict(prediction_loss=pred_loss, goal_loss=goal_loss, collision_loss=coll_loss)
+        if self.traj_decoder.dyn is not None:
+            losses["yaw_reg_loss"] = torch.mean(pred_batch["controls"][..., 1] ** 2)
         return losses
 
 
@@ -134,14 +133,17 @@ class RasterizedGCModel(RasterizedPlanningModel):
             curr_states = L5Utils.get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
         else:
             curr_states = None
-        traj = self.traj_decoder.forward(inputs=input_feat, current_states=curr_states)["trajectories"]
+        preds = self.traj_decoder.forward(inputs=input_feat, current_states=curr_states)
 
+        traj = preds["trajectories"]
         pred_positions = traj[:, :, :2]
         pred_yaws = traj[:, :, 2:3]
         out_dict = {
             "trajectories": traj,
             "predictions": {"positions": pred_positions, "yaws": pred_yaws}
         }
+        if self.traj_decoder.dyn is not None:
+            out_dict["controls"] = preds["controls"]
         return out_dict
 
 

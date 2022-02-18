@@ -227,6 +227,7 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.render_ego_history = False
 
         self.decoder.layer_dims = ()
+        self.decoder.state_as_input = False
 
         self.dynamics.type = None
         self.dynamics.max_steer = 0.5
@@ -234,7 +235,6 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.dynamics.acce_bound = (-10, 8)
         self.dynamics.ddh_bound = (-math.pi * 2.0, math.pi * 2.0)
         self.dynamics.max_speed = 40.0  # roughly 90mph
-        self.dynamics.predict_current_states = False
 
         self.spatial_softmax.enabled = False
         self.spatial_softmax.kwargs.num_kp = 32
@@ -244,6 +244,7 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.loss_weights.prediction_loss = 1.0
         self.loss_weights.goal_loss = 0.0
         self.loss_weights.collision_loss = 0.0
+        self.loss_weights.yaw_reg_loss = 1.0
 
         self.optim_params.policy.learning_rate.initial = 1e-3  # policy learning rate
         self.optim_params.policy.learning_rate.decay_factor = (
