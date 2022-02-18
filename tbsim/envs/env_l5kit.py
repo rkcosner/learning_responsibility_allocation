@@ -2,11 +2,13 @@ import numpy as np
 from copy import deepcopy
 from typing import List, Dict
 from torch.utils.data.dataloader import default_collate
+from collections import OrderedDict
 
 from l5kit.simulation.dataset import SimulationConfig, SimulationDataset
 from l5kit.simulation.unroll import ClosedLoopSimulator, SimulationOutput
 from l5kit.cle.metrics import DisplacementErrorL2Metric
 from l5kit.geometry import transform_points, rotation33_as_yaw
+from l5kit.data import filter_agents_by_frames
 
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.utils.vis_utils import render_state_l5kit
@@ -45,6 +47,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         self._current_scene_indices = None  # indices of the scenes (in dataset) that are being used for simulation
         self._current_scene_dataset = None  # corresponding dataset of the scenes
+        self._current_agent_track_ids = None  # agent IDs of the current episode for each scene
 
         self._frame_index = 0
         self._cached_observation = None
@@ -87,6 +90,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self._current_scene_dataset = SimulationDataset.from_dataset_indices(
             self.dataset, scene_indices, self._sim_cfg
         )
+        self._current_agent_track_ids = None
+
         self._frame_index = 0
         self._cached_observation = None
         self._done = False
@@ -142,6 +147,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
     def scene_to_ego_index(self):
         return np.split(np.arange(self.num_instances), self.num_instances)
 
+
     def get_metrics(self):
         """
         Get metrics of the current episode (may compute before is_done==True)
@@ -177,15 +183,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                 metrics[met_name] = met_vals
         return metrics
 
-    def get_state(self):
-        """Get the current raw state of the scenes (ego and agents)"""
-        obs = self.get_observation()
-        agents_s = obs["agents"]
-        agent_dict = dict()
-        for idx_agent in range(len(agents_s["track_id"])):
-            agent_in = {k: v[idx_agent] for k, v in agents_s.items() if k != "image"}
-        # TODO: finish implementation
-
     def get_observation(self):
         if self._done:
             return None
@@ -194,21 +191,57 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             return self._cached_observation
 
         self.timers.tic("get_obs")
+        # Get agent observations
         if self.generate_agent_obs:
-            agent_obs = self._current_scene_dataset.rasterise_agents_frame_batch(
-                self._frame_index
-            )
+            if self._current_agent_track_ids is None:
+                agent_obs = self._current_scene_dataset.rasterise_agents_frame_batch(self._frame_index)
+                self._current_agent_track_ids = agent_obs.keys()  # [scene_index, track_id]
+            else:
+                agent_obs = OrderedDict()
+                for scene_index, track_id in self._current_agent_track_ids:
+                    ao = self.get_observation_by_index(
+                        scene_index=scene_index,
+                        frame_index=self._frame_index,
+                        agent_track_ids=[track_id],
+                        collate=False
+                    )
+                    agent_obs.update(ao)
+
             if len(agent_obs) > 0:
                 agent_obs = default_collate(list(agent_obs.values()))
         else:
             agent_obs = None
+        # Get ego observation
         ego_obs = self._current_scene_dataset.rasterise_frame_batch(self._frame_index)
         ego_obs = default_collate(ego_obs)
+
+        # cache observations
         self._cached_observation = TensorUtils.to_numpy(
             {"agents": agent_obs, "ego": ego_obs}
         )
         self.timers.toc("get_obs")
+
         return self._cached_observation
+
+    def get_observation_by_index(self, scene_index, frame_index, agent_track_ids, collate=True):
+        agents_dict = OrderedDict()
+        dataset = self._current_scene_dataset.scene_dataset_batch[scene_index]
+        frame = dataset.dataset.frames[frame_index]
+        frame_agents = filter_agents_by_frames(frame, dataset.dataset.agents)[0]
+        for agent in frame_agents:
+            track_id = int(agent["track_id"])
+            if track_id in agent_track_ids:
+                el = dataset.get_frame(
+                    scene_index=0, state_index=frame_index, track_id=track_id
+                )
+                # we replace the scene_index here to match the real one (otherwise is 0)
+                el["scene_index"] = scene_index
+                agents_dict[scene_index, track_id] = el
+        if collate:
+            agents_dict = default_collate(list(agents_dict.values()))
+            return TensorUtils.to_numpy(agents_dict)
+        else:
+            return agents_dict
 
     def combine_observations(self, obs):
         """Get a combined observation by concatenating ego and agents"""
@@ -229,10 +262,13 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
     def render(self, actions_to_take: RolloutAction, **kwargs):
         ims = []
-        _, metrics_to_vis = self._metrics["all_collision_rate"].compute_per_step(
-            self.combine_observations(self.get_observation()),
-            all_scene_index=self.current_scene_indices
-        )
+        metrics_to_vis = dict()
+        if "all_collision_rate" in self._metrics:
+            _, coll_count = self._metrics["all_collision_rate"].compute_per_step(
+                self.combine_observations(self.get_observation()),
+                all_scene_index=self.current_scene_indices
+            )
+            metrics_to_vis.update(coll_count)
         for i, si in enumerate(self.current_scene_indices):
             im = render_state_l5kit(
                 rasterizer=self.rasterizer,
