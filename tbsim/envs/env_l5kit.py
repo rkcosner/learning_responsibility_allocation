@@ -435,3 +435,10 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             self._step(step_actions=step_actions)
 
         return renderings
+
+    def get_episode_datasets(self):
+        """Get episodic experience in the form of datasets"""
+        ds = dict()
+        for k, v in self._current_scene_dataset.scene_dataset_batch.items():
+            ds[k] = v.dataset
+        return ds
