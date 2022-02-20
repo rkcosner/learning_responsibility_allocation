@@ -9,21 +9,48 @@ from tbsim.utils.l5_utils import get_last_available_index
 from tbsim.utils.loss_utils import goal_reaching_loss, trajectory_loss, collision_loss
 
 
-def decode_spatial_map(pred_map):
+def decode_spatial_prediction(prob_map, residual_yaw_map, num_samples=None):
+    """
+    Decode spatial predictions (e.g., UNet output) to a list of locations
+    Args:
+        prob_map (torch.Tensor): probability of each spatial location [B, H, W]
+        residual_yaw_map (torch.Tensor): location residual (d_x, d_yy) and yaw of each location [B, 3, H, W]
+        num_samples (int): (optional) if specified, take # of samples according to the discrete prob_map distribution.
+            default is None, which is to take the max
+    Returns:
+        pixel_loc (torch.Tensor): coordinates of each predicted location before applying residual [B, N, 2]
+        residual_pred (torch.Tensor): residual of each predicted location [B, N, 2]
+        yaw_pred (torch.Tensor): yaw of each predicted location [B, N, 1]
+        pixel_prob (torch.Tensor): probability of each sampled prediction [B, N]
+    """
     # decode map as predictions
-    b, c, h, w = pred_map.shape
-    pixel_logit, pixel_loc_flat = torch.max(torch.flatten(pred_map[:, 0], start_dim=1), dim=1)
-    pixel_loc_x = torch.remainder(pixel_loc_flat, w)
-    pixel_loc_y = torch.floor(pixel_loc_flat.float() / float(w)).long()
-    pixel_loc = torch.stack((pixel_loc_x, pixel_loc_y), dim=1)  # [B, 2]
+    b, h, w = prob_map.shape
+    flat_prob_map = prob_map.flatten(start_dim=1)
+    if num_samples is None:
+        # if num_samples is not specified, take the maximum-probability location
+        pixel_prob, pixel_loc_flat = torch.max(flat_prob_map, dim=1)
+        pixel_prob = pixel_prob.unsqueeze(1)
+        pixel_loc_flat = pixel_loc_flat.unsqueeze(1)
+    else:
+        # otherwise, use the probability map as a discrete distribution of location predictions
+        dist = torch.distributions.Categorical(probs=flat_prob_map)
+        pixel_loc_flat = dist.sample((num_samples,)).permute(1, 0)  # [n_sample, batch] -> [batch, n_sample]
+        pixel_prob = torch.gather(flat_prob_map, dim=1, index=pixel_loc_flat)
+
     local_pred = torch.gather(
-        input=torch.flatten(pred_map, 2),  # [B, C, H * W]
+        input=torch.flatten(residual_yaw_map, 2),  # [B, C, H * W]
         dim=2,
-        index=TensorUtils.unsqueeze_expand_at(pixel_loc_flat, size=c, dim=1)[:, :, None]  # [B, C, 1]
-    ).squeeze(-1)
-    residual_pred = local_pred[:, 1:3]
-    yaw_pred = local_pred[:, 3:4]
-    return pixel_loc.float(), residual_pred, yaw_pred, pixel_logit
+        index=TensorUtils.unsqueeze_expand_at(pixel_loc_flat, size=3, dim=1)  # [B, C, num_samples]
+    ).permute(0, 2, 1)  # [B, C, N] -> [B, N, C]
+
+    residual_pred = local_pred[:, :, 0:2]
+    yaw_pred = local_pred[:, :, 2:3]
+
+    pixel_loc_x = torch.remainder(pixel_loc_flat, w).float()
+    pixel_loc_y = torch.floor(pixel_loc_flat.float() / float(w)).float()
+    pixel_loc = torch.stack((pixel_loc_x, pixel_loc_y), dim=-1)  # [B, N, 2]
+
+    return pixel_loc, residual_pred, yaw_pred, pixel_prob
 
 
 def get_spatial_goal_supervision(data_batch):
