@@ -15,18 +15,30 @@ from tbsim.envs.env_l5kit import EnvL5KitSimulation, BatchedEnv
 from tbsim.utils.config_utils import translate_l5kit_cfg, get_experiment_config_from_file
 from tbsim.utils.env_utils import rollout_episodes, PolicyWrapper, OptimController, HierarchicalWrapper, GTPlanner, RolloutWrapper
 from tbsim.utils.tensor_utils import to_torch, to_numpy
-from tbsim.external.l5_ego_dataset import EgoDatasetMixed
+from tbsim.external.l5_ego_dataset import EgoDatasetMixed, EgoReplayBufferMixed, ExperienceIterableWrapper
 from tbsim.utils.experiment_utils import get_checkpoint
 from imageio import get_writer
+from tbsim.utils.timer import Timers
 
 
 def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
-
     policy_ckpt_path, policy_config_path = get_checkpoint(
-        ngc_job_id="2561797", # gc_dynNone_decmlp128,128
-        ckpt_key="iter83999_",
-        # ngc_job_id="2580486", # gc_dynNone_decmlp128,128
+        # ngc_job_id="2561797", # gc_dynNone_decmlp128,128
+        # ckpt_key="iter83999_",
+        # ngc_job_id="2580486", # l5_ma_rasterized_plan
         # ckpt_key="iter33999_ep0_valLoss",
+        # ngc_job_id="2573533",  # gc_dynUnicycle
+        # ckpt_key="iter59999_",
+        # ngc_job_id="2573535",  # gc_dynBicycle
+        # ckpt_key="iter63999",
+        # ngc_job_id="2594094",  # gc_clip_dynBicycle_decmlp128,128_decstateTrue_rlFalse
+        # ckpt_key="iter27999",
+        # ngc_job_id="2594093", # gc_clip_dynUnicycle_decmlp128,128_decstateTrue_rlFalse
+        # ckpt_key="iter31999",
+        # ngc_job_id="2595273",  # gc_clip_regyaw_dynBicycle_decmlp128,128_decstateTrue_yrl0.01_rlFalse
+        # ckpt_key="iter23999",
+        ngc_job_id="2596419", # gc_clip_regyaw_dynUnicycle_decmlp128,128_decstateTrue_yrl1.0
+        ckpt_key="iter37999",
         ckpt_root_dir=ckpt_dir
     )
     policy_cfg = get_experiment_config_from_file(policy_config_path)
@@ -37,6 +49,10 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
         ckpt_root_dir=ckpt_dir
     )
     planner_cfg = get_experiment_config_from_file(planner_config_path)
+    print(policy_ckpt_path)
+    print(policy_config_path)
+    print(planner_ckpt_path)
+    print(planner_config_path)
 
     data_cfg = policy_cfg
     assert data_cfg.env.rasterizer.map_type == "py_semantic"
@@ -63,6 +79,8 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
         modality_shapes=modality_shapes
     ).to(device).eval()
 
+    planner = PolicyWrapper.wrap_planner(planner, mask_drivable=True, sample=True)
+
     policy = HierarchicalWrapper(planner, controller)
 
     # policy = MATrafficModel.load_from_checkpoint(
@@ -74,6 +92,8 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
     policy = RolloutWrapper(ego_policy=policy, agents_policy=policy)
 
     data_cfg.env.simulation.num_simulation_steps = 200
+    data_cfg.env.simulation.distance_th_far = 1e+5
+    data_cfg.env.simulation.disable_new_agents = True
     data_cfg.env.generate_agent_obs = True
     env = EnvL5KitSimulation(
         data_cfg.env,
@@ -83,21 +103,30 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
         prediction_only=False
     )
 
+    # env.reset()
+    # buffer = EgoReplayBufferMixed(cfg=l5_config, vectorizer=vectorizer, rasterizer=rasterizer, capacity=10)
+    # ds = ExperienceIterableWrapper(buffer)
+    # ds.append_experience(env.get_info()["experience"])
+    # from IPython import embed; embed()
+
     stats, info, renderings = rollout_episodes(
         env,
         policy,
         num_episodes=1,
         n_step_action=10,
         render=True,
+        skip_first_n=1,
         # scene_indices=[11, 16, 35, 38, 45, 58, 150, 152, 154, 156],
-        scene_indices=[38, 45, 58]
+        scene_indices=[35, 45, 58]
     )
+    print(stats)
 
     for i, scene_images in enumerate(renderings[0]):
         writer = get_writer(os.path.join(video_dir, "{}.mp4".format(i)), fps=10)
         for im in scene_images:
             writer.append_data(im)
         writer.close()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
