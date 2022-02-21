@@ -16,7 +16,7 @@ from l5kit.dataset import EgoDataset, AgentDataset
 
 from tbsim.configs.base import TrainConfig
 from tbsim.external.l5_ego_dataset import (
-    EgoDatasetMixed,
+    EgoDatasetMixed, EgoReplayBufferMixed
 )
 
 
@@ -65,6 +65,7 @@ class L5RasterizedDataModule(pl.LightningDataModule, L5BaseDatasetModule):
         super().__init__()
         self.train_dataset = None
         self.valid_dataset = None
+        self.experience_dataset = None  # replay buffer
         self.rasterizer = None
         self._train_config = train_config
         self._l5_config = l5_config
@@ -151,6 +152,12 @@ class L5MixedDataModule(L5RasterizedDataModule):
         self.ego_validset = EgoDatasetMixed(self._l5_config, valid_zarr, self.vectorizer, self.rasterizer)
 
         if self._mode == "ego":
+            self.experience_dataset = EgoReplayBufferMixed(
+                self._l5_config,
+                vectorizer=self.vectorizer,
+                rasterizer=self.rasterizer,
+                capacity=self._train_config.training.buffer_size
+            )
             self.train_dataset = self.ego_trainset
             self.valid_dataset = self.ego_validset
         else:

@@ -18,6 +18,11 @@ from tbsim.configs.l5kit_config import (
     L5RasterizedVAEConfig,
 )
 
+from tbsim.configs.l5kit_selfplay_config import (
+    L5KitOnlineTrainConfig,
+    SelfPlayHierarchicalConfig
+)
+
 EXP_CONFIG_REGISTRY = dict()
 
 EXP_CONFIG_REGISTRY["l5_rasterized_plan"] = ExperimentConfig(
@@ -75,6 +80,14 @@ EXP_CONFIG_REGISTRY["l5_mixed_transformerGAN_plan"] = ExperimentConfig(
     algo_config=L5TransformerGANConfig(),
     registered_name="l5_mixed_transformerGAN_plan",
 )
+
+EXP_CONFIG_REGISTRY["l5_sp_hierarchical"] = ExperimentConfig(
+    train_config=L5KitOnlineTrainConfig(),
+    env_config=L5KitMixedSemanticMapEnvConfig(),
+    algo_config=SelfPlayHierarchicalConfig(),
+    registered_name="l5_sp_hierarchical",
+)
+
 
 
 def get_registered_experiment_config(registered_name):

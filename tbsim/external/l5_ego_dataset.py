@@ -1,9 +1,10 @@
 import bisect
 from functools import partial
-from typing import Callable, Optional
+from typing import Callable, Optional, List
 
 import numpy as np
-from torch.utils.data import Dataset
+import torch
+from torch.utils.data import Dataset, IterableDataset
 
 from l5kit.data import ChunkedDataset, get_frames_slice_from_scenes
 from l5kit.dataset.utils import convert_str_to_fixed_length_tensor
@@ -131,16 +132,22 @@ class EgoReplayBufferMixed(Dataset):
             vectorize_lane=self.cfg["data_generation_params"]["vectorize_lane"],
         )
 
-    def append_scene_datasets(self, datasets: dict):
-        if self._capacity is None:
-            self.dataset = datasets
-        else:
-            self._active_scenes.extend(list(datasets.keys()))
-            if len(self._active_scenes) > self._capacity:
-                for si in self._active_scenes[:len(self._active_scenes) - self._capacity]:
-                    self.dataset.pop(si)
-                self._active_scenes = self._active_scenes[len(self._active_scenes) - self._capacity:]
-            self.dataset.update(datasets)
+    def append_experience(self, episodes_data: List):
+        """
+        Append list of episodic experience
+        Args:
+            episodes_data (list): a list of episodic experiences
+
+        """
+        self._active_scenes.extend([d[0] for d in episodes_data])
+        for si, ds in episodes_data:
+            self.dataset[si] = ds
+
+        if self._capacity is not None and len(self._active_scenes) > self._capacity:
+            n_to_remove = len(self._active_scenes) - self._capacity
+            for si in self._active_scenes[:n_to_remove]:
+                self.dataset.pop(si)
+            self._active_scenes = self._active_scenes[n_to_remove:]
 
     def _get_scene_indices(self):
         fi = dict()
@@ -174,8 +181,41 @@ class EgoReplayBufferMixed(Dataset):
             tl_faces,
             selected_track_id=None
         )
+        data["image"] = data["image"].transpose(2, 0, 1)
 
         # add information only, so that all data keys are always preserved
         data["scene_index"] = scene_index
         data["track_id"] = np.int64(-1)  # always a number to avoid crashing torch
         return data
+
+
+class ExperienceIterableWrapper(IterableDataset):
+    def __init__(self, dataset):
+        self.dataset = dataset
+        self._should_update_indices = False
+        self._indices = None
+        self._rnd = None
+        self._curr_index = 0
+
+    def _update_indices(self):
+        self._indices = np.arange(len(self.dataset))
+        self._rnd.shuffle(self._indices)
+        self._curr_index = 0
+
+    def append_experience(self, episodes_data: List):
+        self._should_update_indices = True
+        self.dataset.append_experience(episodes_data)
+
+    def __iter__(self):
+        while True:
+            if self._rnd is None:
+                winfo = torch.utils.data.get_worker_info()
+                if winfo is not None:
+                    seed = winfo.id
+                else:
+                    seed = 0
+                self._rnd = np.random.RandomState(seed=seed)
+            if self._should_update_indices:
+                self._update_indices()
+                self._should_update_indices = False
+            yield self.dataset[self._curr_index]

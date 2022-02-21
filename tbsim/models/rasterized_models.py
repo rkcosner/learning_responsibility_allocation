@@ -83,6 +83,13 @@ class RasterizedPlanningModel(nn.Module):
             data_batch=data_batch,
             ego_predictions=pred_batch["predictions"]
         )
+
+        coll_loss = collision_loss(pred_edges=pred_edges)
+        losses = OrderedDict(
+            prediction_loss=pred_loss,
+            goal_loss=goal_loss,
+            collision_loss=coll_loss
+        )
         if self.traj_decoder.dyn is not None:
             losses["yaw_reg_loss"] = torch.mean(pred_batch["controls"][..., 1] ** 2)
         return losses

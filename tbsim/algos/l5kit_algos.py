@@ -28,13 +28,14 @@ from tbsim.utils.geometry_utils import transform_points_tensor
 
 
 class L5TrafficModel(pl.LightningModule):
-    def __init__(self, algo_config, modality_shapes):
+    def __init__(self, algo_config, modality_shapes, do_log=True):
         """
         Creates networks and places them into @self.nets.
         """
         super(L5TrafficModel, self).__init__()
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
+        self._do_log = do_log
         assert modality_shapes["image"][0] == 15
 
         traj_decoder = MLPTrajectoryDecoder(
@@ -121,15 +122,21 @@ class L5TrafficModel(pl.LightningModule):
         losses = self.nets["policy"].compute_losses(pout, batch)
         total_loss = 0.0
         for lk, l in losses.items():
-            loss = l * self.algo_config.loss_weights[lk]
-            self.log("train/losses_" + lk, loss)
-            total_loss += loss
+            losses[lk] = l * self.algo_config.loss_weights[lk]
+            total_loss += losses[lk]
 
         metrics = self._compute_metrics(pout, batch)
+
+        for lk, l in losses.items():
+            self.log("train/losses_" + lk, l)
         for mk, m in metrics.items():
             self.log("train/metrics_" + mk, m)
 
-        return total_loss
+        return {
+            "loss": total_loss,
+            "all_losses": losses,
+            "all_metrics": metrics
+        }
 
     def validation_step(self, batch, batch_idx):
         pout = self.nets["policy"](batch)

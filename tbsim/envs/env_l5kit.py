@@ -121,7 +121,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
     def get_info(self):
         return {
             "l5_sim_states": self._get_l5_sim_states(),
-            "l5_scene_indices": deepcopy(self.current_scene_indices),
+            "l5_scene_indices": self.current_scene_indices,
+            "experience": self.get_episode_experience()
         }
 
     @property
@@ -146,7 +147,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
     @property
     def scene_to_ego_index(self):
         return np.split(np.arange(self.num_instances), self.num_instances)
-
 
     def get_metrics(self):
         """
@@ -436,9 +436,9 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         return renderings
 
-    def get_episode_datasets(self):
+    def get_episode_experience(self):
         """Get episodic experience in the form of datasets"""
-        ds = dict()
-        for k, v in self._current_scene_dataset.scene_dataset_batch.items():
-            ds[k] = v.dataset
+        ds = []
+        for si in self.current_scene_indices:
+            ds.append((si, self._current_scene_dataset.scene_dataset_batch[si].dataset))
         return ds

@@ -20,6 +20,7 @@ def rollout_episodes(
     n_step_action=1,
     render=False,
     scene_indices=None,
+    device=None,
 ):
     """
     Rollout an environment for a number of episodes
@@ -53,7 +54,8 @@ def rollout_episodes(
             with timers.timed("obs"):
                 obs = env.get_observation()
             with timers.timed("to_torch"):
-                obs = TensorUtils.to_torch(obs, device=policy.device)
+                device = policy.device if device is None else device
+                obs = TensorUtils.to_torch(obs, device=device)
 
             if counter < skip_first_n:
                 # skip the first N steps to warm up environment state (velocity, etc.)
@@ -311,6 +313,9 @@ class OptimController(object):
                 "dynamics type {} is not implemented", dynamics_type
             )
 
+    def eval(self):
+        pass
+
     def get_action(self, obs, plan: Plan, init_u=None, **kwargs) -> Tuple[Action, Dict]:
         target_pos = plan.positions
         target_yaw = plan.yaws
@@ -345,6 +350,9 @@ class GTPlanner(object):
     def __init__(self, device):
         self.device = device
 
+    def eval(self):
+        pass
+
     @staticmethod
     def get_plan(obs, **kwargs) -> Tuple[Plan, Dict]:
         plan = Plan(
@@ -361,6 +369,10 @@ class HierarchicalWrapper(object):
         self.device = planner.device
         self.planner = planner
         self.controller = controller
+
+    def eval(self):
+        self.planner.eval()
+        self.controller.eval()
 
     def get_action(self, obs) -> Tuple[Action, Dict]:
         plan, plan_info = self.planner.get_plan(obs)
@@ -381,6 +393,9 @@ class PolicyWrapper(object):
         self.device = model.device
         self.action_kwargs = get_action_kwargs
         self.plan_kwargs = get_plan_kwargs
+
+    def eval(self):
+        self.model.eval()
 
     def get_action(self, obs) -> Tuple[Action, Dict]:
         return self.model.get_action(obs, **self.action_kwargs)
@@ -403,6 +418,10 @@ class RolloutWrapper(object):
         self.device = ego_policy.device if agents_policy is None else agents_policy.device
         self.ego_policy = ego_policy
         self.agents_policy = agents_policy
+
+    def eval(self):
+        self.ego_policy.eval()
+        self.agents_policy.eval()
 
     def get_action(self, obs) -> RolloutAction:
         ego_action = None
