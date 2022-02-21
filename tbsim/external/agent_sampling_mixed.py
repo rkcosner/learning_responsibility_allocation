@@ -44,7 +44,7 @@ def generate_agent_sample_mixed(
     rasterizer: Rasterizer,
     render_context: RenderContext,
     perturbation: Optional[Perturbation] = None,
-    vectorize_lane=True,
+    vectorize_lane=False,
 ) -> dict:
     """Generates the inputs and targets to train a deep prediction model with vectorized inputs.
     A deep prediction model takes as input the state of the world in vectorized form,

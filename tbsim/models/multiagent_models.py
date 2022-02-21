@@ -244,7 +244,7 @@ class AgentAwareRasterizedModel(MultiAgentRasterizedModel):
         )
 
         other_dyn_type = None if disable_dynamics_for_other_agents else dynamics_type
-        self.agent_decoder = base_models.MLPTrajectoryDecoder(
+        self.agents_decoder = base_models.MLPTrajectoryDecoder(
             feature_dim=agent_feature_dim,
             state_dim=3,
             num_steps=future_num_frames,
@@ -276,7 +276,8 @@ class AgentAwareRasterizedModel(MultiAgentRasterizedModel):
         agent_feats, _, ego_feats = self.map_encoder(image_batch, rois=indexed_rois_raster)
         # use per-agent features for predicting non-ego trajectories
         agent_feats = agent_feats.reshape(b, a, -1)
-        agent_pred = self.agent_decoder.forward(inputs=agent_feats)
+        # TODO: get agent states
+        agent_pred = self.agents_decoder.forward(inputs=agent_feats)
 
         # use global feature for predicting ego trajectories
         if self.goal_conditional:
@@ -291,7 +292,11 @@ class AgentAwareRasterizedModel(MultiAgentRasterizedModel):
             goal_feat = self.goal_encoder(goal_state) # -> [B, D]
             ego_feats = torch.cat((ego_feats, goal_feat), dim=-1)
 
-        ego_pred = self.ego_decoder.forward(inputs=ego_feats)
+        if self.ego_decoder.dyn is not None:
+            curr_states = L5Utils.get_current_states(data_batch, dyn_type=self.ego_decoder.dyn.type())
+        else:
+            curr_states = None
+        ego_pred = self.ego_decoder.forward(inputs=ego_feats, current_states=curr_states)
 
         # process predictions
         all_pred = dict()
@@ -306,9 +311,9 @@ class AgentAwareRasterizedModel(MultiAgentRasterizedModel):
             "predictions": {"positions": pred_positions, "yaws": pred_yaws},
             "rois_raster": rois_raster.reshape(b, a, 2, 2)
         }
-        if self.ego_decoder.dyn is not None and self.ego_decoder.dyn is not None:
+        if self.ego_decoder.dyn is not None and self.agents_decoder.dyn is not None:
             out_dict["controls"] = all_pred["controls"]
-        elif self.ego_decoder.dyn is not None and self.ego_decoder.dyn is None:
+        elif self.ego_decoder.dyn is not None and self.agents_decoder.dyn is None:
             out_dict["controls"] = ego_pred["controls"]
 
         return out_dict

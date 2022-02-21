@@ -211,6 +211,7 @@ class L5KitMixedSemanticMapEnvConfig(L5KitMixedEnvConfig):
         super(L5KitMixedSemanticMapEnvConfig, self).__init__()
         self.rasterizer.map_type = "py_semantic"
         self.data_generation_params.vectorize_lane = False
+        self.generate_agent_obs = True
 
 
 class L5RasterizedPlanningConfig(AlgoConfig):
