@@ -18,7 +18,7 @@ from tbsim.configs.l5kit_config import (
     L5RasterizedVAEConfig,
 )
 
-from tbsim.configs.l5kit_selfplay_config import (
+from tbsim.configs.l5kit_online_config import (
     L5KitOnlineTrainConfig,
     SelfPlayHierarchicalConfig
 )

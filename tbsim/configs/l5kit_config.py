@@ -210,6 +210,7 @@ class L5KitMixedSemanticMapEnvConfig(L5KitMixedEnvConfig):
     def __init__(self):
         super(L5KitMixedSemanticMapEnvConfig, self).__init__()
         self.rasterizer.map_type = "py_semantic"
+        self.data_generation_params.vectorize_lane = False
 
 
 class L5RasterizedPlanningConfig(AlgoConfig):
@@ -227,7 +228,7 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.render_ego_history = False
 
         self.decoder.layer_dims = ()
-        self.decoder.state_as_input = False
+        self.decoder.state_as_input = True
 
         self.dynamics.type = None
         self.dynamics.max_steer = 0.5
@@ -244,7 +245,7 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.loss_weights.prediction_loss = 1.0
         self.loss_weights.goal_loss = 0.0
         self.loss_weights.collision_loss = 0.0
-        self.loss_weights.yaw_reg_loss = 1.0
+        self.loss_weights.yaw_reg_loss = 0.0
 
         self.optim_params.policy.learning_rate.initial = 1e-3  # policy learning rate
         self.optim_params.policy.learning_rate.decay_factor = (
@@ -271,7 +272,13 @@ class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
         super(MARasterizedPlanningConfig, self).__init__()
         self.name = "ma_rasterized"
         self.agent_feature_dim = 128
+        self.ego_feature_dim = 128
         self.context_size = (30, 30)
+        self.agent_aware = True
+        self.disable_dynamics_for_other_agents = False
+        self.goal_conditional = True
+        self.goal_feature_dim = 32
+        self.decoder.layer_dims = (128, 128)
 
 
 class L5RasterizedGCConfig(L5RasterizedPlanningConfig):
@@ -279,6 +286,7 @@ class L5RasterizedGCConfig(L5RasterizedPlanningConfig):
         super(L5RasterizedGCConfig, self).__init__()
         self.name = "l5_rasterized_gc"
         self.goal_feature_dim = 32
+        self.decoder.layer_dims = (128, 128)
 
 
 class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):

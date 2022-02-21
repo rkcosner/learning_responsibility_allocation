@@ -982,7 +982,7 @@ class MLPTrajectoryDecoder(TrajectoryDecoder):
             pred_shapes = OrderedDict(trajectories=(self.num_steps, self.dyn.udim))
 
         state_as_input = net_kwargs.pop("state_as_input")
-        if state_as_input:
+        if state_as_input and self.dyn is not None:
             feature_dim = self.feature_dim + self.dyn.xdim
         else:
             feature_dim = self.feature_dim
@@ -995,7 +995,7 @@ class MLPTrajectoryDecoder(TrajectoryDecoder):
         )
 
     def _forward_networks(self, inputs, current_states=None, num_steps=None):
-        if self._network_kwargs["state_as_input"]:
+        if self._network_kwargs["state_as_input"] and self.dyn is not None:
             inputs = torch.cat((inputs, current_states), dim=-1)
 
         if inputs.ndim == 2:

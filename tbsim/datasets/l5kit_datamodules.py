@@ -15,6 +15,7 @@ from l5kit.data import LocalDataManager, ChunkedDataset
 from l5kit.dataset import EgoDataset, AgentDataset
 
 from tbsim.configs.base import TrainConfig
+from tbsim.configs.l5kit_online_config import L5KitOnlineTrainConfig
 from tbsim.external.l5_ego_dataset import (
     EgoDatasetMixed, EgoReplayBufferMixed
 )
@@ -152,12 +153,13 @@ class L5MixedDataModule(L5RasterizedDataModule):
         self.ego_validset = EgoDatasetMixed(self._l5_config, valid_zarr, self.vectorizer, self.rasterizer)
 
         if self._mode == "ego":
-            self.experience_dataset = EgoReplayBufferMixed(
-                self._l5_config,
-                vectorizer=self.vectorizer,
-                rasterizer=self.rasterizer,
-                capacity=self._train_config.training.buffer_size
-            )
+            if isinstance(self._train_config, L5KitOnlineTrainConfig):
+                self.experience_dataset = EgoReplayBufferMixed(
+                    self._l5_config,
+                    vectorizer=self.vectorizer,
+                    rasterizer=self.rasterizer,
+                    capacity=self._train_config.training.buffer_size
+                )
             self.train_dataset = self.ego_trainset
             self.valid_dataset = self.ego_validset
         else:

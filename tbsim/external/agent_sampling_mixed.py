@@ -258,58 +258,6 @@ def generate_agent_sample_mixed(
         frame_info["ego_lanes"] = ego_lanes
         frame_info["all_other_agents_lanes"] = all_other_agents_lanes
 
-    # all_other_agents_curr_pos = vectorized_features["all_other_agents_history_positions"][:, 0]
-    # all_other_agents_curr_yaw = vectorized_features["all_other_agents_history_yaws"][:, 0]
-    #
-    # all_other_agents_curr_pos_world = transform_points(all_other_agents_curr_pos, world_from_agent)
-    # all_other_agents_curr_yaw_world = agent_yaw_rad + all_other_agents_curr_yaw
-    #
-    # num_agents = all_other_agents_curr_pos.shape[0]
-    # all_other_agent_from_agent = np.zeros((num_agents, 3, 3))
-    # for i in range(num_agents):
-    #     world_from_other_agent = compute_agent_pose(
-    #         all_other_agents_curr_pos_world[i],
-    #         all_other_agents_curr_yaw_world[i]
-    #     ).astype(np.float64)
-    #     other_agent_from_world = np.linalg.inv(world_from_other_agent)
-    #     all_other_agent_from_agent[i] = other_agent_from_world @ world_from_agent
-    #
-    # vectorized_features["all_other_agents_future_positions_from_self"] = transform_points(
-    #     vectorized_features["all_other_agents_future_positions"],
-    #     all_other_agent_from_agent
-    # )
-    # vectorized_features["all_other_agents_future_yaws_from_self"] = angular_distance(
-    #     vectorized_features["all_other_agents_future_yaws"],
-    #     all_other_agents_curr_yaw[:, np.newaxis]
-    # )
-    # vectorized_features["all_other_agents_from_agent"] = all_other_agent_from_agent
-
-    # all_other_agents_curr_pos = vectorized_features["all_other_agents_history_positions"][:, 0]
-    # all_other_agents_curr_yaw = vectorized_features["all_other_agents_history_yaws"][:, 0]
-    #
-    # all_other_agents_curr_pos_world = transform_points(all_other_agents_curr_pos, world_from_agent)
-    # all_other_agents_curr_yaw_world = agent_yaw_rad + all_other_agents_curr_yaw
-    #
-    # num_agents = all_other_agents_curr_pos.shape[0]
-    # all_other_agent_from_agent = np.zeros((num_agents, 3, 3))
-    # for i in range(num_agents):
-    #     world_from_other_agent = compute_agent_pose(
-    #         all_other_agents_curr_pos_world[i],
-    #         all_other_agents_curr_yaw_world[i]
-    #     ).astype(np.float64)
-    #     other_agent_from_world = np.linalg.inv(world_from_other_agent)
-    #     all_other_agent_from_agent[i] = other_agent_from_world @ world_from_agent
-    #
-    # vectorized_features["all_other_agents_future_positions_from_self"] = transform_points(
-    #     vectorized_features["all_other_agents_future_positions"],
-    #     all_other_agent_from_agent
-    # )
-    # vectorized_features["all_other_agents_future_yaws_from_self"] = angular_distance(
-    #     vectorized_features["all_other_agents_future_yaws"],
-    #     all_other_agents_curr_yaw[:, np.newaxis]
-    # )
-    # vectorized_features["all_other_agents_from_agent"] = all_other_agent_from_agent
-
     return {**frame_info, **vectorized_features}
 
 
