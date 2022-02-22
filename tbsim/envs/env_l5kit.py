@@ -19,7 +19,16 @@ from tbsim.utils.timer import Timers
 
 
 class EnvL5KitSimulation(BaseEnv, BatchedEnv):
-    def __init__(self, env_config, num_scenes, dataset, seed=0, prediction_only=False):
+    def __init__(
+            self,
+            env_config,
+            num_scenes,
+            dataset,
+            seed=0,
+            prediction_only=False,
+            compute_metrics=True,
+            skimp_rollout=False
+    ):
         """
         A gym-like interface for simulating traffic behaviors (both ego and other agents) with L5Kit's SimulationDataset
 
@@ -59,11 +68,14 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         self.timers = Timers()
 
-        self._metrics = dict(
-            ego_off_road_rate=EnvMetrics.OffRoadRate(),
-            agents_off_road_rate=EnvMetrics.OffRoadRate(),
-            all_collision_rate=EnvMetrics.CollisionRate()
-        )
+        self._metrics = dict()
+        if compute_metrics:
+            self._metrics = dict(
+                ego_off_road_rate=EnvMetrics.OffRoadRate(),
+                agents_off_road_rate=EnvMetrics.OffRoadRate(),
+                all_collision_rate=EnvMetrics.CollisionRate()
+            )
+        self._skimp = skimp_rollout
 
     def reset(self, scene_indices: List = None):
         """
@@ -324,7 +336,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self.timers.tic("update")
         if step_actions.has_ego:
             ego_obs = dict(obs["ego"])
-            ego_obs.pop("image")  # reduce memory consumption
+            ego_obs.pop("image", None)  # reduce memory consumption
             if should_update:
                 # update the next frame's ego position and orientation using control input
                 ClosedLoopSimulator.update_ego(
@@ -343,7 +355,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         if step_actions.has_agents:
             agent_obs = dict(obs["agents"])
-            agent_obs.pop("image")  # reduce memory consumption
+            agent_obs.pop("image", None)  # reduce memory consumption
             if should_update:
                 # update the next frame's agent positions and orientations using control input
                 ClosedLoopSimulator.update_agents(
@@ -368,6 +380,10 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             self._frame_index += 1
         # print(self.timers)
 
+    def set_dataset_skimp_mode(self, skimp):
+        for scene_ds in self._current_scene_dataset.scene_dataset_batch.values():
+            scene_ds.set_skimp(skimp)
+
     def step(self, actions, num_steps_to_take: int = 1, render=False):
         """
         Step the simulation with control inputs
@@ -388,6 +404,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         ego_actions_world = None
         agents_actions_world = None
 
+        self.set_dataset_skimp_mode(self._skimp)
         # TODO: transform plans too
         if actions.has_ego:
             ego_actions_world = actions.ego.transform(
@@ -434,6 +451,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
             self._step(step_actions=step_actions)
 
+        self.set_dataset_skimp_mode(False)
         return renderings
 
     def get_episode_experience(self):

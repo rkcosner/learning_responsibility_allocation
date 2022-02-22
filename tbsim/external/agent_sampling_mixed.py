@@ -43,8 +43,10 @@ def generate_agent_sample_mixed(
     vectorizer: Vectorizer,
     rasterizer: Rasterizer,
     render_context: RenderContext,
+    timer,
     perturbation: Optional[Perturbation] = None,
     vectorize_lane=False,
+    skimp_fn=False,
 ) -> dict:
     """Generates the inputs and targets to train a deep prediction model with vectorized inputs.
     A deep prediction model takes as input the state of the world in vectorized form,
@@ -79,23 +81,25 @@ def generate_agent_sample_mixed(
         the future yaw angular offset, the future_availability as a binary mask,
         the vectorized input representation features, and (optional) a raster image
     """
+    timer.tic("sample")
+    with timer.timed("get_agent_context"):
+        history_num_frames_max = max(history_num_frames_ego, history_num_frames_agents)
+        (
+            history_frames,
+            future_frames,
+            history_agents,
+            future_agents,
+            history_tl_faces,
+            future_tl_faces,
+        ) = get_agent_context(
+            state_index,
+            frames,
+            agents,
+            tl_faces,
+            history_num_frames_max,
+            future_num_frames,
+        )
 
-    history_num_frames_max = max(history_num_frames_ego, history_num_frames_agents)
-    (
-        history_frames,
-        future_frames,
-        history_agents,
-        future_agents,
-        history_tl_faces,
-        future_tl_faces,
-    ) = get_agent_context(
-        state_index,
-        frames,
-        agents,
-        tl_faces,
-        history_num_frames_max,
-        future_num_frames,
-    )
 
     if perturbation is not None and len(future_frames) == future_num_frames:
         history_frames, future_frames = perturbation.perturb(
@@ -132,7 +136,10 @@ def generate_agent_sample_mixed(
         agent_type_idx = np.argmax(agent["label_probabilities"])
         selected_agent = agent
 
-    input_im = rasterizer.rasterize(history_frames, history_agents, history_tl_faces, selected_agent)
+    with timer.timed("rasterize"):
+        rasterizer_out = dict()
+        if not skimp_fn():
+            rasterizer_out["image"] = rasterizer.rasterize(history_frames, history_agents, history_tl_faces, selected_agent)
 
     raster_from_world = render_context.raster_from_world(
         agent_centroid_m, agent_yaw_rad
@@ -144,36 +151,37 @@ def generate_agent_sample_mixed(
     raster_from_agent = raster_from_world @ world_from_agent
     agent_from_raster = np.linalg.inv(raster_from_agent)
 
-    (
-        future_coords_offset,
-        future_yaws_offset,
-        future_extents,
-        future_availability,
-    ) = get_relative_poses(
-        future_num_frames,
-        future_frames,
-        selected_track_id,
-        future_agents,
-        agent_from_world,
-        agent_yaw_rad,
-    )
+    with timer.timed("get_future_history"):
+        (
+            future_coords_offset,
+            future_yaws_offset,
+            future_extents,
+            future_availability,
+        ) = get_relative_poses(
+            future_num_frames,
+            future_frames,
+            selected_track_id,
+            future_agents,
+            agent_from_world,
+            agent_yaw_rad,
+        )
 
-    # For vectorized version we require both ego and agent history to be a Tensor of same length
-    # => fetch history_num_frames_max for both, and later zero out frames exceeding the set history length.
-    # Use history_num_frames_max + 1 because it also includes the current frame.
-    (
-        history_coords_offset,
-        history_yaws_offset,
-        history_extents,
-        history_availability,
-    ) = get_relative_poses(
-        history_num_frames_max + 1,
-        history_frames,
-        selected_track_id,
-        history_agents,
-        agent_from_world,
-        agent_yaw_rad,
-    )
+        # For vectorized version we require both ego and agent history to be a Tensor of same length
+        # => fetch history_num_frames_max for both, and later zero out frames exceeding the set history length.
+        # Use history_num_frames_max + 1 because it also includes the current frame.
+        (
+            history_coords_offset,
+            history_yaws_offset,
+            history_extents,
+            history_availability,
+        ) = get_relative_poses(
+            history_num_frames_max + 1,
+            history_frames,
+            selected_track_id,
+            history_agents,
+            agent_from_world,
+            agent_yaw_rad,
+        )
 
     history_coords_offset[history_num_frames_ego + 1 :] *= 0
     history_yaws_offset[history_num_frames_ego + 1 :] *= 0
@@ -186,7 +194,6 @@ def generate_agent_sample_mixed(
     frame_info = {
         "extent": agent_extent_m,
         "type": agent_type_idx,
-        "image": input_im,
         "raster_from_agent": raster_from_agent,
         "agent_from_raster": agent_from_raster,
         "raster_from_world": raster_from_world,
@@ -206,59 +213,64 @@ def generate_agent_sample_mixed(
         "curr_speed": np.linalg.norm(history_vels_mps[0]),
     }
 
-    vectorized_features = vectorizer.vectorize(
-        selected_track_id,
-        agent_centroid_m,
-        agent_yaw_rad,
-        agent_from_world,
-        history_frames,
-        history_agents,
-        history_tl_faces,
-        history_coords_offset,
-        history_yaws_offset,
-        history_availability,
-        future_frames,
-        future_agents,
-    )
-    if vectorize_lane:
-        other_agents_idx = np.where(
-            vectorized_features["all_other_agents_history_availability"][:, 0]
-            & (vectorized_features["all_other_agents_types"] >= 3)
-            & (vectorized_features["all_other_agents_types"] <= 13)
-        )[0]
-        available_other_pos = vectorized_features["all_other_agents_history_positions"][
-            other_agents_idx, 0
-        ]
-        available_other_yaw = vectorized_features["all_other_agents_history_yaws"][
-            other_agents_idx, 0
-        ]
-        local_pos = np.vstack((np.zeros([1, 2]), available_other_pos))
-        local_yaw = np.vstack((np.zeros([1, 1]), available_other_yaw))
-        world_pos = transform_points(local_pos, world_from_agent)
-        world_yaw = (local_yaw + agent_yaw_rad + np.pi) % (2 * np.pi) - np.pi
+    with timer.timed("vectorize"):
+        if not skimp_fn():
+            vectorized_features = vectorizer.vectorize(
+                selected_track_id,
+                agent_centroid_m,
+                agent_yaw_rad,
+                agent_from_world,
+                history_frames,
+                history_agents,
+                history_tl_faces,
+                history_coords_offset,
+                history_yaws_offset,
+                history_availability,
+                future_frames,
+                future_agents,
+            )
+        else:
+            vectorized_features = dict()
+    # if vectorize_lane:
+    #     other_agents_idx = np.where(
+    #         vectorized_features["all_other_agents_history_availability"][:, 0]
+    #         & (vectorized_features["all_other_agents_types"] >= 3)
+    #         & (vectorized_features["all_other_agents_types"] <= 13)
+    #     )[0]
+    #     available_other_pos = vectorized_features["all_other_agents_history_positions"][
+    #         other_agents_idx, 0
+    #     ]
+    #     available_other_yaw = vectorized_features["all_other_agents_history_yaws"][
+    #         other_agents_idx, 0
+    #     ]
+    #     local_pos = np.vstack((np.zeros([1, 2]), available_other_pos))
+    #     local_yaw = np.vstack((np.zeros([1, 1]), available_other_yaw))
+    #     world_pos = transform_points(local_pos, world_from_agent)
+    #     world_yaw = (local_yaw + agent_yaw_rad + np.pi) % (2 * np.pi) - np.pi
+    #
+    #     agent_lanes = get_lane_info(
+    #         agent_yaw_rad,
+    #         vectorizer,
+    #         world_pos,
+    #         world_yaw,
+    #         local_pos,
+    #         local_yaw,
+    #         world_from_agent,
+    #         agent_from_world,
+    #     )
+    #     ego_lanes = agent_lanes[0]
+    #     all_other_agents_lanes = np.zeros(
+    #         [
+    #             vectorized_features["all_other_agents_history_positions"].shape[0],
+    #             *agent_lanes.shape[1:],
+    #         ]
+    #     )
+    #     all_other_agents_lanes[other_agents_idx] = agent_lanes[1:]
+    #     frame_info["ego_lanes"] = ego_lanes
+    #     frame_info["all_other_agents_lanes"] = all_other_agents_lanes
+    timer.toc("sample")
 
-        agent_lanes = get_lane_info(
-            agent_yaw_rad,
-            vectorizer,
-            world_pos,
-            world_yaw,
-            local_pos,
-            local_yaw,
-            world_from_agent,
-            agent_from_world,
-        )
-        ego_lanes = agent_lanes[0]
-        all_other_agents_lanes = np.zeros(
-            [
-                vectorized_features["all_other_agents_history_positions"].shape[0],
-                *agent_lanes.shape[1:],
-            ]
-        )
-        all_other_agents_lanes[other_agents_idx] = agent_lanes[1:]
-        frame_info["ego_lanes"] = ego_lanes
-        frame_info["all_other_agents_lanes"] = all_other_agents_lanes
-
-    return {**frame_info, **vectorized_features}
+    return {**frame_info, **vectorized_features, **rasterizer_out}
 
 
 def get_lane_info(
