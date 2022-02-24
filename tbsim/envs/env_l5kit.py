@@ -4,15 +4,18 @@ from typing import List, Dict
 from torch.utils.data.dataloader import default_collate
 from collections import OrderedDict
 
-from l5kit.simulation.dataset import SimulationConfig, SimulationDataset
 from l5kit.simulation.unroll import ClosedLoopSimulator, SimulationOutput
 from l5kit.cle.metrics import DisplacementErrorL2Metric
 from l5kit.geometry import transform_points, rotation33_as_yaw
 from l5kit.data import filter_agents_by_frames
+from l5kit.rasterization import build_rasterizer
+from l5kit.data import LocalDataManager
+from l5kit.rasterization import Rasterizer, RenderContext
 
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.utils.vis_utils import render_state_l5kit
 from tbsim.envs.base import BaseEnv, BatchedEnv, SimulationException
+from tbsim.external.simulation_dataset import SimulationDataset, SimulationConfig
 from tbsim.utils.env_utils import RolloutAction, Action
 import tbsim.envs.env_metrics as EnvMetrics
 from tbsim.utils.timer import Timers
@@ -27,7 +30,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             seed=0,
             prediction_only=False,
             compute_metrics=True,
-            skimp_rollout=False
+            skimp_rollout=False,
+            renderer=None
     ):
         """
         A gym-like interface for simulating traffic behaviors (both ego and other agents) with L5Kit's SimulationDataset
@@ -50,7 +54,12 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self.generate_agent_obs = env_config.get("generate_agent_obs", True)
         self._npr = np.random.RandomState(seed=seed)
         self.dataset = dataset
-        self.rasterizer = dataset.rasterizer
+
+        if renderer is not None:
+            self.render_rasterizer = renderer
+        else:
+            self.render_rasterizer = dataset.rasterizer
+
         self._num_total_scenes = len(dataset.dataset.scenes)
         self._num_scenes = num_scenes
 
@@ -205,6 +214,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self.timers.tic("get_obs")
         # Get agent observations
         if self.generate_agent_obs:
+            # agent_obs = self._current_scene_dataset.rasterise_agents_frame_batch(self._frame_index)
             if self._current_agent_track_ids is None:
                 agent_obs = self._current_scene_dataset.rasterise_agents_frame_batch(self._frame_index)
                 self._current_agent_track_ids = agent_obs.keys()  # [scene_index, track_id]
@@ -283,7 +293,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             metrics_to_vis.update(coll_count)
         for i, si in enumerate(self.current_scene_indices):
             im = render_state_l5kit(
-                rasterizer=self.rasterizer,
+                rasterizer=self.render_rasterizer,
                 state_obs=self.get_observation(),
                 action=actions_to_take,
                 scene_index=i,

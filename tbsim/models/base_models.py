@@ -883,8 +883,8 @@ class ConditionDecoder(nn.Module):
         super(ConditionDecoder, self).__init__()
         self.decoder_model = decoder_model
 
-    def forward(self, latents, condition_features):
-        return self.decoder_model(torch.cat((latents, condition_features), dim=-1))
+    def forward(self, latents, condition_features, **decoder_kwargs):
+        return self.decoder_model(torch.cat((latents, condition_features), dim=-1), **decoder_kwargs)
 
 
 class TrajectoryDecoder(nn.Module):

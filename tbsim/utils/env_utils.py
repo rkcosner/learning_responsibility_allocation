@@ -51,6 +51,7 @@ def rollout_episodes(
         counter = 0
         frames = []
         while not done:
+            timers.tic("step")
             with timers.timed("obs"):
                 obs = env.get_observation()
             with timers.timed("to_torch"):
@@ -64,13 +65,14 @@ def rollout_episodes(
                 with timers.timed("network"):
                     action = policy.get_action(obs)
 
-                with timers.timed("step"):
+                with timers.timed("env_step"):
                     ims = env.step(
                         action, num_steps_to_take=n_step_action, render=render
                     )  # List of [num_scene, h, w, 3]
                 if render:
                     frames.extend(ims)
-            # print(timers)
+            timers.toc("step")
+            print(timers)
 
             done = env.is_done()
             counter += 1
