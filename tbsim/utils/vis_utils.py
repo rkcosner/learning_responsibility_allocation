@@ -14,60 +14,14 @@ from PIL import Image, ImageDraw
 COLORS = {
     "agent_contour": "#247BA0",
     "agent_fill": "#56B1D8",
-    "ego_contour": "#247BA0",
-    "ego_fill": "#56B1D8",
+    "ego_contour": "#911A12",
+    "ego_fill": "#FE5F55",
 }
 
 
 def agent_to_raster_np(pt_tensor, trans_mat):
     pos_raster = transform_points(pt_tensor[None], trans_mat)[0]
     return pos_raster
-
-
-def _render_state(
-        state_image,
-        trans_mat,
-        title="",
-        text=None,
-        pred_actions=None,
-        gt_actions=None,
-        pred_plan=None,
-        gt_plan=None,
-        pred_plan_info=None
-):
-    fig = Figure(figsize=(10, 8), dpi=100)
-    canvas = FigureCanvasAgg(fig)
-    if text is not None:
-        fig.text(x=10, y=10, s=text)
-    ax = fig.add_subplot(121)
-    ax.imshow(state_image)
-    fig.suptitle(title)
-
-    if pred_actions is not None:
-        raster_traj = agent_to_raster_np(pred_actions["positions"], trans_mat)
-        ax.plot(raster_traj[:-1, 0], raster_traj[:-1, 1], color="red")
-
-    if gt_actions is not None:
-        raster_traj = agent_to_raster_np(gt_actions["positions"], trans_mat)
-        ax.plot(raster_traj[:, 0], raster_traj[:, 1], color="blue")
-
-    if pred_plan is not None:
-        # predicted subgoal
-        pos_raster = agent_to_raster_np(pred_plan["positions"], trans_mat)[[-1]]
-        ax.scatter(pos_raster[:, 0], pos_raster[:, 1], marker='o', color="red")
-
-    if gt_plan is not None:
-        pos_raster = agent_to_raster_np(gt_plan["positions"], trans_mat)[[-1]]
-        ax.scatter(pos_raster[:, 0], pos_raster[:, 1], marker='o', color="blue")
-
-    # visualize plan heat map
-    if pred_plan_info is not None and "location_map" in pred_plan_info:
-        ax = fig.add_subplot(122)
-        ax.imshow(pred_plan_info["location_map"])
-
-    canvas.draw()
-    im = np.asarray(canvas.buffer_rgba())[:, :, :3]
-    return im
 
 
 def _render_draw(
@@ -85,13 +39,15 @@ def _render_draw(
     draw = ImageDraw.Draw(im)
     if pred_actions is not None:
         raster_traj = agent_to_raster_np(pred_actions["positions"], trans_mat)
-        draw.line(raster_traj[:-1].reshape(-1).tolist(), fill="red", width=3, joint="curve")
+        for point in raster_traj:
+            circle = np.hstack([point - 3, point + 3])
+            draw.ellipse(circle.tolist(), fill="#FE5F55", outline="#911A12")
 
     if pred_plan is not None:
         # predicted subgoal
         pos_raster = agent_to_raster_np(pred_plan["positions"], trans_mat)[-1]
-        circle = np.hstack([pos_raster - 5, pos_raster + 5])
-        draw.ellipse(circle.tolist(), fill="red")
+        circle = np.hstack([pos_raster - 8, pos_raster + 8])
+        draw.ellipse(circle.tolist(), fill="#FF6B35")
 
     im = np.asarray(im)
 
@@ -99,7 +55,6 @@ def _render_draw(
     if pred_plan_info is not None and "location_map" in pred_plan_info:
         import matplotlib.pyplot as plt
 
-        # Get the color map by name:
         cm = plt.get_cmap("jet")
         heatmap = pred_plan_info["location_map"]
         heatmap = heatmap - heatmap.min()
@@ -109,7 +64,11 @@ def _render_draw(
         heatmap = Image.fromarray((heatmap * 255).astype(np.uint8))
         heatmap = heatmap.resize(size=im.shape[:2])
         heatmap = np.asarray(heatmap)[..., :3]
-        im = np.concatenate((im, heatmap), axis=1)
+        padding = np.ones((im.shape[0], 200, 3), dtype=np.uint8) * 255
+
+        composite = heatmap.astype(np.float32) * 0.3 + im.astype(np.float32) * 0.7
+        composite = composite.astype(np.uint8)
+        im = np.concatenate((im, padding, heatmap, padding, composite), axis=1)
 
     return im
 
@@ -155,8 +114,8 @@ def _get_state_image(ego_obs, agents_obs, rasterizer):
         ego_obs["yaw"][None, None],
         ego_obs["extent"][None, :2],
         raster_from_world,
-        outline_color=COLORS["agent_contour"],
-        fill_color=COLORS["agent_fill"]
+        outline_color=COLORS["ego_contour"],
+        fill_color=COLORS["ego_fill"]
     )
 
     return state_im, raster_from_agent

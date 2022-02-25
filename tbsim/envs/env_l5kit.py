@@ -142,7 +142,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
     def get_info(self):
         return {
             "l5_sim_states": self._get_l5_sim_states(),
-            "l5_scene_indices": self.current_scene_indices,
+            "scene_index": self.current_scene_indices,
             "experience": self.get_episode_experience()
         }
 
@@ -420,6 +420,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             ego_actions_world = actions.ego.transform(
                 trans_mats=obs["ego"]["world_from_agent"], rot_rads=obs["ego"]["yaw"][..., None, None]
             )
+            if actions.ego_info is not None and "plan" in actions.ego_info:
+                ego_plan_world = transform_points(actions.ego_info["plan"]["positions"], obs["ego"]["world_from_agent"])
         if actions.has_agents:
             agents_actions_world = actions.agents.transform(
                 trans_mats=obs["agents"]["world_from_agent"], rot_rads=obs["agents"]["yaw"][..., None, None]
@@ -440,6 +442,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                 ego_actions_step = ego_actions_world_step.transform(
                     trans_mats=obs["ego"]["agent_from_world"], rot_rads= - obs["ego"]["yaw"][..., None, None]
                 )
+                if actions.ego_info is not None and "plan" in actions.ego_info:
+                    actions.ego_info["plan"]["positions"] = transform_points(ego_plan_world, obs["ego"]["agent_from_world"])
 
             if agents_actions_world is not None:
                 agents_actions_world_step = Action.from_dict(

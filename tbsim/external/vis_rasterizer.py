@@ -28,9 +28,12 @@ COLORS = {
     TLFacesColors.GREEN.name: (0, 255, 0),
     TLFacesColors.RED.name: (255, 0, 0),
     TLFacesColors.YELLOW.name: (255, 255, 0),
-    RasterEls.LANE_NOTL.name: (255, 217, 82),
-    RasterEls.ROAD.name: (17, 17, 31),
-    RasterEls.CROSSWALK.name: (255, 117, 69),
+    # RasterEls.LANE_NOTL.name: (255, 217, 82),
+    RasterEls.LANE_NOTL.name: (164, 184, 196),
+    # RasterEls.ROAD.name: (17, 17, 31),
+    RasterEls.ROAD.name: (200, 211, 213),
+    RasterEls.CROSSWALK.name: (96, 117, 138),
+    # RasterEls.CROSSWALK.name: (255, 117, 69),
 }
 
 
@@ -117,7 +120,9 @@ class VisualizationRasterizer(object):
 
         """
 
-        img = 255 * np.ones(shape=(self.raster_size[1], self.raster_size[0], 3), dtype=np.uint8)
+        img = np.ones(shape=(self.raster_size[1], self.raster_size[0], 3))
+        img *= [[[37, 40, 61]]]
+        img = img.astype(np.uint8)
 
         # filter using half a radius from the center
         raster_radius = float(np.linalg.norm(self.raster_size * self.pixel_size)) / 2
