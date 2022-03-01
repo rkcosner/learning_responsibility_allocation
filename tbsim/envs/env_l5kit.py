@@ -13,7 +13,7 @@ from l5kit.data import LocalDataManager
 from l5kit.rasterization import Rasterizer, RenderContext
 
 import tbsim.utils.tensor_utils as TensorUtils
-from tbsim.utils.vis_utils import render_state_l5kit
+from tbsim.utils.vis_utils import render_state_l5kit_agents_view, render_state_l5kit_ego_view
 from tbsim.envs.base import BaseEnv, BatchedEnv, SimulationException
 from tbsim.external.simulation_dataset import SimulationDataset, SimulationConfig
 from tbsim.utils.env_utils import RolloutAction, Action
@@ -124,12 +124,19 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             self._ego_states[k] = []
             self._agents_states[k] = []
 
-    def get_random_ego_actions(self):
+    def get_random_action(self):
         ac = self._npr.randn(self._num_scenes, 1, 3)
-        return Action(
+        ego = Action(
             positions=ac[:, :, :2],
             yaws=ac[:, :, 2:3]
         )
+        ac = self._npr.randn(len(self._current_agent_track_ids), 1, 3)
+        agents = Action(
+            positions=ac[:, :, :2],
+            yaws=ac[:, :, 2:3]
+        )
+
+        return RolloutAction(ego=ego, agents=agents)
 
     @property
     def current_scene_indices(self):
@@ -221,7 +228,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             else:
                 agent_obs = OrderedDict()
                 for scene_index, track_id in self._current_agent_track_ids:
-                    ao = self.get_observation_by_index(
+                    ao = self._get_observation_by_index(
                         scene_index=scene_index,
                         frame_index=self._frame_index,
                         agent_track_ids=[track_id],
@@ -245,7 +252,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         return self._cached_observation
 
-    def get_observation_by_index(self, scene_index, frame_index, agent_track_ids, collate=True):
+    def _get_observation_by_index(self, scene_index, frame_index, agent_track_ids, collate=True):
         agents_dict = OrderedDict()
         dataset = self._current_scene_dataset.scene_dataset_batch[scene_index]
         frame = dataset.dataset.frames[frame_index]
@@ -270,9 +277,10 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         if obs is None:
             return None
 
-        combined = dict()
-        for k in obs["ego"].keys():
-            combined[k] = np.concatenate((obs["ego"][k], obs["agents"][k]), axis=0)
+        combined = obs["ego"]
+        if obs["agents"] is not None:
+            for k in obs["ego"].keys():
+                combined[k] = np.concatenate((obs["ego"][k], obs["agents"][k]), axis=0)
         return combined
 
     def is_done(self):
@@ -285,18 +293,11 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
     def render(self, actions_to_take: RolloutAction, **kwargs):
         ims = []
         metrics_to_vis = dict()
-        if "all_collision_rate" in self._metrics:
-            _, coll_count = self._metrics["all_collision_rate"].compute_per_step(
-                self.combine_observations(self.get_observation()),
-                all_scene_index=self.current_scene_indices
-            )
-            metrics_to_vis.update(coll_count)
         for i, si in enumerate(self.current_scene_indices):
-            im = render_state_l5kit(
+            im = render_state_l5kit_ego_view(
                 rasterizer=self.render_rasterizer,
                 state_obs=self.get_observation(),
                 action=actions_to_take,
-                scene_index=i,
                 step_index=self._frame_index,
                 dataset_scene_index=si,
                 step_metrics=TensorUtils.map_ndarray(metrics_to_vis, lambda x: x[i]),
@@ -415,7 +416,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         agents_actions_world = None
 
         self.set_dataset_skimp_mode(self._skimp)
-        # TODO: transform plans too
         if actions.has_ego:
             ego_actions_world = actions.ego.transform(
                 trans_mats=obs["ego"]["world_from_agent"], rot_rads=obs["ego"]["yaw"][..., None, None]
@@ -433,33 +433,27 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                 break
 
             obs = self.get_observation()
-            ego_actions_step = None
-            agents_actions_step = None
+            step_actions = RolloutAction()
             if ego_actions_world is not None:
                 ego_actions_world_step = Action.from_dict(
                     TensorUtils.map_ndarray(ego_actions_world.to_dict(), lambda x: x[..., step_i:, :])
                 )
-                ego_actions_step = ego_actions_world_step.transform(
+                step_actions.ego = ego_actions_world_step.transform(
                     trans_mats=obs["ego"]["agent_from_world"], rot_rads= - obs["ego"]["yaw"][..., None, None]
                 )
                 if actions.ego_info is not None and "plan" in actions.ego_info:
-                    actions.ego_info["plan"]["positions"] = transform_points(ego_plan_world, obs["ego"]["agent_from_world"])
+                    step_actions.ego_info = dict(plan=dict())
+                    step_actions.ego_info["plan"]["positions"] = transform_points(ego_plan_world, obs["ego"]["agent_from_world"])
 
             if agents_actions_world is not None:
                 agents_actions_world_step = Action.from_dict(
                     TensorUtils.map_ndarray(agents_actions_world.to_dict(), lambda x: x[..., step_i:, :])
                 )
-                agents_actions_step = agents_actions_world_step.transform(
+                step_actions.agents = agents_actions_world_step.transform(
                     trans_mats=obs["agents"]["agent_from_world"], rot_rads= - obs["agents"]["yaw"][..., None, None]
                 )
+                step_actions.agents_info = actions.agents_info
 
-            step_actions = RolloutAction(
-                ego=ego_actions_step,
-                agents=agents_actions_step,
-                ego_info=actions.ego_info,
-                agents_info=actions.agents_info
-
-            )
             if render:
                 renderings.append(self.render(actions_to_take=step_actions))
 
