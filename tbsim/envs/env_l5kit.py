@@ -395,7 +395,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         for scene_ds in self._current_scene_dataset.scene_dataset_batch.values():
             scene_ds.set_skimp(skimp)
 
-    def step(self, actions, num_steps_to_take: int = 1, render=False):
+    def step(self, actions: RolloutAction, num_steps_to_take: int = 1, render=False):
         """
         Step the simulation with control inputs
 
@@ -405,6 +405,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             render (bool): whether to render state and actions and return renderings
         """
 
+        self.set_dataset_skimp_mode(self._skimp)
         if self.is_done():
             raise SimulationException("Simulation episode has ended")
 
@@ -412,49 +413,31 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         actions = actions.to_numpy()
         # Convert ego actions to world frame
         obs = self.get_observation()
-        ego_actions_world = None
-        agents_actions_world = None
-
-        self.set_dataset_skimp_mode(self._skimp)
-        if actions.has_ego:
-            ego_actions_world = actions.ego.transform(
-                trans_mats=obs["ego"]["world_from_agent"], rot_rads=obs["ego"]["yaw"][..., None, None]
-            )
-            if actions.ego_info is not None and "plan" in actions.ego_info:
-                ego_plan_world = transform_points(actions.ego_info["plan"]["positions"], obs["ego"]["world_from_agent"])
-        if actions.has_agents:
-            agents_actions_world = actions.agents.transform(
-                trans_mats=obs["agents"]["world_from_agent"], rot_rads=obs["agents"]["yaw"][..., None, None]
-            )
-
+        actions_world = actions.transform(
+            ego_trans_mats=obs["ego"]["world_from_agent"],
+            ego_rot_rads=obs["ego"]["yaw"][..., None, None],
+            agents_trans_mats=obs["agents"]["world_from_agent"] if self.generate_agent_obs else None,
+            agents_rot_rads=obs["agents"]["yaw"][..., None, None] if self.generate_agent_obs else None
+        )
         renderings = []
         for step_i in range(num_steps_to_take):
             if self.is_done():
                 break
 
             obs = self.get_observation()
-            step_actions = RolloutAction()
-            if ego_actions_world is not None:
-                ego_actions_world_step = Action.from_dict(
-                    TensorUtils.map_ndarray(ego_actions_world.to_dict(), lambda x: x[..., step_i:, :])
-                )
-                step_actions.ego = ego_actions_world_step.transform(
-                    trans_mats=obs["ego"]["agent_from_world"], rot_rads= - obs["ego"]["yaw"][..., None, None]
-                )
-                if actions.ego_info is not None and "plan" in actions.ego_info:
-                    step_actions.ego_info = dict(plan=dict())
-                    step_actions.ego_info["plan"]["positions"] = transform_points(ego_plan_world, obs["ego"]["agent_from_world"])
-
-            if agents_actions_world is not None:
-                agents_actions_world_step = Action.from_dict(
-                    TensorUtils.map_ndarray(agents_actions_world.to_dict(), lambda x: x[..., step_i:, :])
-                )
-                step_actions.agents = agents_actions_world_step.transform(
-                    trans_mats=obs["agents"]["agent_from_world"], rot_rads= - obs["agents"]["yaw"][..., None, None]
-                )
-                step_actions.agents_info = actions.agents_info
+            step_actions_world = RolloutAction.from_dict(
+                TensorUtils.map_ndarray(actions_world.to_dict(), lambda x: x[:, step_i:])
+            )
+            step_actions = step_actions_world.transform(
+                ego_trans_mats=obs["ego"]["agent_from_world"],
+                ego_rot_rads= - obs["ego"]["yaw"][..., None, None],
+                agents_trans_mats=obs["agents"]["agent_from_world"] if self.generate_agent_obs else None,
+                agents_rot_rads= - obs["agents"]["yaw"][..., None, None] if self.generate_agent_obs else None
+            )
 
             if render:
+                if step_actions.ego_info is not None and "plan_info" in step_actions.ego_info:
+                    step_actions.ego_info["plan_info"] = actions.ego_info["plan_info"]
                 renderings.append(self.render(actions_to_take=step_actions))
 
             self._step(step_actions=step_actions)

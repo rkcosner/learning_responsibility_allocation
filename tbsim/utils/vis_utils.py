@@ -61,7 +61,7 @@ def draw_actions(
         heatmap = cm(heatmap)
 
         heatmap = Image.fromarray((heatmap * 255).astype(np.uint8))
-        heatmap = heatmap.resize(size=im.shape[:2])
+        heatmap = heatmap.resize(size=(im.shape[1], im.shape[0]))
         heatmap = np.asarray(heatmap)[..., :3]
         padding = np.ones((im.shape[0], 200, 3), dtype=np.uint8) * 255
 
