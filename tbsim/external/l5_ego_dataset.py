@@ -93,7 +93,8 @@ class EgoDatasetMixed(BaseEgoDataset):
         with self.timer.timed("get_frame"):
             data = super().get_frame(scene_index, state_index, track_id=track_id)
         # TODO (@lberg): this should not be here but in the rasterizer
-        data["image"] = data["image"].transpose(2, 0, 1)  # 0,1,C -> C,0,1
+        if "image" in data:
+            data["image"] = data["image"].transpose(2, 0, 1)  # 0,1,C -> C,0,1
         return data
 
 

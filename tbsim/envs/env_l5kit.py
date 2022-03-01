@@ -29,7 +29,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             dataset,
             seed=0,
             prediction_only=False,
-            compute_metrics=True,
+            compute_metrics=False,
             skimp_rollout=False,
             renderer=None
     ):
@@ -221,20 +221,20 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self.timers.tic("get_obs")
         # Get agent observations
         if self.generate_agent_obs:
-            # agent_obs = self._current_scene_dataset.rasterise_agents_frame_batch(self._frame_index)
-            if self._current_agent_track_ids is None:
-                agent_obs = self._current_scene_dataset.rasterise_agents_frame_batch(self._frame_index)
-                self._current_agent_track_ids = agent_obs.keys()  # [scene_index, track_id]
-            else:
-                agent_obs = OrderedDict()
-                for scene_index, track_id in self._current_agent_track_ids:
-                    ao = self._get_observation_by_index(
-                        scene_index=scene_index,
-                        frame_index=self._frame_index,
-                        agent_track_ids=[track_id],
-                        collate=False
-                    )
-                    agent_obs.update(ao)
+            agent_obs = self._current_scene_dataset.rasterise_agents_frame_batch(self._frame_index)
+            # if self._current_agent_track_ids is None:
+            #     agent_obs = self._current_scene_dataset.rasterise_agents_frame_batch(self._frame_index)
+            #     self._current_agent_track_ids = agent_obs.keys()  # [scene_index, track_id]
+            # else:
+            #     agent_obs = OrderedDict()
+            #     for scene_index, track_id in self._current_agent_track_ids:
+            #         ao = self._get_observation_by_index(
+            #             scene_index=scene_index,
+            #             frame_index=self._frame_index,
+            #             agent_track_ids=[track_id],
+            #             collate=False
+            #         )
+            #         agent_obs.update(ao)
 
             if len(agent_obs) > 0:
                 agent_obs = default_collate(list(agent_obs.values()))
@@ -277,7 +277,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         if obs is None:
             return None
 
-        combined = obs["ego"]
+        combined = dict(obs["ego"])
         if obs["agents"] is not None:
             for k in obs["ego"].keys():
                 combined[k] = np.concatenate((obs["ego"][k], obs["agents"][k]), axis=0)
@@ -419,15 +419,31 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             agents_trans_mats=obs["agents"]["world_from_agent"] if self.generate_agent_obs else None,
             agents_rot_rads=obs["agents"]["yaw"][..., None, None] if self.generate_agent_obs else None
         )
+        if actions.has_agents:
+            agent_track_ids = obs["agents"]["track_id"].tolist()
+
         renderings = []
         for step_i in range(num_steps_to_take):
             if self.is_done():
                 break
 
             obs = self.get_observation()
+            actions_world_d = actions_world.to_dict()
+            if actions.has_agents:
+                # some agents might get dropped in the middle, filter agent actions by active agent track ids
+                step_agent_track_ids = obs["agents"]["track_id"]
+                active_agent_index = np.array([agent_track_ids.index(tid) for tid in step_agent_track_ids])
+                actions_world_d["agents"] = TensorUtils.map_ndarray(
+                    actions_world_d["agents"], lambda x: x[active_agent_index]
+                )
+                actions_world_d["agents_info"] = TensorUtils.map_ndarray(
+                    actions_world_d["agents_info"], lambda x: x[active_agent_index]
+                )
+
             step_actions_world = RolloutAction.from_dict(
-                TensorUtils.map_ndarray(actions_world.to_dict(), lambda x: x[:, step_i:])
+                TensorUtils.map_ndarray(actions_world_d, lambda x: x[:, step_i:])
             )
+
             step_actions = step_actions_world.transform(
                 ego_trans_mats=obs["ego"]["agent_from_world"],
                 ego_rot_rads= - obs["ego"]["yaw"][..., None, None],
