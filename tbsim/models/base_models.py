@@ -883,8 +883,8 @@ class ConditionDecoder(nn.Module):
         super(ConditionDecoder, self).__init__()
         self.decoder_model = decoder_model
 
-    def forward(self, latents, condition_features):
-        return self.decoder_model(torch.cat((latents, condition_features), dim=-1))
+    def forward(self, latents, condition_features, **decoder_kwargs):
+        return self.decoder_model(torch.cat((latents, condition_features), dim=-1), **decoder_kwargs)
 
 
 class TrajectoryDecoder(nn.Module):
@@ -915,31 +915,34 @@ class TrajectoryDecoder(nn.Module):
         self.state_dim = state_dim
         self.num_steps = num_steps
         self.step_time = step_time
-        self._create_dynamics(dynamics_type, dynamics_kwargs)
-        self._create_networks(network_kwargs)
+        self._network_kwargs = network_kwargs
+        self._dynamics_type = dynamics_type
+        self._dynamics_kwargs = dynamics_kwargs
+        self._create_dynamics()
+        self._create_networks()
 
-    def _create_dynamics(self, dynamics_type, dynamics_kwargs):
-        if dynamics_type in ["Unicycle", dynamics.DynType.UNICYCLE]:
+    def _create_dynamics(self):
+        if self._dynamics_type in ["Unicycle", dynamics.DynType.UNICYCLE]:
             self.dyn = dynamics.Unicycle(
                 "dynamics",
-                max_steer=dynamics_kwargs["max_steer"],
-                max_yawvel=dynamics_kwargs["max_yawvel"],
-                acce_bound=dynamics_kwargs["acce_bound"]
+                max_steer=self._dynamics_kwargs["max_steer"],
+                max_yawvel=self._dynamics_kwargs["max_yawvel"],
+                acce_bound=self._dynamics_kwargs["acce_bound"]
             )
-        elif dynamics_type in ["Bicycle", dynamics.DynType.BICYCLE]:
+        elif self._dynamics_type in ["Bicycle", dynamics.DynType.BICYCLE]:
             self.dyn = dynamics.Bicycle(
-                acc_bound=dynamics_kwargs["acce_bound"],
-                ddh_bound=dynamics_kwargs["ddh_bound"],
-                max_hdot=dynamics_kwargs["max_yawvel"],
-                max_speed=dynamics_kwargs["max_speed"]
+                acc_bound=self._dynamics_kwargs["acce_bound"],
+                ddh_bound=self._dynamics_kwargs["ddh_bound"],
+                max_hdot=self._dynamics_kwargs["max_yawvel"],
+                max_speed=self._dynamics_kwargs["max_speed"]
             )
         else:
             self.dyn = None
 
-    def _create_networks(self, network_kwargs):
+    def _create_networks(self):
         raise NotImplementedError
 
-    def _forward_networks(self, inputs, num_steps=None):
+    def _forward_networks(self, inputs, current_states=None, num_steps=None):
         raise NotImplementedError
 
     def _forward_dynamics(self, current_states, actions):
@@ -957,9 +960,7 @@ class TrajectoryDecoder(nn.Module):
         return traj
 
     def forward(self, inputs, current_states=None, num_steps=None):
-        preds = self._forward_networks(inputs, num_steps)
-        if "current_states" in preds:
-            current_states = preds["current_states"]
+        preds = self._forward_networks(inputs, current_states=current_states, num_steps=num_steps)
         if self.dyn is not None:
             preds["controls"] = preds["trajectories"]
             preds["trajectories"] = self._forward_dynamics(
@@ -970,8 +971,9 @@ class TrajectoryDecoder(nn.Module):
 
 
 class MLPTrajectoryDecoder(TrajectoryDecoder):
-    def _create_networks(self, net_kwargs):
-        if net_kwargs is None:
+    def _create_networks(self):
+        net_kwargs = dict() if self._network_kwargs is None else dict(self._network_kwargs)
+        if self._network_kwargs is None:
             net_kwargs = dict()
         assert isinstance(self.num_steps, int)
         if self.dyn is None:
@@ -979,14 +981,23 @@ class MLPTrajectoryDecoder(TrajectoryDecoder):
         else:
             pred_shapes = OrderedDict(trajectories=(self.num_steps, self.dyn.udim))
 
+        state_as_input = net_kwargs.pop("state_as_input")
+        if state_as_input and self.dyn is not None:
+            feature_dim = self.feature_dim + self.dyn.xdim
+        else:
+            feature_dim = self.feature_dim
+
         self.mlp = SplitMLP(
-            input_dim=self.feature_dim,
+            input_dim=feature_dim,
             output_shapes=pred_shapes,
             output_activation=None,
             **net_kwargs
         )
 
-    def _forward_networks(self, inputs, num_steps=None):
+    def _forward_networks(self, inputs, current_states=None, num_steps=None):
+        if self._network_kwargs["state_as_input"] and self.dyn is not None:
+            inputs = torch.cat((inputs, current_states), dim=-1)
+
         if inputs.ndim == 2:
             # [B, D]
             preds = self.mlp(inputs)

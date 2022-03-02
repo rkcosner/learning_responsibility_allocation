@@ -2,10 +2,10 @@ import collections
 import numpy as np
 import torch
 from tbsim.utils.tensor_utils import round_2pi
-import pdb
+from enum import IntEnum
 
 
-def get_box_world_coords(pos, yaw, extent):
+def get_box_agent_coords(pos, yaw, extent):
     corners = (torch.tensor([[-1, -1], [-1, 1], [1, 1], [1, -1]]) * 0.5).to(pos.device) * (
         extent.unsqueeze(-2)
     )
@@ -16,9 +16,42 @@ def get_box_world_coords(pos, yaw, extent):
     return rotated_corners
 
 
+def get_box_world_coords(pos, yaw, extent):
+    corners = (torch.tensor([[-1, -1], [-1, 1], [1, 1], [1, -1]]) * 0.5).to(pos.device) * (
+        extent.unsqueeze(-2)
+    )
+    s = torch.sin(yaw).unsqueeze(-1)
+    c = torch.cos(yaw).unsqueeze(-1)
+    rotM = torch.cat((torch.cat((c, s), dim=-1), torch.cat((-s, c), dim=-1)), dim=-2)
+    rotated_corners = corners @ rotM + pos.unsqueeze(-2)
+    return rotated_corners
+
+
+def get_box_agent_coords_np(pos, yaw, extent):
+    corners = (np.array([[-1, -1], [-1, 1], [1, 1], [1, -1]]) * 0.5) * (
+        extent[..., None, :]
+    )
+    s = np.sin(yaw)[..., None]
+    c = np.cos(yaw)[..., None]
+    rotM = np.concatenate((np.concatenate((c, s), axis=-1), np.concatenate((-s, c), axis=-1)), axis=-2)
+    rotated_corners = (corners + pos[..., None, :]) @ rotM
+    return rotated_corners
+
+
+def get_box_world_coords_np(pos, yaw, extent):
+    corners = (np.array([[-1, -1], [-1, 1], [1, 1], [1, -1]]) * 0.5) * (
+        extent[..., None, :]
+    )
+    s = np.sin(yaw)[..., None]
+    c = np.cos(yaw)[..., None]
+    rotM = np.concatenate((np.concatenate((c, s), axis=-1), np.concatenate((-s, c), axis=-1)), axis=-2)
+    rotated_corners = corners @ rotM + pos[..., None, :]
+    return rotated_corners
+
+
 def get_upright_box(pos, extent):
     yaws = torch.zeros(*pos.shape[:-1], 1).to(pos.device)
-    boxes = get_box_world_coords(pos, yaws, extent)
+    boxes = get_box_agent_coords_np(pos, yaws, extent)
     upright_boxes = boxes[..., [0, 2], :]
     return upright_boxes
 
@@ -262,3 +295,66 @@ def batch_proj(x, line):
             delta_y,
             np.expand_dims(delta_psi, axis=-1),
         )
+
+
+class CollisionType(IntEnum):
+    """This enum defines the three types of collisions: front, rear and side."""
+    FRONT = 0
+    REAR = 1
+    SIDE = 2
+
+
+def detect_collision(
+        ego_pos: np.ndarray,
+        ego_yaw: np.ndarray,
+        ego_extent: np.ndarray,
+        other_pos: np.ndarray,
+        other_yaw: np.ndarray,
+        other_extent: np.ndarray,
+):
+    """
+    Computes whether a collision occured between ego and any another agent.
+    Also computes the type of collision: rear, front, or side.
+    For this, we compute the intersection of ego's four sides with a target
+    agent and measure the length of this intersection. A collision
+    is classified into a class, if the corresponding length is maximal,
+    i.e. a front collision exhibits the longest intersection with
+    egos front edge.
+
+    .. note:: please note that this funciton will stop upon finding the first
+              colision, so it won't return all collisions but only the first
+              one found.
+
+    :param ego_pos: predicted centroid
+    :param ego_yaw: predicted yaw
+    :param ego_extent: predicted extent
+    :param other_pos: target agents
+    :return: None if not collision was found, and a tuple with the
+             collision type and the agent track_id
+    """
+    from l5kit.planning import utils
+    ego_bbox = utils._get_bounding_box(centroid=ego_pos, yaw=ego_yaw, extent=ego_extent)
+    # within_range_mask = utils.within_range(ego_pos, ego_extent, other_pos, other_extent)
+    for i in range(other_pos.shape[0]):
+        agent_bbox = utils._get_bounding_box(other_pos[i], other_yaw[i], other_extent[i])
+
+        if ego_bbox.intersects(agent_bbox):
+            front_side, rear_side, left_side, right_side = utils._get_sides(ego_bbox)
+
+            intersection_length_per_side = np.asarray(
+                [
+                    agent_bbox.intersection(front_side).length,
+                    agent_bbox.intersection(rear_side).length,
+                    agent_bbox.intersection(left_side).length,
+                    agent_bbox.intersection(right_side).length,
+                ]
+            )
+            argmax_side = np.argmax(intersection_length_per_side)
+
+            # Remap here is needed because there are two sides that are
+            # mapped to the same collision type CollisionType.SIDE
+            max_collision_types = max(CollisionType).value
+            remap_argmax = min(argmax_side, max_collision_types)
+            collision_type = CollisionType(remap_argmax)
+            return collision_type, i
+    return None

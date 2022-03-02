@@ -90,9 +90,10 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         train_callbacks.append(rollout_callback)
 
     # Model
-    model_kwargs = {"tgt_mask_N": 0.5 * len(datamodule.train_dataloader())}
     model = algo_factory(
-        algo_config=cfg.algo, modality_shapes=datamodule.modality_shapes, **model_kwargs
+        config=cfg,
+        modality_shapes=datamodule.modality_shapes,
+        data_module=datamodule
     )
 
     # Checkpointing

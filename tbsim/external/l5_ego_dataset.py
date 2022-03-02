@@ -1,9 +1,10 @@
 import bisect
 from functools import partial
-from typing import Callable, Optional
+from typing import Callable, Optional, List
 
 import numpy as np
-from torch.utils.data import Dataset
+import torch
+from torch.utils.data import Dataset, IterableDataset
 
 from l5kit.data import ChunkedDataset, get_frames_slice_from_scenes
 from l5kit.dataset.utils import convert_str_to_fixed_length_tensor
@@ -13,272 +14,8 @@ from l5kit.sampling.agent_sampling import generate_agent_sample
 from l5kit.sampling.agent_sampling_vectorized import generate_agent_sample_vectorized
 from tbsim.external.agent_sampling_mixed import generate_agent_sample_mixed
 from l5kit.vectorization.vectorizer import Vectorizer
-import pdb
-
-
-class BaseEgoDataset(Dataset):
-    def __init__(
-        self,
-        cfg: dict,
-        zarr_dataset: ChunkedDataset,
-    ):
-        """
-        Get a PyTorch dataset object that can be used to train DNN
-
-        Args:
-            cfg (dict): configuration file
-            zarr_dataset (ChunkedDataset): the raw zarr dataset
-        """
-        self.cfg = cfg
-        self.dataset = zarr_dataset
-        self.cumulative_sizes = self.dataset.scenes["frame_index_interval"][:, 1]
-
-        # build a partial so we don't have to access cfg each time
-        self.sample_function = self._get_sample_function()
-
-    def _get_sample_function(self) -> Callable[..., dict]:
-        raise NotImplementedError()
-
-    def __len__(self) -> int:
-        """
-        Get the number of available AV frames
-
-        Returns:
-            int: the number of elements in the dataset
-        """
-        return len(self.dataset.frames)
-
-    def get_frame(
-        self, scene_index: int, state_index: int, track_id: Optional[int] = None
-    ) -> dict:
-        """
-        A utility function to get the rasterisation and trajectory target for a given agent in a given frame
-
-        Args:
-            scene_index (int): the index of the scene in the zarr
-            state_index (int): a relative frame index in the scene
-            track_id (Optional[int]): the agent to rasterize or None for the AV
-        Returns:
-            dict: the rasterised image in (Cx0x1) if the rast is not None, the target trajectory
-            (position and yaw) along with their availability, the 2D matrix to center that agent,
-            the agent track (-1 if ego) and the timestamp
-
-        """
-        frames = self.dataset.frames[
-            get_frames_slice_from_scenes(self.dataset.scenes[scene_index])
-        ]
-
-        tl_faces = self.dataset.tl_faces
-        # TODO (@lberg): this should be done in the sample function
-        if self.cfg["raster_params"]["disable_traffic_light_faces"]:
-            tl_faces = np.empty(
-                0, dtype=self.dataset.tl_faces.dtype
-            )  # completely disable traffic light faces
-
-        data = self.sample_function(
-            state_index, frames, self.dataset.agents, tl_faces, track_id
-        )
-
-        # add information only, so that all data keys are always preserved
-        data["scene_index"] = scene_index
-        data["host_id"] = np.uint8(
-            convert_str_to_fixed_length_tensor(
-                self.dataset.scenes[scene_index]["host"]
-            ).cpu()
-        )
-        data["timestamp"] = frames[state_index]["timestamp"]
-        data["track_id"] = np.int64(
-            -1 if track_id is None else track_id
-        )  # always a number to avoid crashing torch
-
-        return data
-
-    def __getitem__(self, index: int) -> dict:
-        """
-        Function called by Torch to get an element
-
-        Args:
-            index (int): index of the element to retrieve
-
-        Returns: please look get_frame signature and docstring
-
-        """
-        if index < 0:
-            if -index > len(self):
-                raise ValueError(
-                    "absolute value of index should not exceed dataset length"
-                )
-            index = len(self) + index
-
-        scene_index = bisect.bisect_right(self.cumulative_sizes, index)
-
-        if scene_index == 0:
-            state_index = index
-        else:
-            state_index = index - self.cumulative_sizes[scene_index - 1]
-        return self.get_frame(scene_index, state_index)
-
-    def get_scene_dataset(self, scene_index: int) -> "BaseEgoDataset":
-        """
-        Returns another EgoDataset dataset where the underlying data can be modified.
-        This is possible because, even if it supports the same interface, this dataset is np.ndarray based.
-
-        Args:
-            scene_index (int): the scene index of the new dataset
-
-        Returns:
-            EgoDataset: A valid EgoDataset dataset with a copy of the data
-
-        """
-
-        dataset = self.dataset.get_scene_dataset(scene_index)
-        return BaseEgoDataset(self.cfg, dataset)
-
-    def get_scene_indices(self, scene_idx: int) -> np.ndarray:
-        """
-        Get indices for the given scene. EgoDataset iterates over frames, so this is just a matter
-        of finding the scene boundaries.
-        Args:
-            scene_idx (int): index of the scene
-
-        Returns:
-            np.ndarray: indices that can be used for indexing with __getitem__
-        """
-        scenes = self.dataset.scenes
-        assert scene_idx < len(
-            scenes
-        ), f"scene_idx {scene_idx} is over len {len(scenes)}"
-        return np.arange(*scenes[scene_idx]["frame_index_interval"])
-
-    def get_frame_indices(self, frame_idx: int) -> np.ndarray:
-        """
-        Get indices for the given frame. EgoDataset iterates over frames, so this will be a single element
-        Args:
-            frame_idx (int): index of the scene
-
-        Returns:
-            np.ndarray: indices that can be used for indexing with __getitem__
-        """
-        frames = self.dataset.frames
-        assert frame_idx < len(
-            frames
-        ), f"frame_idx {frame_idx} is over len {len(frames)}"
-        return np.asarray((frame_idx,), dtype=np.int64)
-
-    def __str__(self) -> str:
-        return self.dataset.__str__()
-
-
-class EgoDataset(BaseEgoDataset):
-    def __init__(
-        self,
-        cfg: dict,
-        zarr_dataset: ChunkedDataset,
-        rasterizer: Rasterizer,
-        perturbation: Optional[Perturbation] = None,
-    ):
-        """
-        Get a PyTorch dataset object that can be used to train DNN
-
-        Args:
-            cfg (dict): configuration file
-            zarr_dataset (ChunkedDataset): the raw zarr dataset
-            rasterizer (Rasterizer): an object that support rasterisation around an agent (AV or not)
-            perturbation (Optional[Perturbation]): an object that takes care of applying trajectory perturbations.
-            None if not desired
-        """
-        self.perturbation = perturbation
-        self.rasterizer = rasterizer
-        super().__init__(cfg, zarr_dataset)
-
-    def _get_sample_function(self) -> Callable[..., dict]:
-        render_context = RenderContext(
-            raster_size_px=np.array(self.cfg["raster_params"]["raster_size"]),
-            pixel_size_m=np.array(self.cfg["raster_params"]["pixel_size"]),
-            center_in_raster_ratio=np.array(self.cfg["raster_params"]["ego_center"]),
-            set_origin_to_bottom=self.cfg["raster_params"]["set_origin_to_bottom"],
-        )
-
-        return partial(
-            generate_agent_sample,
-            render_context=render_context,
-            history_num_frames=self.cfg["model_params"]["history_num_frames"],
-            future_num_frames=self.cfg["model_params"]["future_num_frames"],
-            step_time=self.cfg["model_params"]["step_time"],
-            filter_agents_threshold=self.cfg["raster_params"][
-                "filter_agents_threshold"
-            ],
-            rasterizer=self.rasterizer,
-            perturbation=self.perturbation,
-        )
-
-    def get_frame(
-        self, scene_index: int, state_index: int, track_id: Optional[int] = None
-    ) -> dict:
-        data = super().get_frame(scene_index, state_index, track_id=track_id)
-        # TODO (@lberg): this should not be here but in the rasterizer
-        data["image"] = data["image"].transpose(2, 0, 1)  # 0,1,C -> C,0,1
-        return data
-
-    def get_scene_dataset(self, scene_index: int) -> "EgoDataset":
-        """
-        Returns another EgoDataset dataset where the underlying data can be modified.
-        This is possible because, even if it supports the same interface, this dataset is np.ndarray based.
-
-        Args:
-            scene_index (int): the scene index of the new dataset
-
-        Returns:
-            EgoDataset: A valid EgoDataset dataset with a copy of the data
-
-        """
-        dataset = self.dataset.get_scene_dataset(scene_index)
-        return EgoDataset(self.cfg, dataset, self.rasterizer, self.perturbation)
-
-
-class EgoDatasetVectorized(BaseEgoDataset):
-    def __init__(
-        self,
-        cfg: dict,
-        zarr_dataset: ChunkedDataset,
-        vectorizer: Vectorizer,
-        perturbation: Optional[Perturbation] = None,
-    ):
-        """
-        Get a PyTorch dataset object that can be used to train DNNs with vectorized input
-
-        Args:
-            cfg (dict): configuration file
-            zarr_dataset (ChunkedDataset): the raw zarr dataset
-            vectorizer (Vectorizer): a object that supports vectorization around an AV
-            perturbation (Optional[Perturbation]): an object that takes care of applying trajectory perturbations.
-        None if not desired
-        """
-        self.perturbation = perturbation
-        self.vectorizer = vectorizer
-        super().__init__(cfg, zarr_dataset)
-
-    def _get_sample_function(self) -> Callable[..., dict]:
-        return partial(
-            generate_agent_sample_vectorized,
-            history_num_frames_ego=self.cfg["model_params"]["history_num_frames_ego"],
-            history_num_frames_agents=self.cfg["model_params"][
-                "history_num_frames_agents"
-            ],
-            future_num_frames=self.cfg["model_params"]["future_num_frames"],
-            step_time=self.cfg["model_params"]["step_time"],
-            filter_agents_threshold=self.cfg["raster_params"][
-                "filter_agents_threshold"
-            ],
-            perturbation=self.perturbation,
-            vectorizer=self.vectorizer,
-        )
-
-    def get_scene_dataset(self, scene_index: int) -> "EgoDatasetVectorized":
-        dataset = self.dataset.get_scene_dataset(scene_index)
-        return EgoDatasetVectorized(
-            self.cfg, dataset, self.vectorizer, self.perturbation
-        )
+from l5kit.dataset.ego import BaseEgoDataset
+from tbsim.utils.timer import Timers
 
 
 class EgoDatasetMixed(BaseEgoDataset):
@@ -303,7 +40,85 @@ class EgoDatasetMixed(BaseEgoDataset):
         self.perturbation = perturbation
         self.vectorizer = vectorizer
         self.rasterizer = rasterizer
+        self.timer = Timers()
+        self._skimp = False
         super().__init__(cfg, zarr_dataset)
+
+    def set_skimp(self, skimp):
+        self._skimp = skimp
+
+    def is_skimp(self):
+        return self._skimp
+
+    def _get_sample_function(self) -> Callable[..., dict]:
+        render_context = RenderContext(
+            raster_size_px=np.array(self.cfg["raster_params"]["raster_size"]),
+            pixel_size_m=np.array(self.cfg["raster_params"]["pixel_size"]),
+            center_in_raster_ratio=np.array(self.cfg["raster_params"]["ego_center"]),
+            set_origin_to_bottom=self.cfg["raster_params"]["set_origin_to_bottom"],
+        )
+        return partial(
+            generate_agent_sample_mixed,
+            render_context=render_context,
+            history_num_frames_ego=self.cfg["model_params"]["history_num_frames_ego"],
+            history_num_frames_agents=self.cfg["model_params"][
+                "history_num_frames_agents"
+            ],
+            future_num_frames=self.cfg["model_params"]["future_num_frames"],
+            step_time=self.cfg["model_params"]["step_time"],
+            filter_agents_threshold=self.cfg["raster_params"][
+                "filter_agents_threshold"
+            ],
+            timer=self.timer,
+            perturbation=self.perturbation,
+            vectorizer=self.vectorizer,
+            rasterizer=self.rasterizer,
+            skimp_fn=self.is_skimp,
+            vectorize_lane=self.cfg["data_generation_params"]["vectorize_lane"],
+        )
+
+    def get_scene_dataset(self, scene_index: int) -> "EgoDatasetMixed":
+        dataset = self.dataset.get_scene_dataset(scene_index)
+        return EgoDatasetMixed(
+            self.cfg,
+            dataset,
+            self.vectorizer,
+            self.rasterizer,
+            self.perturbation,
+        )
+
+    def get_frame(
+            self, scene_index: int, state_index: int, track_id: Optional[int] = None
+    ) -> dict:
+        with self.timer.timed("get_frame"):
+            data = super().get_frame(scene_index, state_index, track_id=track_id)
+        # TODO (@lberg): this should not be here but in the rasterizer
+        if "image" in data:
+            data["image"] = data["image"].transpose(2, 0, 1)  # 0,1,C -> C,0,1
+        return data
+
+
+class EgoReplayBufferMixed(Dataset):
+    """A Dataset class object for wrapping environment interaction episodes"""
+    def __init__(
+            self,
+            cfg,
+            vectorizer: Vectorizer,
+            rasterizer: Rasterizer,
+            capacity=None,
+            perturbation: Perturbation = None,
+    ):
+        super(EgoReplayBufferMixed, self).__init__()
+        self.cfg = cfg
+        self.dataset = dict()
+        self._capacity = capacity
+        self._active_scenes = []
+
+        self.perturbation = perturbation
+        self.vectorizer = vectorizer
+        self.rasterizer = rasterizer
+
+        self.sample_function = self._get_sample_function()
 
     def _get_sample_function(self) -> Callable[..., dict]:
         render_context = RenderContext(
@@ -330,20 +145,90 @@ class EgoDatasetMixed(BaseEgoDataset):
             vectorize_lane=self.cfg["data_generation_params"]["vectorize_lane"],
         )
 
-    def get_scene_dataset(self, scene_index: int) -> "EgoDatasetMixed":
-        dataset = self.dataset.get_scene_dataset(scene_index)
-        return EgoDatasetMixed(
-            self.cfg,
-            dataset,
-            self.vectorizer,
-            self.rasterizer,
-            self.perturbation,
-        )
+    def append_experience(self, episodes_data: List):
+        """
+        Append list of episodic experience
+        Args:
+            episodes_data (list): a list of episodic experiences
 
-    def get_frame(
-            self, scene_index: int, state_index: int, track_id: Optional[int] = None
-    ) -> dict:
-        data = super().get_frame(scene_index, state_index, track_id=track_id)
-        # TODO (@lberg): this should not be here but in the rasterizer
-        data["image"] = data["image"].transpose(2, 0, 1)  # 0,1,C -> C,0,1
+        """
+        self._active_scenes.extend([d[0] for d in episodes_data])
+        for si, ds in episodes_data:
+            self.dataset[si] = ds
+
+        if self._capacity is not None and len(self._active_scenes) > self._capacity:
+            n_to_remove = len(self._active_scenes) - self._capacity
+            for si in self._active_scenes[:n_to_remove]:
+                self.dataset.pop(si)
+            self._active_scenes = self._active_scenes[n_to_remove:]
+
+    def _get_scene_indices(self):
+        fi = dict()
+        ind = 0
+        for si in self._active_scenes:
+            fl = len(self.dataset[si].frames)
+            fi[si] = (ind, ind + fl)
+            ind += fl
+        return fi
+
+    def _get_scene_by_index(self, index):
+        fi = self._get_scene_indices()
+        for si, (start, end) in fi.items():
+            if start <= index < end:
+                return si, index - start
+        raise IndexError("index {} is out of range".format(index))
+
+    def __len__(self):
+        return self._get_scene_indices()[self._active_scenes[-1]][1]
+
+    def __getitem__(self, index):
+        scene_index, state_index = self._get_scene_by_index(index)
+        dataset = self.dataset[scene_index]
+        tl_faces = dataset.tl_faces
+        if self.cfg["raster_params"]["disable_traffic_light_faces"]:
+            tl_faces = np.empty(0, dtype= dataset.tl_faces.dtype)
+        data = self.sample_function(
+            state_index,
+            dataset.frames,
+            dataset.agents,
+            tl_faces,
+            selected_track_id=None
+        )
+        data["image"] = data["image"].transpose(2, 0, 1)
+
+        # add information only, so that all data keys are always preserved
+        data["scene_index"] = scene_index
+        data["track_id"] = np.int64(-1)  # always a number to avoid crashing torch
         return data
+
+
+class ExperienceIterableWrapper(IterableDataset):
+    def __init__(self, dataset):
+        self.dataset = dataset
+        self._should_update_indices = False
+        self._indices = None
+        self._rnd = None
+        self._curr_index = 0
+
+    def _update_indices(self):
+        self._indices = np.arange(len(self.dataset))
+        self._rnd.shuffle(self._indices)
+        self._curr_index = 0
+
+    def append_experience(self, episodes_data: List):
+        self._should_update_indices = True
+        self.dataset.append_experience(episodes_data)
+
+    def __iter__(self):
+        while True:
+            if self._rnd is None:
+                winfo = torch.utils.data.get_worker_info()
+                if winfo is not None:
+                    seed = winfo.id
+                else:
+                    seed = 0
+                self._rnd = np.random.RandomState(seed=seed)
+            if self._should_update_indices:
+                self._update_indices()
+                self._should_update_indices = False
+            yield self.dataset[self._curr_index]

@@ -1,5 +1,6 @@
 """Factory methods for creating models"""
-from tbsim.configs.base import AlgoConfig
+from pytorch_lightning import LightningDataModule
+from tbsim.configs.base import ExperimentConfig
 
 from tbsim.algos.l5kit_algos import (
     L5TrafficModel,
@@ -14,18 +15,24 @@ from tbsim.algos.multiagent_algos import (
     MATrafficModel
 )
 
-def algo_factory(algo_config: AlgoConfig, modality_shapes, **kwargs):
+from tbsim.algos.selfplay_algos import (
+    SelfPlayHierarchical
+)
+
+def algo_factory(config: ExperimentConfig, modality_shapes: dict, data_module: LightningDataModule, **kwargs):
     """
     A factory for creating training algos
 
     Args:
-        algo_config (AlgoConfig): an algo config object
-        modality_shapes (dict): A dictionary of named observation shapes (e.g., rasterized image shape)
+        config (ExperimentConfig): an ExperimentConfig object,
+        modality_shapes (dict): a dictionary that maps observation modality names to shapes
+        data_module (LightningDataModule): (optional) a pytorch_lightning data_module object
         **kwargs: any info needed to create an algo
 
     Returns:
         algo: pl.LightningModule
     """
+    algo_config = config.algo
     algo_name = algo_config.name
 
     if algo_name == "l5_rasterized":
@@ -46,6 +53,8 @@ def algo_factory(algo_config: AlgoConfig, modality_shapes, **kwargs):
         algo = L5TransformerTrafficModel(algo_config=algo_config)
     elif algo_name == "TransformerGAN":
         algo = L5TransformerGANTrafficModel(algo_config=algo_config)
+    elif algo_name == "sp_hierarchical":
+        algo = SelfPlayHierarchical(cfg=config, data_module=data_module)
     else:
         raise NotImplementedError("{} is not a valid algorithm" % algo_name)
     return algo

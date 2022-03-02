@@ -353,3 +353,8 @@ def get_current_states(batch: dict, dyn_type: dynamics.DynType) -> torch.Tensor:
         current_states = torch.zeros(bs, 4).to(batch["curr_speed"].device)  # [x, y, vel, yaw]
         current_states[:, 2] = batch["curr_speed"]
     return current_states
+
+
+def get_drivable_region_map(rasterized_map):
+    assert rasterized_map.shape[-3] in [3, 15]
+    return rasterized_map[..., -3, :, :] < 1.

@@ -3,7 +3,7 @@
   "wandb_project_name": null,
   "workspace_mounting_point": "/workspace/ws_mount/",
   "result_dir": "/workspace/result/",
-  "workspace_id": "OVG6VSVJRjq7TTKBpOdohg",
+  "workspace_id": "<YOUR-NGC-WORKSPACE-ID>",
   "dataset_id": "90893",
   "dataset_mounting_point": "/workspace/lyft_prediction/",
   "dataset_path": "/workspace/lyft_prediction/lyft_prediction",

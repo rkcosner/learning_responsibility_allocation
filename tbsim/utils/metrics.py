@@ -12,6 +12,7 @@ from tbsim.utils.geometry_utils import (
     VEH_PED_collision,
     PED_VEH_collision,
     PED_PED_collision,
+    get_box_world_coords,
 )
 
 
@@ -406,3 +407,46 @@ def batch_pairwise_collision_rate(agent_edges, collision_funcs=None):
         else:
             coll_rates[et] = torch.sum(dis <= 0) / float(dis.shape[0])
     return coll_rates
+
+
+def batch_detect_off_road(positions, drivable_region_map):
+    """
+    Compute whether the given positions are out of drivable region
+    Args:
+        positions (torch.Tensor): a position (x, y) in rasterized frame [B, ..., 2]
+        drivable_region_map (torch.Tensor): binary drivable region maps [B, H, W]
+
+    Returns:
+        off_road (torch.Tensor): whether each given position is off-road [B, ...]
+    """
+    assert positions.shape[0] == drivable_region_map.shape[0]
+    assert drivable_region_map.ndim == 3
+    b, h, w = drivable_region_map.shape
+    positions_flat = positions[..., 1] * w + positions[..., 0]
+    if positions_flat.ndim == 1:
+        positions_flat = positions_flat[:, None]
+    drivable = torch.gather(
+        drivable_region_map.flatten(start_dim=1),  # [B, H * W]
+        dim=1,
+        index=positions_flat.long().flatten(start_dim=1),  # [B, (all trailing dim flattened)]
+    ).reshape(*positions.shape[:-1])
+    return 1 - drivable.float()
+
+
+def batch_detect_off_road_boxes(positions, yaws, extents, drivable_region_map):
+    """
+    Compute whether boxes specified by (@positions, @yaws, and @extents) are out of drivable region.
+    A box is considered off-road if at least one of its corners are out of drivable region
+    Args:
+        positions (torch.Tensor): agent centroid (x, y) in rasterized frame [B, ..., 2]
+        yaws (torch.Tensor): agent yaws in rasterized frame [B, ..., 1]
+        extents (torch.Tensor): agent extents [B, ..., 2]
+        drivable_region_map (torch.Tensor): binary drivable region maps [B, H, W]
+
+    Returns:
+        box_off_road (torch.Tensor): whether each given box is off-road [B, ...]
+    """
+    boxes = get_box_world_coords(positions, yaws, extents)  # [B, ..., 4, 2]
+    off_road = batch_detect_off_road(boxes, drivable_region_map)  # [B, ..., 4]
+    box_off_road = off_road.sum(dim=-1) > 0.5
+    return box_off_road.float()

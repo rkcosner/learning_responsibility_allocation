@@ -10,14 +10,14 @@ from torch.utils.data import DataLoader
 
 from l5kit.rasterization import build_rasterizer
 from l5kit.rasterization.rasterizer import Rasterizer
-from l5kit.vectorization.vectorizer_builder import build_vectorizer
 from l5kit.data import LocalDataManager, ChunkedDataset
 from l5kit.dataset import EgoDataset, AgentDataset
 
 from tbsim.configs.base import TrainConfig
+from tbsim.configs.l5kit_online_config import L5KitOnlineTrainConfig
+from tbsim.external.vectorizer import build_vectorizer
 from tbsim.external.l5_ego_dataset import (
-    EgoDatasetVectorized,
-    EgoDatasetMixed,
+    EgoDatasetMixed, EgoReplayBufferMixed
 )
 
 
@@ -66,6 +66,7 @@ class L5RasterizedDataModule(pl.LightningDataModule, L5BaseDatasetModule):
         super().__init__()
         self.train_dataset = None
         self.valid_dataset = None
+        self.experience_dataset = None  # replay buffer
         self.rasterizer = None
         self._train_config = train_config
         self._l5_config = l5_config
@@ -152,6 +153,13 @@ class L5MixedDataModule(L5RasterizedDataModule):
         self.ego_validset = EgoDatasetMixed(self._l5_config, valid_zarr, self.vectorizer, self.rasterizer)
 
         if self._mode == "ego":
+            if isinstance(self._train_config, L5KitOnlineTrainConfig):
+                self.experience_dataset = EgoReplayBufferMixed(
+                    self._l5_config,
+                    vectorizer=self.vectorizer,
+                    rasterizer=self.rasterizer,
+                    capacity=self._train_config.training.buffer_size
+                )
             self.train_dataset = self.ego_trainset
             self.valid_dataset = self.ego_validset
         else:

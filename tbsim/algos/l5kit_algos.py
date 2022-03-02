@@ -28,13 +28,14 @@ from tbsim.utils.geometry_utils import transform_points_tensor
 
 
 class L5TrafficModel(pl.LightningModule):
-    def __init__(self, algo_config, modality_shapes):
+    def __init__(self, algo_config, modality_shapes, do_log=True):
         """
         Creates networks and places them into @self.nets.
         """
         super(L5TrafficModel, self).__init__()
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
+        self._do_log = do_log
         assert modality_shapes["image"][0] == 15
 
         traj_decoder = MLPTrajectoryDecoder(
@@ -121,15 +122,21 @@ class L5TrafficModel(pl.LightningModule):
         losses = self.nets["policy"].compute_losses(pout, batch)
         total_loss = 0.0
         for lk, l in losses.items():
-            loss = l * self.algo_config.loss_weights[lk]
-            self.log("train/losses_" + lk, loss)
-            total_loss += loss
+            losses[lk] = l * self.algo_config.loss_weights[lk]
+            total_loss += losses[lk]
 
         metrics = self._compute_metrics(pout, batch)
+
+        for lk, l in losses.items():
+            self.log("train/losses_" + lk, l)
         for mk, m in metrics.items():
             self.log("train/metrics_" + mk, m)
 
-        return total_loss
+        return {
+            "loss": total_loss,
+            "all_losses": losses,
+            "all_metrics": metrics
+        }
 
     def validation_step(self, batch, batch_idx):
         pout = self.nets["policy"](batch)
@@ -231,7 +238,7 @@ class SpatialPlanner(pl.LightningModule):
         self.nets["policy"] = RasterizedMapUNet(
             model_arch=algo_config.model_architecture,
             input_image_shape=modality_shapes["image"],  # [C, H, W]
-            output_channel=4,  # (pixel, x_residua, y_residua, yaw)
+            output_channel=4,  # (pixel, x_residual, y_residual, yaw)
             use_spatial_softmax=algo_config.spatial_softmax.enabled,
             spatial_softmax_kwargs=algo_config.spatial_softmax.kwargs,
         )
@@ -245,59 +252,65 @@ class SpatialPlanner(pl.LightningModule):
             keys["valCELoss"] = "val/losses_pixel_ce_loss"
         return keys
 
-    def forward(self, obs_dict):
+    def forward(self, obs_dict, mask_drivable=False, num_samples=None):
         pred_map = self.nets["policy"](obs_dict["image"])
-        pred_map[:, 1:3] = torch.sigmoid(pred_map[:, 1:3])  # x, y residuals are within [0, 1]
+        assert pred_map.shape[1] == 4  # [location_logits, residual_x, residual_y, yaw]
+
+        pred_map[:, 1:3] = torch.sigmoid(pred_map[:, 1:3])
+        location_map = pred_map[:, 0]
+
+        # get normalized probability map
+        location_prob_map = torch.softmax(location_map.flatten(1), dim=1).reshape(location_map.shape)
+
+        if mask_drivable:
+            # At test time: optionally mask out undrivable regions
+            drivable_map = L5Utils.get_drivable_region_map(obs_dict["image"])
+            for i, m in enumerate(drivable_map):
+                if m.sum() == 0:  # if nowhere is drivable, set it to all True's to avoid decoding problems
+                    drivable_map[i] = True
+
+            location_prob_map = location_prob_map * drivable_map.float()
+
         # decode map as predictions
-        pixel_pred, res_pred, yaw_pred, pred_logit = AlgoUtils.decode_spatial_map(pred_map)
+        pixel_pred, res_pred, yaw_pred, pred_logit = AlgoUtils.decode_spatial_prediction(
+            prob_map=location_prob_map,
+            residual_yaw_map=pred_map[:, 1:],
+            num_samples=num_samples
+        )
+
         # transform prediction to agent coordinate
         pos_pred = transform_points_tensor(
-            (pixel_pred + res_pred).unsqueeze(1),
+            (pixel_pred + res_pred),
             obs_dict["agent_from_raster"].float()
-        ).squeeze(1)
-
-        pos_pred_no_res = transform_points_tensor(
-            pixel_pred.unsqueeze(1),
-            obs_dict["agent_from_raster"].float()
-        ).squeeze(1)
-
-        # normalize pixel location map
-        location_map = pred_map[:, 0]
-        norm_location_map = torch.softmax(location_map.flatten(1), dim=1).reshape(location_map.shape)
+        )
 
         return dict(
             predictions=dict(
                 positions=pos_pred,
                 yaws=yaw_pred
             ),
-            predictions_no_res=dict(
-                positions=pos_pred_no_res,
-                yaws=yaw_pred
-            ),
             confidence=torch.sigmoid(pred_logit),
             spatial_prediction=pred_map,
             location_map=location_map,
-            normalized_location_map=norm_location_map
+            location_prob_map=location_prob_map
         )
 
     def _compute_metrics(self, pred_batch, data_batch):
         metrics = dict()
         goal_sup = data_batch["goal"]
+        goal_pred = TensorUtils.squeeze(pred_batch["predictions"], dim=1)
+
         pos_norm_err = torch.norm(
-            pred_batch["predictions"]["positions"] - goal_sup["goal_position"], dim=-1
+            goal_pred["positions"] - goal_sup["goal_position"], dim=-1
         )
         metrics["goal_pos_err"] = torch.mean(pos_norm_err)
-        pos_norm_err_no_res = torch.norm(
-            pred_batch["predictions_no_res"]["positions"] - goal_sup["goal_position"],
-            dim=-1,
-        )
-        metrics["goal_pos_no_res_err"] = torch.mean(pos_norm_err_no_res)
+
         metrics["goal_yaw_err"] = torch.mean(
-            torch.abs(pred_batch["predictions"]["yaws"] - goal_sup["goal_yaw"])
+            torch.abs(goal_pred["yaws"] - goal_sup["goal_yaw"])
         )
 
         pixel_pred = torch.argmax(
-            torch.flatten(pred_batch["spatial_prediction"][:, 0], start_dim=1), dim=1
+            torch.flatten(pred_batch["location_map"], start_dim=1), dim=1
         )  # [B]
         metrics["goal_selection_err"] = torch.mean(
             (goal_sup["goal_position_pixel_flat"].long() != pixel_pred).float()
@@ -344,7 +357,7 @@ class SpatialPlanner(pl.LightningModule):
         return losses
 
     def training_step(self, batch, batch_idx):
-        pout = self(batch)
+        pout = self.forward(batch)
         batch["goal"] = AlgoUtils.get_spatial_goal_supervision(batch)
         losses = self._compute_losses(pout, batch)
         total_loss = 0.0
@@ -353,7 +366,8 @@ class SpatialPlanner(pl.LightningModule):
             self.log("train/losses_" + lk, loss)
             total_loss += loss
 
-        metrics = self._compute_metrics(pout, batch)
+        with torch.no_grad():
+            metrics = self._compute_metrics(pout, batch)
         for mk, m in metrics.items():
             self.log("train/metrics_" + mk, m)
 
@@ -383,12 +397,15 @@ class SpatialPlanner(pl.LightningModule):
             weight_decay=optim_params["regularization"]["L2"],
         )
 
-    def get_plan(self, obs_dict, **kwargs):
-        preds = self(obs_dict)
+    def get_plan(self, obs_dict, mask_drivable=False, sample=False, **kwargs):
+        num_samples = 1 if sample else None
+        preds = self.forward(obs_dict, mask_drivable=mask_drivable, num_samples=num_samples)
+        plan_preds = TensorUtils.squeeze(preds["predictions"], dim=1)
         plan_dict = dict(
-            predictions=TensorUtils.to_sequence(preds["predictions"]),
-            availabilities=torch.ones(preds["predictions"]["positions"].shape[0], 1).to(self.device),
+            predictions=TensorUtils.to_sequence(plan_preds),
+            availabilities=torch.ones(plan_preds["positions"].shape[0], 1).to(self.device),
         )
+        # pad plans to the same size as the future trajectories
         n_steps_to_pad = self.algo_config.future_num_frames - 1
         plan_dict = TensorUtils.pad_sequence(plan_dict, padding=(n_steps_to_pad, 0), batched=True, pad_values=0.)
         plan = Plan(
@@ -508,7 +525,7 @@ class L5VAETrafficModel(pl.LightningModule):
             weight_decay=optim_params["regularization"]["L2"],
         )
 
-    def get_action(self, obs_dict, sample=True, num_viz_samples=10, **kwargs):
+    def get_action(self, obs_dict, sample=True, **kwargs):
         if sample:
             preds = self.nets["policy"].sample(obs_dict, n=1)["predictions"]  # [B, 1, T, 3]
             preds = TensorUtils.squeeze(preds, dim=1)
@@ -516,12 +533,11 @@ class L5VAETrafficModel(pl.LightningModule):
             preds = self.nets["policy"].predict(obs_dict)["predictions"]
 
         # get trajectory samples for visualization purposes
-        samples = self.nets["policy"].sample(obs_dict, n=num_viz_samples)["predictions"]
         action = Action(
             positions=preds["positions"],
             yaws=preds["yaws"]
         )
-        return action, dict(samples=samples)
+        return action, dict()
 
 
 class L5TransformerTrafficModel(pl.LightningModule):
