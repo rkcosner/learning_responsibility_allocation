@@ -525,7 +525,7 @@ class L5VAETrafficModel(pl.LightningModule):
             weight_decay=optim_params["regularization"]["L2"],
         )
 
-    def get_action(self, obs_dict, sample=True, num_viz_samples=10, **kwargs):
+    def get_action(self, obs_dict, sample=True, **kwargs):
         if sample:
             preds = self.nets["policy"].sample(obs_dict, n=1)["predictions"]  # [B, 1, T, 3]
             preds = TensorUtils.squeeze(preds, dim=1)
@@ -533,12 +533,11 @@ class L5VAETrafficModel(pl.LightningModule):
             preds = self.nets["policy"].predict(obs_dict)["predictions"]
 
         # get trajectory samples for visualization purposes
-        samples = self.nets["policy"].sample(obs_dict, n=num_viz_samples)["predictions"]
         action = Action(
             positions=preds["positions"],
             yaws=preds["yaws"]
         )
-        return action, dict(samples=samples)
+        return action, dict()
 
 
 class L5TransformerTrafficModel(pl.LightningModule):
