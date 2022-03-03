@@ -612,6 +612,23 @@ class RasterizedMapEncoder(nn.Module):
         return feat
 
 
+class RotatedROIAlign(nn.Module):
+    def __init__(self, roi_feature_size, roi_scale):
+        super(RotatedROIAlign, self).__init__()
+        from tbsim.models.roi_align import ROI_align
+        self.roi_align = lambda feat, rois: ROI_align(feat, rois, roi_feature_size[0])
+        self.roi_scale = roi_scale
+
+    def forward(self, feats, list_of_rois):
+        scaled_rois = []
+        for rois in list_of_rois:
+            sroi = rois.clone()
+            sroi[..., :-1] = rois[..., :-1] * self.roi_scale
+            scaled_rois.append(sroi)
+        list_of_feats = self.roi_align(feats, scaled_rois)
+        return torch.cat(list_of_feats, dim=0)
+
+
 class RasterizeROIEncoder(nn.Module):
     """Use RoI Align to crop map feature for each agent"""
     def __init__(
@@ -642,12 +659,13 @@ class RasterizeROIEncoder(nn.Module):
         self.roi_layer_key = roi_layer_key
         roi_scale = model.feature_scales()[roi_layer_key]
         roi_channel = model.feature_channels()[roi_layer_key]
-        self.roi_align = RoIAlign(
-            output_size=roi_feature_size,
-            spatial_scale=roi_scale,
-            sampling_ratio=-1,
-            aligned=True
-        )
+        # self.roi_align = RoIAlign(
+        #     output_size=roi_feature_size,
+        #     spatial_scale=roi_scale,
+        #     sampling_ratio=-1,
+        #     aligned=True
+        # )
+        self.roi_align = RotatedROIAlign(roi_feature_size, roi_scale=roi_scale)
 
         self.activation = output_activation()
         if agent_feature_dim is not None:
@@ -674,7 +692,7 @@ class RasterizeROIEncoder(nn.Module):
         """
         feats = self.encoder_heads(map_inputs)
         pre_roi_feats = feats[self.roi_layer_key]
-        roi_feats = self.roi_align(pre_roi_feats, rois)  # [num_boxes, C, H W]
+        roi_feats = self.roi_align(pre_roi_feats, rois)  # [num_boxes, C, H, W]
         agent_feats = self.agent_net(roi_feats)
         global_feats = feats["final"]
 
