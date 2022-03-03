@@ -275,9 +275,7 @@ class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
         self.agent_feature_dim = 128
         self.ego_feature_dim = 128
         self.context_size = (30, 30)
-        self.agent_aware = True
-        self.disable_dynamics_for_other_agents = False
-        self.goal_conditional = True
+        self.goal_conditional = False
         self.goal_feature_dim = 32
         self.decoder.layer_dims = (128, 128)
 

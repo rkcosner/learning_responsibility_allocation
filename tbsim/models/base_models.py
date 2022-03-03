@@ -612,7 +612,7 @@ class RasterizedMapEncoder(nn.Module):
         return feat
 
 
-class RasterizeAgentEncoder(nn.Module):
+class RasterizeROIEncoder(nn.Module):
     """Use RoI Align to crop map feature for each agent"""
     def __init__(
             self,
@@ -624,7 +624,7 @@ class RasterizeAgentEncoder(nn.Module):
             roi_layer_key: str = "layer4",
             output_activation = nn.ReLU
     ) -> None:
-        super(RasterizeAgentEncoder, self).__init__()
+        super(RasterizeROIEncoder, self).__init__()
         model = RasterizedMapEncoder(
             model_arch=model_arch,
             input_image_shape=input_image_shape,
@@ -659,7 +659,6 @@ class RasterizeAgentEncoder(nn.Module):
             )
         else:
             self.agent_net = nn.Identity()
-
 
     def forward(self, map_inputs: torch.Tensor, rois: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
@@ -982,6 +981,9 @@ class MLPTrajectoryDecoder(TrajectoryDecoder):
             pred_shapes = OrderedDict(trajectories=(self.num_steps, self.dyn.udim))
 
         state_as_input = net_kwargs.pop("state_as_input")
+        if self.dyn is not None:
+            assert state_as_input   # TODO: deprecated, set default to True and remove from configs
+
         if state_as_input and self.dyn is not None:
             feature_dim = self.feature_dim + self.dyn.xdim
         else:
@@ -1025,7 +1027,7 @@ if __name__ == "__main__":
     boxes_indexed = torch.cat((boxes_indices, boxes_aligned), dim=1)
 
 
-    model = RasterizeAgentEncoder(model_arch="resnet50", input_image_shape=(15, 224, 224))
+    model = RasterizeROIEncoder(model_arch="resnet50", input_image_shape=(15, 224, 224))
     output = model(t, boxes_indexed)
     for f in output:
         print(f.shape)

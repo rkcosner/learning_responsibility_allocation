@@ -177,8 +177,8 @@ def batch_to_raw_all_agents(data_batch, step_time):
 
     return {
         "history_positions": src_pos,
-        "history_velocities": src_vel,
         "history_yaws": src_yaw,
+        "curr_speed": src_vel[:, :, -1, 0],
         "raw_types": raw_type,
         "history_availabilities": src_mask,
         "extents": extents
@@ -348,10 +348,26 @@ def get_current_states(batch: dict, dyn_type: dynamics.DynType) -> torch.Tensor:
         current_states = torch.zeros(bs, 6).to(batch["curr_speed"].device)  # [x, y, yaw, vel, dh, veh_len]
         current_states[:, 3] = batch["curr_speed"].abs()
         current_states[:, [4]] = (batch["history_yaws"][:, 0] - batch["history_yaws"][:, 1]).abs()
-        current_states[:, 5] = batch["extent"][:, 0]  # [l, w, h]
+        current_states[:, 5] = batch["extent"][:, 0]  # [veh_len]
     else:
         current_states = torch.zeros(bs, 4).to(batch["curr_speed"].device)  # [x, y, vel, yaw]
         current_states[:, 2] = batch["curr_speed"]
+    return current_states
+
+
+def get_current_states_all_agents(batch: dict, step_time, dyn_type: dynamics.DynType) -> torch.Tensor:
+    state_all = batch_to_raw_all_agents(batch, step_time)
+    bs, na = state_all["curr_speed"].shape[:2]
+    if dyn_type == dynamics.DynType.BICYCLE:
+        current_states = torch.zeros(bs, na, 6).to(state_all["curr_speed"].device)  # [x, y, yaw, vel, dh, veh_len]
+        current_states[:, :, :2] = state_all["history_positions"][:, :, -1]
+        current_states[:, :, 3] = state_all["curr_speed"].abs()
+        current_states[:, :, [4]] = (state_all["history_yaws"][:, :, 0] - state_all["history_yaws"][:, :, 1]).abs()
+        current_states[:, :, 5] = state_all["extent"][:, :, 0]  # [veh_len]
+    else:
+        current_states = torch.zeros(bs, na, 4).to(state_all["curr_speed"].device)  # [x, y, vel, yaw]
+        current_states[:, :, :2] = state_all["history_positions"][:, :, -1]
+        current_states[:, :, 2] = state_all["curr_speed"]
     return current_states
 
 

@@ -51,7 +51,7 @@ def get_box_world_coords_np(pos, yaw, extent):
 
 def get_upright_box(pos, extent):
     yaws = torch.zeros(*pos.shape[:-1], 1).to(pos.device)
-    boxes = get_box_agent_coords_np(pos, yaws, extent)
+    boxes = get_box_world_coords(pos, yaws, extent)
     upright_boxes = boxes[..., [0, 2], :]
     return upright_boxes
 
