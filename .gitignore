@@ -5,7 +5,7 @@ wandb/
 tbsim-ws/
 videos/
 result/
-
+ngc/ngc_config.json
 
 ## config files
 *.yaml
