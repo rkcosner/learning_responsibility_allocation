@@ -289,3 +289,187 @@ def collision_loss(pred_edges: Dict[str, torch.Tensor], col_funcs=None):
 
 def lane_regulation_loss(lane_flag,agent_mask):
     return (lane_flag.mean(-1)*agent_mask).sum()/agent_mask.sum()
+
+def weighted_trajectory_loss(
+    predictions,
+    targets,
+    target_weights,
+    total_count,
+    weights_scaling=None,
+    crit=nn.MSELoss(reduction="none"),
+):
+    """
+    Aggregated per-step loss between gt and predicted trajectories
+    Args:
+        predictions (torch.Tensor): predicted trajectory [B, (A), T, D]
+        targets (torch.Tensor): target trajectory [B, (A), T, D]
+        weights (torch.Tensor): [B, (A), T]
+        total_count (float)
+        weight_scaling (torch.Tensor): [D], Defaults to None.
+        crit (nn.Module): loss function
+
+    Returns:
+        loss (torch.Tensor)
+    """
+    assert target_weights.shape == predictions.shape[:-1]
+    assert predictions.shape == targets.shape
+    if weights_scaling is None:
+        weights_scaling = torch.ones(targets.shape[-1]).to(targets.device)
+    assert weights_scaling.shape[-1] == targets.shape[-1]
+    target_weights = target_weights.unsqueeze(-1) * weights_scaling
+    loss = torch.sum(crit(predictions, targets) * target_weights) / total_count
+    return loss
+
+
+def weighted_multimodal_trajectory_loss(
+    predictions,
+    targets,
+    target_weights,
+    probability,
+    total_count,
+    weights_scaling=None,
+    crit=nn.MSELoss(reduction="none"),
+):
+    """
+    Aggregated per-step loss between gt and predicted trajectories
+    Args:
+        predictions (torch.Tensor): predicted trajectory [B, M, A, T, D]
+        targets (torch.Tensor): target trajectory [B, A, T, D]
+        target_weights (torch.Tensor): [B, A, T]
+        probability (torch.Tensor): [B,M]
+        total_count (float)
+        weight_scaling (torch.Tensor): [D], Defaults to None.
+        crit (nn.Module): loss function
+
+    Returns:
+        loss (torch.Tensor)
+    """
+    assert target_weights.shape == predictions.shape[:-1]
+    assert predictions.shape == targets.shape
+    if weights_scaling is None:
+        weights_scaling = torch.ones(targets.shape[-1]).to(targets.device)
+    assert weights_scaling.shape[-1] == targets.shape[-1]
+    target_weights = target_weights.unsqueeze(-1) * weights_scaling
+    err = (
+        crit(
+            targets.unsqueeze(1).repeat(1, predictions.size(1), 1, 1, 1),
+            predictions,
+        )
+        * target_weights.unsqueeze(1)
+        * probability[:, :, None, None, None]
+    )
+    max_idx = torch.max(probability, dim=-1)[1]
+    max_mask = torch.zeros([*err.shape[:2], 1, 1, 1], dtype=torch.bool).to(err.device)
+    max_mask[torch.arange(0, err.size(0)), max_idx] = True
+    nonmax_mask = ~max_mask
+    loss = (
+        torch.sum((err * max_mask)) + torch.sum((err * nonmax_mask).detach())
+    ) / total_count
+    return loss
+
+
+def likelihood_loss(likelihood):
+    return 1.0 - torch.mean(likelihood)
+
+def lane_regularization_loss(lane_flags, weights, total_count, probability=None):
+    """penalizing the vehicle for exiting drivable area
+
+    Args:
+        lane_flags (torch.Tensor): 1 for in the lane, 0 for out of the lane, [B, (M), (A), T, 1]
+        weights (torch.Tensor): [B, (A), T]
+        total_count (float):
+        probability (torch.Tensor, optional): [B,M]. Defaults to None.
+
+    Returns:
+        [type]: [description]
+    """
+    if probability is None:
+        loss = torch.sum(weights.unsqueeze(-1) * (1.0 - lane_flags)) / total_count
+    else:
+        if lane_flags.ndim == 4:
+            probability = probability[:, :, None, None]
+        elif lane_flags.ndim == 5:
+            probability = probability[:, :, None, None, None]
+        loss = (
+            torch.sum(
+                weights.unsqueeze(-1).unsqueeze(1) * (1.0 - lane_flags) * probability
+            )
+            / total_count
+        )
+        return loss
+    return loss
+
+
+def goal_reaching_loss(
+    predictions,
+    targets,
+    availabilities,
+    weights_scaling=None,
+    crit=nn.MSELoss(reduction="none"),
+):
+    """
+    Final step loss between gt and predicted trajectories (normally used in conjunction with a forward dynamics model)
+    Args:
+        predictions (torch.Tensor): predicted trajectory [B, (A), T, D]
+        targets (torch.Tensor): target trajectory [B, (A), T, D]
+        availabilities (torch.Tensor): [B, (A), T]
+        weights_scaling (torch.Tensor): [D]
+        crit (nn.Module): loss function
+
+    Returns:
+        loss (torch.Tensor)
+    """
+    # compute loss mask by finding the last available target
+    num_frames = availabilities.shape[-1]
+    last_inds = L5Utils.get_last_available_index(availabilities)  # [B, (A)]
+    goal_mask = TensorUtils.to_one_hot(
+        last_inds, num_class=num_frames
+    )  # [B, (A), T] with the last frame set to 1
+    # filter out samples that do not have available frames
+    available_samples_mask = availabilities.sum(-1) > 0  # [B, (A)]
+    goal_mask = goal_mask * available_samples_mask.unsqueeze(-1).float()  # [B, (A), T]
+    goal_loss = trajectory_loss(
+        predictions,
+        targets,
+        availabilities=goal_mask,
+        weights_scaling=weights_scaling,
+        crit=crit,
+    )
+    return goal_loss
+
+
+def collision_loss(pred_edges: Dict[str, torch.Tensor], col_funcs=None):
+    """
+    Calculate collision loss among predicted edges along a batch of trajectories
+    Args:
+        pred_edges (dict): A dict that maps collision types to box locations
+        col_funcs (dict): A dict of collision functions (implemented in tbsim.utils.geometric_utils)
+
+    Returns:
+        collision loss (torch.Tensor)
+    """
+    if col_funcs is None:
+        col_funcs = {
+            "VV": VEH_VEH_collision,
+            "VP": VEH_PED_collision,
+            "PV": PED_VEH_collision,
+            "PP": PED_PED_collision,
+        }
+
+    coll_loss = 0
+    for et, fun in col_funcs.items():
+        if et not in pred_edges:
+            continue
+        edges = pred_edges[et]
+        if edges.shape[0] == 0:
+            continue
+        dis = fun(
+            edges[..., 0:3],
+            edges[..., 3:6],
+            edges[..., 6:8],
+            edges[..., 8:],
+        ).min(dim=-1)[
+            0
+        ]  # take min distance across time steps
+        coll_loss += torch.mean(torch.sigmoid(-dis - 4.0))  # smooth collision loss
+    return coll_loss

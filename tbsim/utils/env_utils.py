@@ -2,6 +2,7 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 from typing import Tuple, Dict
+from copy import deepcopy
 
 from tbsim.envs.base import BatchedEnv, BaseEnv
 import tbsim.utils.tensor_utils as TensorUtils
@@ -51,6 +52,7 @@ def rollout_episodes(
         counter = 0
         frames = []
         while not done:
+            timers.tic("step")
             with timers.timed("obs"):
                 obs = env.get_observation()
             with timers.timed("to_torch"):
@@ -64,13 +66,14 @@ def rollout_episodes(
                 with timers.timed("network"):
                     action = policy.get_action(obs)
 
-                with timers.timed("step"):
+                with timers.timed("env_step"):
                     ims = env.step(
                         action, num_steps_to_take=n_step_action, render=render
                     )  # List of [num_scene, h, w, 3]
                 if render:
                     frames.extend(ims)
-            # print(timers)
+            timers.toc("step")
+            print(timers)
 
             done = env.is_done()
             counter += 1
@@ -195,7 +198,7 @@ class Plan(object):
         b, t, s = positions.shape
         assert s == 2
         assert yaws.shape == (b, t, 1)
-        assert availabilities.shape ==  (b, t)
+        assert availabilities.shape == (b, t), (availabilities.shape, (b, t))
         self._positions = positions
         self._yaws = yaws
         self._availabilities = availabilities
@@ -264,14 +267,37 @@ class RolloutAction(object):
     def has_agents(self):
         return self.agents is not None
 
+    def transform(self, ego_trans_mats, ego_rot_rads, agents_trans_mats=None, agents_rot_rads=None):
+        trans_action = RolloutAction()
+        if self.has_ego:
+            trans_action.ego = self.ego.transform(trans_mats=ego_trans_mats, rot_rads=ego_rot_rads)
+            if self.ego_info is not None:
+                trans_action.ego_info = deepcopy(self.ego_info)
+                if "plan" in trans_action.ego_info:
+                    plan = Plan.from_dict(trans_action.ego_info["plan"])
+                    trans_action.ego_info["plan"] = plan.transform(
+                        trans_mats=ego_trans_mats, rot_rads=ego_rot_rads
+                    ).to_dict()
+        if self.has_agents:
+            assert agents_trans_mats is not None and agents_rot_rads is not None
+            trans_action.agents = self.agents.transform(trans_mats=agents_trans_mats, rot_rads=agents_rot_rads)
+            if self.agents_info is not None:
+                trans_action.agents_info = deepcopy(self.agents_info)
+                if "plan" in trans_action.agents_info:
+                    plan = Plan.from_dict(trans_action.agents_info["plan"])
+                    trans_action.agents_info["plan"] = plan.transform(
+                        trans_mats=agents_trans_mats, rot_rads=agents_rot_rads
+                    ).to_dict()
+        return trans_action
+
     def to_dict(self):
         d = dict()
         if self.has_ego:
             d["ego"] = self.ego.to_dict()
-            d["ego_info"] = self.ego_info
+            d["ego_info"] = deepcopy(self.ego_info)
         if self.has_agents:
             d["agents"] = self.agents.to_dict()
-            d["agents_info"] = self.agents_info
+            d["agents_info"] = deepcopy(self.agents_info)
         return d
 
     def to_numpy(self):
@@ -281,6 +307,15 @@ class RolloutAction(object):
             agents=self.agents.to_numpy() if self.has_agents else None,
             agents_info=TensorUtils.to_numpy(self.agents_info) if self.has_agents else None,
         )
+
+    @classmethod
+    def from_dict(cls, d):
+        d = deepcopy(d)
+        if "ego" in d:
+            d["ego"] = Action.from_dict(d["ego"])
+        if "agents" in d:
+            d["agents"] = Action.from_dict(d["agents"])
+        return cls(**d)
 
 
 class OptimController(object):

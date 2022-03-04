@@ -374,7 +374,7 @@ def obtain_lane_flag(
             centroid,
             raster_from_world,
             mask,
-            patch_size,
+            patch_size.type(torch.float),
             mode="all",
         )
         lane_flags = ROI_align(lane_mask.unsqueeze(1), ROI, out_dim)
@@ -390,7 +390,7 @@ def obtain_lane_flag(
                 centroid,
                 raster_from_world,
                 mask,
-                patch_size,
+                patch_size.type(torch.float),
                 mode="all",
             )
             lane_flag_i = ROI_align(lane_mask.unsqueeze(1), ROI, out_dim)
@@ -418,7 +418,7 @@ def obtain_map_enc(
         centroid,
         raster_from_world,
         mask,
-        patch_size,
+        patch_size.type(torch.float),
         mode,
     )
     CNN_out = map_encoder(image, ROI)

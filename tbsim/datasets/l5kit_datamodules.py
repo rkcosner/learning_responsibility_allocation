@@ -10,12 +10,13 @@ from torch.utils.data import DataLoader
 
 from l5kit.rasterization import build_rasterizer
 from l5kit.rasterization.rasterizer import Rasterizer
-from tbsim.external.vectorization.vectorizer_builder import build_vectorizer
+from tbsim.external.vectorizer import build_vectorizer
 from l5kit.data import LocalDataManager, ChunkedDataset
 from l5kit.dataset import EgoDataset, AgentDataset
 
 from tbsim.configs.base import TrainConfig
 from tbsim.configs.l5kit_online_config import L5KitOnlineTrainConfig
+from tbsim.external.vectorizer import build_vectorizer
 from tbsim.external.l5_ego_dataset import (
     EgoDatasetMixed, EgoReplayBufferMixed
 )

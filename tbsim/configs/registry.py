@@ -60,11 +60,11 @@ EXP_CONFIG_REGISTRY["l5_mixed_plan"] = ExperimentConfig(
     registered_name="l5_mixed_plan",
 )
 
-EXP_CONFIG_REGISTRY["l5_rasterized_vae_plan"] = ExperimentConfig(
-    train_config=L5KitTrainConfig(),
-    env_config=L5KitEnvConfig(),
+EXP_CONFIG_REGISTRY["l5_mixed_vae_plan"] = ExperimentConfig(
+    train_config=L5KitMixedTrainConfig(),
+    env_config=L5KitMixedSemanticMapEnvConfig(),
     algo_config=L5RasterizedVAEConfig(),
-    registered_name="l5_rasterized_vae_plan",
+    registered_name="l5_mixed_vae_plan",
 )
 
 EXP_CONFIG_REGISTRY["l5_mixed_transformer_plan"] = ExperimentConfig(

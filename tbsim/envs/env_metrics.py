@@ -100,6 +100,7 @@ def masked_max_per_episode(met, met_mask):
 
 
 class OffRoadRate(EnvMetrics):
+    """Compute the fraction of the time that the agent is in undrivable regions"""
     def reset(self):
         self._per_step = []
         self._per_step_mask = []
@@ -136,11 +137,13 @@ class CollisionRate(EnvMetrics):
         super(CollisionRate, self).__init__()
         self._all_scene_index = None
         self._agent_scene_index = None
+        self._agent_track_id = None
 
     def reset(self):
         self._per_step = {CollisionType.FRONT: [], CollisionType.REAR: [], CollisionType.SIDE:[], "coll_any": []}
         self._all_scene_index = None
         self._agent_scene_index = None
+        self._agent_track_id = None
 
     def __len__(self):
         return len(self._per_step["coll_any"])
@@ -179,6 +182,7 @@ class CollisionRate(EnvMetrics):
                     coll_rates[coll[0]][agent_index_per_scene[i][j]] = 1.
                     coll_rates["coll_any"][agent_index_per_scene[i][j]] = 1.
 
+        # compute per-scene collision counts (for visualization purposes)
         coll_counts = dict()
         for k in coll_rates:
             coll_counts[k], _ = step_aggregate_per_scene(
@@ -191,9 +195,22 @@ class CollisionRate(EnvMetrics):
         return coll_rates, coll_counts
 
     def add_step(self, state_info: dict, all_scene_index: np.ndarray):
-        self._all_scene_index = all_scene_index
-        self._agent_scene_index = state_info["scene_index"]
+        if self._all_scene_index is None:  # start of an episode
+            self._all_scene_index = all_scene_index
+            self._agent_scene_index = state_info["scene_index"]
+            self._agent_track_id = state_info["track_id"]
+
         met_all, _ = self.compute_per_step(state_info, all_scene_index)
+
+        # reassign metrics according to the track id of the initial state (in case some agents go missing)
+        for k, met in met_all.items():
+            met_a = np.zeros(len(self._agent_track_id))  # assume no collision for missing agents
+            for i, (sid, tid) in enumerate(zip(state_info["scene_index"], state_info["track_id"])):
+                agent_index = np.bitwise_and(self._agent_track_id == tid, self._agent_scene_index == sid)
+                assert np.sum(agent_index) == 1  # make sure there is no new agent
+                met_a[agent_index] = met[i]
+            met_all[k] = met_a
+
         for k in self._per_step:
             self._per_step[k].append(met_all[k])
 

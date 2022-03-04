@@ -13,7 +13,7 @@ from l5kit.rasterization import Rasterizer, RenderContext
 from l5kit.sampling.agent_sampling import generate_agent_sample
 from l5kit.sampling.agent_sampling_vectorized import generate_agent_sample_vectorized
 from tbsim.external.agent_sampling_mixed import generate_agent_sample_mixed
-from tbsim.external.vectorization.vectorizer import Vectorizer
+from tbsim.external.vectorizer import Vectorizer
 from l5kit.dataset.ego import BaseEgoDataset
 from tbsim.utils.timer import Timers
 
@@ -95,7 +95,8 @@ class EgoDatasetMixed(BaseEgoDataset):
         with self.timer.timed("get_frame"):
             data = super().get_frame(scene_index, state_index, track_id=track_id)
         # TODO (@lberg): this should not be here but in the rasterizer
-        data["image"] = data["image"].transpose(2, 0, 1)  # 0,1,C -> C,0,1
+        if "image" in data:
+            data["image"] = data["image"].transpose(2, 0, 1)  # 0,1,C -> C,0,1
         if "other_agents_image" in data:
             data["other_agents_image"] = data["other_agents_image"].transpose(0,3,1,2)
         return data

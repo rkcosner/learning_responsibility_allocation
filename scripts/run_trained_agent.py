@@ -1,4 +1,5 @@
 import argparse
+from copy import deepcopy
 
 from collections import OrderedDict
 import os
@@ -6,7 +7,7 @@ import torch
 from l5kit.data import LocalDataManager, ChunkedDataset
 from l5kit.dataset import EgoDataset
 from l5kit.rasterization import build_rasterizer
-from tbsim.external.vectorization.vectorizer_builder import build_vectorizer
+from tbsim.external.vectorizer import build_vectorizer
 
 from tbsim.algos.l5kit_algos import L5TrafficModel, L5VAETrafficModel, L5TrafficModelGC, SpatialPlanner
 from tbsim.algos.multiagent_algos import MATrafficModel
@@ -17,6 +18,7 @@ from tbsim.utils.env_utils import rollout_episodes, PolicyWrapper, OptimControll
 from tbsim.utils.tensor_utils import to_torch, to_numpy
 from tbsim.external.l5_ego_dataset import EgoDatasetMixed, EgoReplayBufferMixed, ExperienceIterableWrapper
 from tbsim.utils.experiment_utils import get_checkpoint
+from tbsim.utils.vis_utils import build_visualization_rasterizer_l5kit
 from imageio import get_writer
 from tbsim.utils.timer import Timers
 
@@ -91,6 +93,11 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
 
     policy = RolloutWrapper(ego_policy=policy, agents_policy=policy)
 
+    dm = LocalDataManager(None)
+    l5_config = deepcopy(l5_config)
+    l5_config["raster_params"]["raster_size"] = (1000, 1000)
+    l5_config["raster_params"]["pixel_size"] = (0.1, 0.1)
+    render_rasterizer = build_visualization_rasterizer_l5kit(l5_config, dm)
     data_cfg.env.simulation.num_simulation_steps = 200
     data_cfg.env.simulation.distance_th_far = 1e+5
     data_cfg.env.simulation.disable_new_agents = True
@@ -100,7 +107,9 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
         dataset=env_dataset,
         seed=data_cfg.seed,
         num_scenes=3,
-        prediction_only=False
+        prediction_only=False,
+        renderer=render_rasterizer,
+        compute_metrics=False
     )
 
     # env.reset()

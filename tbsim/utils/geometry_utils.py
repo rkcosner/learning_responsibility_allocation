@@ -5,7 +5,7 @@ from tbsim.utils.tensor_utils import round_2pi
 from enum import IntEnum
 
 
-def get_box_world_coords(pos, yaw, extent):
+def get_box_agent_coords(pos, yaw, extent):
     corners = (torch.tensor([[-1, -1], [-1, 1], [1, 1], [1, -1]]) * 0.5).to(pos.device) * (
         extent.unsqueeze(-2)
     )
@@ -16,9 +16,42 @@ def get_box_world_coords(pos, yaw, extent):
     return rotated_corners
 
 
+def get_box_world_coords(pos, yaw, extent):
+    corners = (torch.tensor([[-1, -1], [-1, 1], [1, 1], [1, -1]]) * 0.5).to(pos.device) * (
+        extent.unsqueeze(-2)
+    )
+    s = torch.sin(yaw).unsqueeze(-1)
+    c = torch.cos(yaw).unsqueeze(-1)
+    rotM = torch.cat((torch.cat((c, s), dim=-1), torch.cat((-s, c), dim=-1)), dim=-2)
+    rotated_corners = corners @ rotM + pos.unsqueeze(-2)
+    return rotated_corners
+
+
+def get_box_agent_coords_np(pos, yaw, extent):
+    corners = (np.array([[-1, -1], [-1, 1], [1, 1], [1, -1]]) * 0.5) * (
+        extent[..., None, :]
+    )
+    s = np.sin(yaw)[..., None]
+    c = np.cos(yaw)[..., None]
+    rotM = np.concatenate((np.concatenate((c, s), axis=-1), np.concatenate((-s, c), axis=-1)), axis=-2)
+    rotated_corners = (corners + pos[..., None, :]) @ rotM
+    return rotated_corners
+
+
+def get_box_world_coords_np(pos, yaw, extent):
+    corners = (np.array([[-1, -1], [-1, 1], [1, 1], [1, -1]]) * 0.5) * (
+        extent[..., None, :]
+    )
+    s = np.sin(yaw)[..., None]
+    c = np.cos(yaw)[..., None]
+    rotM = np.concatenate((np.concatenate((c, s), axis=-1), np.concatenate((-s, c), axis=-1)), axis=-2)
+    rotated_corners = corners @ rotM + pos[..., None, :]
+    return rotated_corners
+
+
 def get_upright_box(pos, extent):
     yaws = torch.zeros(*pos.shape[:-1], 1).to(pos.device)
-    boxes = get_box_world_coords(pos, yaws, extent)
+    boxes = get_box_agent_coords_np(pos, yaws, extent)
     upright_boxes = boxes[..., [0, 2], :]
     return upright_boxes
 

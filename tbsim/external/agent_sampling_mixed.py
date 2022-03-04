@@ -1,7 +1,7 @@
 from typing import Optional
 
 import numpy as np
-from tbsim.external.vectorization.vectorizer import Vectorizer
+from tbsim.external.vectorizer import Vectorizer
 
 from l5kit.data import filter_agents_by_labels, PERCEPTION_LABEL_TO_INDEX
 from l5kit.data.filter import filter_agents_by_track_id
@@ -273,43 +273,43 @@ def generate_agent_sample_mixed(
                 vectorized_features["other_agents_agent_from_world"] =other_agents_agent_from_world
         else:
             vectorized_features = dict()
-    # if vectorize_lane:
-    #     other_agents_idx = np.where(
-    #         vectorized_features["all_other_agents_history_availability"][:, 0]
-    #         & (vectorized_features["all_other_agents_types"] >= 3)
-    #         & (vectorized_features["all_other_agents_types"] <= 13)
-    #     )[0]
-    #     available_other_pos = vectorized_features["all_other_agents_history_positions"][
-    #         other_agents_idx, 0
-    #     ]
-    #     available_other_yaw = vectorized_features["all_other_agents_history_yaws"][
-    #         other_agents_idx, 0
-    #     ]
-    #     local_pos = np.vstack((np.zeros([1, 2]), available_other_pos))
-    #     local_yaw = np.vstack((np.zeros([1, 1]), available_other_yaw))
-    #     world_pos = transform_points(local_pos, world_from_agent)
-    #     world_yaw = (local_yaw + agent_yaw_rad + np.pi) % (2 * np.pi) - np.pi
-    #
-    #     agent_lanes = get_lane_info(
-    #         agent_yaw_rad,
-    #         vectorizer,
-    #         world_pos,
-    #         world_yaw,
-    #         local_pos,
-    #         local_yaw,
-    #         world_from_agent,
-    #         agent_from_world,
-    #     )
-    #     ego_lanes = agent_lanes[0]
-    #     all_other_agents_lanes = np.zeros(
-    #         [
-    #             vectorized_features["all_other_agents_history_positions"].shape[0],
-    #             *agent_lanes.shape[1:],
-    #         ]
-    #     )
-    #     all_other_agents_lanes[other_agents_idx] = agent_lanes[1:]
-    #     frame_info["ego_lanes"] = ego_lanes
-    #     frame_info["all_other_agents_lanes"] = all_other_agents_lanes
+    if vectorize_lane:
+        other_agents_idx = np.where(
+            vectorized_features["all_other_agents_history_availability"][:, 0]
+            & (vectorized_features["all_other_agents_types"] >= 3)
+            & (vectorized_features["all_other_agents_types"] <= 13)
+        )[0]
+        available_other_pos = vectorized_features["all_other_agents_history_positions"][
+            other_agents_idx, 0
+        ]
+        available_other_yaw = vectorized_features["all_other_agents_history_yaws"][
+            other_agents_idx, 0
+        ]
+        local_pos = np.vstack((np.zeros([1, 2]), available_other_pos))
+        local_yaw = np.vstack((np.zeros([1, 1]), available_other_yaw))
+        world_pos = transform_points(local_pos, world_from_agent)
+        world_yaw = (local_yaw + agent_yaw_rad + np.pi) % (2 * np.pi) - np.pi
+    
+        agent_lanes = get_lane_info(
+            agent_yaw_rad,
+            vectorizer,
+            world_pos,
+            world_yaw,
+            local_pos,
+            local_yaw,
+            world_from_agent,
+            agent_from_world,
+        )
+        ego_lanes = agent_lanes[0]
+        all_other_agents_lanes = np.zeros(
+            [
+                vectorized_features["all_other_agents_history_positions"].shape[0],
+                *agent_lanes.shape[1:],
+            ]
+        )
+        all_other_agents_lanes[other_agents_idx] = agent_lanes[1:]
+        frame_info["ego_lanes"] = ego_lanes
+        frame_info["all_other_agents_lanes"] = all_other_agents_lanes
     timer.toc("sample")
 
     return {**frame_info, **vectorized_features, **rasterizer_out}
