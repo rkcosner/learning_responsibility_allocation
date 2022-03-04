@@ -87,9 +87,6 @@ class L5KitEnvConfig(EnvConfig):
         # maximum number of simulation steps to run (0.1sec / step)
         self.simulation.num_simulation_steps = 50
 
-        # maximum number of simulation steps to run (0.1sec / step)
-        self.simulation.num_simulation_steps = 50
-
         # which frame to start an simulation episode with
         self.simulation.start_frame_index = 0
 
@@ -220,7 +217,7 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         super(L5RasterizedPlanningConfig, self).__init__()
 
         self.name = "l5_rasterized"
-        self.model_architecture = "resnet50"
+        self.model_architecture = "resnet18"
         self.map_feature_dim = 256
         self.history_num_frames = 5
         self.history_num_frames_ego = 5
@@ -275,11 +272,15 @@ class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
         super(MARasterizedPlanningConfig, self).__init__()
         self.name = "ma_rasterized"
         self.agent_feature_dim = 128
-        self.ego_feature_dim = 128
+        self.global_feature_dim = 128
         self.context_size = (30, 30)
         self.goal_conditional = False
         self.goal_feature_dim = 32
         self.decoder.layer_dims = (128, 128)
+
+        self.use_rotated_roi = False
+        self.use_transformer = False
+        self.roi_layer_key = "layer4"
 
 
 class L5RasterizedGCConfig(L5RasterizedPlanningConfig):
