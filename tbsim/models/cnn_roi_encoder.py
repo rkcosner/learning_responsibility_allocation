@@ -269,11 +269,13 @@ def generate_ROIs(
         )
         world_xy = ((pos.unsqueeze(-2)) @ (rotM.transpose(-1, -2))).squeeze(-2)
         world_xy += centroid.view(-1, 1, 1, 2).type(torch.float)
+
         Mat = raster_from_world.view(-1, 1, 1, 3, 3).type(torch.float)
         raster_xy = batch_nd_transform_points(world_xy, Mat)
+        raster_mult = torch.linalg.norm(raster_from_world[0,0,0:2],dim=[-1]).item()
+        patch_size*=raster_mult
         ROI = [None] * bs
         index = [None] * bs
-
         for i in range(bs):
             ii, jj = torch.where(mask[i])
             index[i] = (ii, jj)
@@ -372,7 +374,7 @@ def obtain_lane_flag(
             centroid,
             raster_from_world,
             mask,
-            patch_size,
+            patch_size.type(torch.float),
             mode="all",
         )
         lane_flags = ROI_align(lane_mask.unsqueeze(1), ROI, out_dim)
@@ -388,7 +390,7 @@ def obtain_lane_flag(
                 centroid,
                 raster_from_world,
                 mask,
-                patch_size,
+                patch_size.type(torch.float),
                 mode="all",
             )
             lane_flag_i = ROI_align(lane_mask.unsqueeze(1), ROI, out_dim)

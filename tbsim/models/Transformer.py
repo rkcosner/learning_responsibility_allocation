@@ -539,6 +539,7 @@ def attention(query, key, value, mask=None, dropout=None):
     "Compute 'Scaled Dot Product Attention'"
     d_k = query.size(-1)
     scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
+
     if mask is not None:
         scores = scores.masked_fill(mask == 0, -1e9)
 
@@ -838,29 +839,6 @@ class SimpleTransformer(nn.Module):
         x = self.pre_emb(feats)
         x = self.agent_enc(x, avails, pos)
         return self.post_emb(x)
-
-
-def make_transformer_simple(
-        src_dim,
-        N_a=3,
-        d_model=384,
-        XY_pe_dim=64,
-        d_ff=2048,
-        head=8,
-        dropout=0.1,
-        step_size=[0.1, 0.1],
-):
-    "first generate the building blocks, attn networks, encoders, decoders, PEs and Feedforward nets"
-    c = copy.deepcopy
-    agent_attn = MultiHeadedAttention(head, d_model, pooling_dim=-3)
-    ff = PositionwiseFeedForward(d_model, d_ff, dropout)
-    XY_pe = PositionalEncodingNd(XY_pe_dim, dropout, step_size=step_size)
-    agent_enc = StaticEncoder(EncoderLayer(d_model, c(agent_attn), c(ff), dropout), XY_pe, N_a)
-    pre_emb = nn.Linear(src_dim, d_model - XY_pe_dim)
-    post_emb = nn.Linear(d_model, src_dim)
-
-    return
-
 
 
 class simplelinear(nn.Module):

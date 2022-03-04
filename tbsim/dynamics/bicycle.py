@@ -105,6 +105,32 @@ class Bicycle(Dynamics):
             max_s=self.max_speed
         )
         return next_x
+    @staticmethod
+    def calculate_vel(pos, yaw, dt, mask):
+
+        vel = (pos[..., 1:, 0:1] - pos[..., :-1, 0:1]) / dt * torch.cos(
+            yaw[..., 1:, :]
+        ) + (pos[..., 1:, 1:2] - pos[..., :-1, 1:2]) / dt * torch.sin(
+            yaw[..., 1:, :]
+        )
+        # right finite difference velocity
+        vel_r = torch.cat((vel[..., 0:1, :], vel), dim=-2)
+        # left finite difference velocity
+        vel_l = torch.cat((vel, vel[..., -1:, :]), dim=-2)
+        mask_r = torch.roll(mask, 1, dims=-1)
+        mask_r[..., 0] = False
+        mask_r = mask_r & mask
+
+        mask_l = torch.roll(mask, -1, dims=-1)
+        mask_l[..., -1] = False
+        mask_l = mask_l & mask
+        vel = (
+            (mask_l & mask_r).unsqueeze(-1) * (vel_r + vel_l) / 2
+            + (mask_l & (~mask_r)).unsqueeze(-1) * vel_l
+            + (mask_r & (~mask_l)).unsqueeze(-1) * vel_r
+        )
+
+        return vel
 
     def type(self):
         return DynType.BICYCLE

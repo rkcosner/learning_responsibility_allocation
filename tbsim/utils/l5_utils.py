@@ -128,6 +128,271 @@ def batch_to_raw_ego(data_batch, step_time):
     return raw
 
 
+def raw2feature(pos, vel, yaw, raw_type, mask, lanes=None, add_noise=False):
+    "map raw src into features of dim 21+lane dim"
+
+    """
+    PERCEPTION_LABELS = [
+    "PERCEPTION_LABEL_NOT_SET",
+    "PERCEPTION_LABEL_UNKNOWN",
+    "PERCEPTION_LABEL_DONTCARE",
+    "PERCEPTION_LABEL_CAR",
+    "PERCEPTION_LABEL_VAN",
+    "PERCEPTION_LABEL_TRAM",
+    "PERCEPTION_LABEL_BUS",
+    "PERCEPTION_LABEL_TRUCK",
+    "PERCEPTION_LABEL_EMERGENCY_VEHICLE",
+    "PERCEPTION_LABEL_OTHER_VEHICLE",
+    "PERCEPTION_LABEL_BICYCLE",
+    "PERCEPTION_LABEL_MOTORCYCLE",
+    "PERCEPTION_LABEL_CYCLIST",
+    "PERCEPTION_LABEL_MOTORCYCLIST",
+    "PERCEPTION_LABEL_PEDESTRIAN",
+    "PERCEPTION_LABEL_ANIMAL",
+    "AVRESEARCH_LABEL_DONTCARE",
+    ]
+    """
+    dyn_type = torch.zeros_like(raw_type)
+    veh_mask = (raw_type >= 3) & (raw_type <= 13)
+    ped_mask = (raw_type == 14) | (raw_type == 15)
+    veh_mask = veh_mask | ped_mask
+    ped_mask = ped_mask * 0
+    dyn_type += dynamics.DynType.UNICYCLE * veh_mask
+    # all vehicles, cyclists, and motorcyclists
+    if add_noise:
+        pos_noise = torch.randn(pos.size(0), 1, 1, 2).to(pos.device) * 0.5
+        yaw_noise = torch.randn(pos.size(0), 1, 1, 1).to(pos.device) * 0.1
+        if pos.ndim == 5:
+            pos_noise = pos_noise.unsqueeze(1)
+            yaw_noise = yaw_noise.unsqueeze(1)
+        feature_veh = torch.cat(
+            (
+                pos + pos_noise,
+                vel,
+                torch.cos(yaw + yaw_noise),
+                torch.sin(yaw + yaw_noise),
+            ),
+            dim=-1,
+        )
+    else:
+        feature_veh = torch.cat((pos, vel, torch.cos(yaw), torch.sin(yaw)), dim=-1)
+
+    state_veh = torch.cat((pos, vel, yaw), dim=-1)
+
+    # pedestrians and animals
+    if add_noise:
+        pos_noise = torch.randn(pos.size(0), 1, 1, 2).to(pos.device) * 0.5
+        yaw_noise = torch.randn(pos.size(0), 1, 1, 1).to(pos.device) * 0.1
+        if pos.ndim == 5:
+            pos_noise = pos_noise.unsqueeze(1)
+            yaw_noise = yaw_noise.unsqueeze(1)
+        ped_feature = torch.cat(
+            (
+                pos + pos_noise,
+                vel,
+                vel * torch.sin(yaw + yaw_noise),
+                vel * torch.cos(yaw + yaw_noise),
+            ),
+            dim=-1,
+        )
+    else:
+        ped_feature = torch.cat(
+            (pos, vel, vel * torch.sin(yaw), vel * torch.cos(yaw)), dim=-1
+        )
+    state_ped = torch.cat((pos, vel * torch.cos(yaw), vel * torch.sin(yaw)), dim=-1)
+    state = state_veh * veh_mask.view(
+        [*raw_type.shape, 1, 1]
+    ) + state_ped * ped_mask.view([*raw_type.shape, 1, 1])
+    dyn_type += dynamics.DynType.DI * ped_mask
+
+    feature = feature_veh * veh_mask.view(
+        [*raw_type.shape, 1, 1]
+    ) + ped_feature * ped_mask.view([*raw_type.shape, 1, 1])
+
+    type_embedding = F.one_hot(raw_type, 16)
+
+    if pos.ndim == 4:
+        if lanes is not None:
+            feature = torch.cat(
+                (
+                    feature,
+                    type_embedding.unsqueeze(-2).repeat(1, 1, feature.size(2), 1),
+                    lanes[:, :, None, :].repeat(1, 1, feature.size(2), 1),
+                ),
+                dim=-1,
+            )
+        else:
+            feature = torch.cat(
+                (
+                    feature,
+                    type_embedding.unsqueeze(-2).repeat(1, 1, feature.size(2), 1),
+                ),
+                dim=-1,
+            )
+
+    elif pos.ndim == 5:
+        if lanes is not None:
+            feature = torch.cat(
+                (
+                    feature,
+                    type_embedding.unsqueeze(-2).repeat(1, 1, 1, feature.size(-2), 1),
+                    lanes[:, :, None, None, :].repeat(
+                        1, feature.size(1), 1, feature.size(2), 1
+                    ),
+                ),
+                dim=-1,
+            )
+        else:
+            feature = torch.cat(
+                (
+                    feature,
+                    type_embedding.unsqueeze(-2).repeat(1, 1, 1, feature.size(-2), 1),
+                ),
+                dim=-1,
+            )
+    feature = feature * mask.unsqueeze(-1)
+    return feature, dyn_type, state
+
+
+def batch_to_vectorized_feature(data_batch, dyn_list, step_time, algo_config):
+    device = data_batch["history_positions"].device
+    raw_type = torch.cat(
+        (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
+        dim=1,
+    ).type(torch.int64)
+    extents = torch.cat(
+        (
+            data_batch["extent"][..., :2].unsqueeze(1),
+            torch.max(data_batch["all_other_agents_history_extents"], dim=-2)[0],
+        ),
+        dim=1,
+    )
+
+    src_pos = torch.cat(
+        (
+            data_batch["history_positions"].unsqueeze(1),
+            data_batch["all_other_agents_history_positions"],
+        ),
+        dim=1,
+    )
+    "history position and yaw need to be flipped so that they go from past to recent"
+    src_pos = torch.flip(src_pos, dims=[-2])
+    src_yaw = torch.cat(
+        (
+            data_batch["history_yaws"].unsqueeze(1),
+            data_batch["all_other_agents_history_yaws"],
+        ),
+        dim=1,
+    )
+    src_yaw = torch.flip(src_yaw, dims=[-2])
+    src_world_yaw = src_yaw + (
+        data_batch["yaw"]
+        .view(-1, 1, 1, 1)
+        .repeat(1, src_yaw.size(1), src_yaw.size(2), 1)
+    ).type(torch.float)
+    src_mask = torch.cat(
+        (
+            data_batch["history_availabilities"].unsqueeze(1),
+            data_batch["all_other_agents_history_availability"],
+        ),
+        dim=1,
+    ).bool()
+
+    src_mask = torch.flip(src_mask, dims=[-1])
+    # estimate velocity
+    src_vel = dyn_list[dynamics.DynType.UNICYCLE].calculate_vel(
+        src_pos, src_yaw, step_time, src_mask
+    )
+
+    src_vel[:, 0, -1] = torch.clip(
+        data_batch["curr_speed"].unsqueeze(-1),
+        min=algo_config.vmin,
+        max=algo_config.vmax,
+    )
+    if algo_config.vectorize_lane:
+        src_lanes = torch.cat(
+            (
+                data_batch["ego_lanes"].unsqueeze(1),
+                data_batch["all_other_agents_lanes"],
+            ),
+            dim=1,
+        ).type(torch.float)
+        src_lanes = torch.cat((
+            src_lanes[...,0:2],
+            torch.cos(src_lanes[...,2:3]),
+            torch.sin(src_lanes[...,2:3]),
+            src_lanes[...,-1:],
+        ),dim=-1)
+        src_lanes = src_lanes.view(*src_lanes.shape[:2], -1)
+    else:
+        src_lanes = None
+    src, dyn_type, src_state = raw2feature(
+        src_pos, src_vel, src_yaw, raw_type, src_mask, src_lanes
+    )
+    tgt_mask = torch.cat(
+        (
+            data_batch["target_availabilities"].unsqueeze(1),
+            data_batch["all_other_agents_future_availability"],
+        ),
+        dim=1,
+    ).bool()
+    num = torch.arange(0, src_mask.shape[2]).view(1, 1, -1).to(src_mask.device)
+    nummask = num * src_mask
+    last_idx, _ = torch.max(nummask, dim=2)
+    curr_state = torch.gather(
+        src_state, 2, last_idx[..., None, None].repeat(1, 1, 1, 4)
+    )
+
+    tgt_pos = torch.cat(
+        (
+            data_batch["target_positions"].unsqueeze(1),
+            data_batch["all_other_agents_future_positions"],
+        ),
+        dim=1,
+    )
+    tgt_yaw = torch.cat(
+        (
+            data_batch["target_yaws"].unsqueeze(1),
+            data_batch["all_other_agents_future_yaws"],
+        ),
+        dim=1,
+    )
+    tgt_pos_yaw = torch.cat((tgt_pos, tgt_yaw), dim=-1)
+    
+
+    # curr_pos_yaw = torch.cat((curr_state[..., 0:2], curr_yaw), dim=-1)
+
+    # tgt = tgt - curr_pos_yaw.repeat(1, 1, tgt.size(2), 1) * tgt_mask.unsqueeze(-1)
+
+
+    return (
+        src,
+        dyn_type,
+        src_state,
+        src_pos,
+        src_yaw,
+        src_world_yaw,
+        src_vel,
+        raw_type,
+        src_mask,
+        src_lanes,
+        extents,
+        tgt_pos_yaw,
+        tgt_mask,
+        curr_state,
+    )
+
+def obtain_goal_state(tgt_pos_yaw,tgt_mask):
+    num = torch.arange(0, tgt_mask.shape[2]).view(1, 1, -1).to(tgt_mask.device)
+    nummask = num * tgt_mask
+    last_idx, _ = torch.max(nummask, dim=2, keepdim=True)
+    last_mask = nummask.ge(last_idx)
+    
+    goal_mask = tgt_mask*last_mask
+    goal_pos_yaw = tgt_pos_yaw*goal_mask.unsqueeze(-1)
+    return goal_pos_yaw[...,:2], goal_pos_yaw[...,2:], goal_mask
+
+
 def batch_to_raw_all_agents(data_batch, step_time):
     raw_type = torch.cat(
         (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
@@ -170,9 +435,7 @@ def batch_to_raw_all_agents(data_batch, step_time):
     )
 
     # estimate velocity
-    src_vel = dynamics.Unicycle.calculate_vel(
-        src_pos, src_yaw, step_time, src_mask
-    )
+    src_vel = dynamics.Unicycle.calculate_vel(src_pos, src_yaw, step_time, src_mask)
     src_vel[:, 0, -1] = data_batch["curr_speed"].unsqueeze(-1)
 
     return {
@@ -181,7 +444,7 @@ def batch_to_raw_all_agents(data_batch, step_time):
         "curr_speed": src_vel[:, :, -1, 0],
         "raw_types": raw_type,
         "history_availabilities": src_mask,
-        "extents": extents
+        "extents": extents,
     }
 
 

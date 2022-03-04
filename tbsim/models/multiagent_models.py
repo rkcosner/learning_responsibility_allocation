@@ -11,13 +11,15 @@ import tbsim.utils.metrics as Metrics
 
 import tbsim.models.vaes as vaes
 import tbsim.utils.l5_utils as L5Utils
-from tbsim.utils.geometry_utils import get_upright_box, transform_points_tensor
+from tbsim.utils.geometry_utils import get_upright_box, transform_points_tensor, calc_distance_map
 from tbsim.utils.loss_utils import (
     trajectory_loss,
     goal_reaching_loss,
-    collision_loss
+    collision_loss,
+    lane_regulation_loss
 )
 from tbsim.models.roi_align import ROI_align, generate_ROIs, Indexing_ROI_result
+from tbsim.models.cnn_roi_encoder import obtain_lane_flag
 from tbsim.models.Transformer import SimpleTransformer
 
 
@@ -256,6 +258,28 @@ class AgentAwareRasterizedModel(nn.Module):
         if self.decoder.dyn is not None:
             out_dict["controls"] = all_pred["controls"]
 
+
+        lane_mask = (image_batch[:, -3] < 1.0).type(torch.float)
+        dis_map = calc_distance_map(lane_mask)
+        target_mask = torch.cat([data_batch["target_availabilities"].unsqueeze(1),data_batch["all_other_agents_future_availability"]],1)
+        agent_mask = target_mask.any(dim=-1).unsqueeze(-1).repeat(1, 1, target_mask.size(-1))
+        extents = torch.cat(
+            (
+                data_batch["extent"][..., :2].unsqueeze(1),
+                torch.max(data_batch["all_other_agents_history_extents"], dim=-2)[0],
+            ),
+            dim=1,
+        )
+        lane_flags = obtain_lane_flag(dis_map,
+                        pred_positions,
+                        pred_yaws,
+                        data_batch["centroid"].type(torch.float),
+                        data_batch["raster_from_world"],
+                        agent_mask,
+                        extents.type(torch.float),
+                        3,
+                        ).squeeze(-1)
+        out_dict["lane_flags"] = lane_flags
         return out_dict
 
     def compute_losses(self, pred_batch, data_batch):
@@ -285,7 +309,14 @@ class AgentAwareRasterizedModel(nn.Module):
         )
 
         coll_loss = collision_loss(pred_edges=pred_edges)
-        losses = OrderedDict(prediction_loss=pred_loss, goal_loss=goal_loss, collision_loss=coll_loss)
+
+        target_mask = torch.cat([data_batch["target_availabilities"].unsqueeze(1),data_batch["all_other_agents_future_availability"]],1)
+        agent_mask = target_mask.any(dim=-1)
+
+        lane_reg_loss = lane_regulation_loss(pred_batch["lane_flags"],agent_mask)
+
+        losses = OrderedDict(prediction_loss=pred_loss, goal_loss=goal_loss, collision_loss=coll_loss, lane_reg_loss=lane_reg_loss)
+
         if "controls" in pred_batch:
             # regularize the magnitude of yaw
             losses["yaw_reg_loss"] = torch.mean(pred_batch["controls"][..., 1] ** 2)

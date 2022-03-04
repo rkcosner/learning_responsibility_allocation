@@ -59,7 +59,7 @@ class TransformerModel(nn.Module):
 
         self.criterion = nn.MSELoss(reduction="none")
         self.map_enc_mode = algo_config.map_enc_mode
-        # unicycle for vehicles and double integrators for pedestrians
+        "unicycle for vehicles and double integrators for pedestrians"
         self.dyn_list = {
             DynType.UNICYCLE: Unicycle(
                 "vehicle", vbound=[algo_config.vmin, algo_config.vmax]
@@ -81,8 +81,8 @@ class TransformerModel(nn.Module):
         self.training_num = 0
         self.training_num_N = algo_config.training_num_N
 
-        # src_dim:x,y,v,sin(yaw),cos(yaw)+16-dim type encoding
-        # tgt_dim:x,y,yaw
+        "src_dim:x,y,v,sin(yaw),cos(yaw)+16-dim type encoding"
+        "tgt_dim:x,y,yaw"
         if algo_config.name == "TransformerGAN":
             self.use_GAN = True
             N_layer_enc_discr = algo_config.Discriminator.N_layer_enc
@@ -137,7 +137,7 @@ class TransformerModel(nn.Module):
 
     @staticmethod
     def tgt_temporal_mask(p, tgt_mask):
-        # use a binomial distribution with parameter p to mask out the first k steps of the tgt
+        "use a binomial distribution with parameter p to mask out the first k steps of the tgt"
         nbatches = tgt_mask.size(0)
         T = tgt_mask.size(2)
         mask_hint = torch.ones_like(tgt_mask)
