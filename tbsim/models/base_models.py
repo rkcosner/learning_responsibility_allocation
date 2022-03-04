@@ -639,7 +639,8 @@ class RasterizeROIEncoder(nn.Module):
             global_feature_dim: int = None,
             roi_feature_size: tuple = (7, 7),
             roi_layer_key: str = "layer4",
-            output_activation = nn.ReLU
+            output_activation = nn.ReLU,
+            use_rotated_roi=True
     ) -> None:
         super(RasterizeROIEncoder, self).__init__()
         model = RasterizedMapEncoder(
@@ -659,13 +660,15 @@ class RasterizeROIEncoder(nn.Module):
         self.roi_layer_key = roi_layer_key
         roi_scale = model.feature_scales()[roi_layer_key]
         roi_channel = model.feature_channels()[roi_layer_key]
-        # self.roi_align = RoIAlign(
-        #     output_size=roi_feature_size,
-        #     spatial_scale=roi_scale,
-        #     sampling_ratio=-1,
-        #     aligned=True
-        # )
-        self.roi_align = RotatedROIAlign(roi_feature_size, roi_scale=roi_scale)
+        if use_rotated_roi:
+            self.roi_align = RotatedROIAlign(roi_feature_size, roi_scale=roi_scale)
+        else:
+            self.roi_align = RoIAlign(
+                output_size=roi_feature_size,
+                spatial_scale=roi_scale,
+                sampling_ratio=-1,
+                aligned=True
+            )
 
         self.activation = output_activation()
         if agent_feature_dim is not None:

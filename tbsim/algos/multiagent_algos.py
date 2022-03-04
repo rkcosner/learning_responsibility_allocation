@@ -23,7 +23,7 @@ class MATrafficModel(pl.LightningModule):
         self.model = AgentAwareRasterizedModel(
             model_arch=algo_config.model_architecture,
             input_image_shape=modality_shapes["image"],  # [C, H, W]
-            ego_feature_dim=algo_config.ego_feature_dim,
+            global_feature_dim=algo_config.global_feature_dim,
             agent_feature_dim=algo_config.agent_feature_dim,
             context_size=algo_config.context_size,
             future_num_frames=algo_config.future_num_frames,
@@ -33,6 +33,9 @@ class MATrafficModel(pl.LightningModule):
             decoder_kwargs=algo_config.decoder,
             goal_conditional=algo_config.goal_conditional,
             goal_feature_dim=algo_config.goal_feature_dim,
+            use_rotated_roi=algo_config.use_rotated_roi,
+            use_transformer=algo_config.use_transformer,
+            roi_layer_key=algo_config.roi_layer_key
         )
 
     @property

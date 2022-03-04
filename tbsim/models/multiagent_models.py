@@ -27,7 +27,7 @@ class AgentAwareRasterizedModel(nn.Module):
             self,
             model_arch: str,
             input_image_shape,
-            ego_feature_dim: int,
+            global_feature_dim: int,
             agent_feature_dim: int,
             future_num_frames: int,
             context_size: tuple,
@@ -38,6 +38,9 @@ class AgentAwareRasterizedModel(nn.Module):
             goal_conditional: bool = False,
             goal_feature_dim : int = 32,
             weights_scaling : tuple = (1.0, 1.0, 1.0),
+            use_transformer=True,
+            use_rotated_roi=True,
+            roi_layer_key="layer4"
     ) -> None:
 
         nn.Module.__init__(self)
@@ -45,10 +48,13 @@ class AgentAwareRasterizedModel(nn.Module):
         self.map_encoder = base_models.RasterizeROIEncoder(
             model_arch=model_arch,
             input_image_shape=input_image_shape,  # [C, H, W]
-            global_feature_dim=ego_feature_dim,
+            global_feature_dim=global_feature_dim,
             agent_feature_dim=agent_feature_dim,
-            output_activation=nn.ReLU
+            output_activation=nn.ReLU,
+            use_rotated_roi=use_rotated_roi,
+            roi_layer_key=roi_layer_key
         )
+        self.use_rotated_roi = use_rotated_roi
 
         self.goal_conditional = goal_conditional
         goal_dim = 0
@@ -72,7 +78,7 @@ class AgentAwareRasterizedModel(nn.Module):
 
         # other_dyn_type = None if disable_dynamics_for_other_agents else dynamics_type
         self.decoder = base_models.MLPTrajectoryDecoder(
-            feature_dim=agent_feature_dim + goal_dim,
+            feature_dim=agent_feature_dim + global_feature_dim + goal_dim,
             state_dim=3,
             num_steps=future_num_frames,
             dynamics_type=dynamics_type,
@@ -80,8 +86,11 @@ class AgentAwareRasterizedModel(nn.Module):
             step_time=step_time,
             network_kwargs=decoder_kwargs
         )
+        if use_transformer:
+            self.transformer = SimpleTransformer(src_dim=agent_feature_dim + global_feature_dim)
+        else:
+            self.transformer = None
 
-        self.transformer = SimpleTransformer(src_dim=agent_feature_dim)
         assert len(context_size) == 2
         self.context_size = nn.Parameter(torch.Tensor(context_size), requires_grad=False)
         self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
@@ -134,28 +143,28 @@ class AgentAwareRasterizedModel(nn.Module):
         metrics["agents_FDE"] = np.mean(fde)
 
         # pairwise collisions
-        targets_all = L5Utils.batch_to_target_all_agents(data_batch)
-        raw_type = torch.cat(
-            (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
-            dim=1,
-        ).type(torch.int64)
-
-        pred_edges = L5Utils.generate_edges(
-            raw_type,
-            targets_all["extents"],
-            pos_pred=targets_all["target_positions"],
-            yaw_pred=targets_all["target_yaws"],
-        )
-
-        coll_rates = TensorUtils.to_numpy(
-            Metrics.batch_pairwise_collision_rate(pred_edges)
-        )
-        for c in coll_rates:
-            metrics["coll_" + c] = float(coll_rates[c])
+        # targets_all = L5Utils.batch_to_target_all_agents(data_batch)
+        # raw_type = torch.cat(
+        #     (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
+        #     dim=1,
+        # ).type(torch.int64)
+        #
+        # pred_edges = L5Utils.generate_edges(
+        #     raw_type,
+        #     targets_all["extents"],
+        #     pos_pred=targets_all["target_positions"],
+        #     yaw_pred=targets_all["target_yaws"],
+        # )
+        #
+        # coll_rates = TensorUtils.to_numpy(
+        #     Metrics.batch_pairwise_collision_rate(pred_edges)
+        # )
+        # for c in coll_rates:
+        #     metrics["coll_" + c] = float(coll_rates[c])
 
         return metrics
 
-    def _get_roi_boxes(self, pos, yaw, trans_mat):
+    def _get_roi_boxes(self, pos, trans_mat):
         b, a = pos.shape[:2]
         curr_pos_raster = transform_points_tensor(pos, trans_mat.float())
         extents = torch.ones_like(curr_pos_raster) * self.context_size  # [B, A, 2]
@@ -191,34 +200,36 @@ class AgentAwareRasterizedModel(nn.Module):
         ), dim=1)[:, :, 0]  # histories are reversed
         b, a = curr_pos_all.shape[:2]
 
-        # curr_yaw_all = torch.cat((
-        #     data_batch["history_yaws"].unsqueeze(1),
-        #     data_batch["all_other_agents_history_yaws"],
-        # ), dim=1)[:, :, 0]  # histories are reversed
-
         states_all = L5Utils.batch_to_raw_all_agents(data_batch, self.decoder.step_time)
 
-        # rois = self._get_roi_boxes(curr_pos_all, curr_yaw_all, trans_mat=data_batch["raster_from_agent"])
-        rois, indices = self._get_roi_boxes_rotated(
-            pos=states_all["history_positions"],
-            yaw=states_all["history_yaws"],
-            centroid=data_batch["centroid"],
-            avails=states_all["history_availabilities"],
-            trans_mat=data_batch["raster_from_world"],
-            patch_size=torch.Tensor([30, 30, 30, 30]).to(image_batch.device)
-        )
+        if self.use_rotated_roi:
+            rois, indices = self._get_roi_boxes_rotated(
+                pos=states_all["history_positions"],
+                yaw=states_all["history_yaws"],
+                centroid=data_batch["centroid"],
+                avails=states_all["history_availabilities"],
+                trans_mat=data_batch["raster_from_world"],
+                patch_size=torch.Tensor([30, 30, 30, 30]).to(image_batch.device)
+            )
 
-        all_feats, _, _ = self.map_encoder(image_batch, rois=rois)  # approximately B * A
-        split_sizes = [len(l) for l in indices]
-        all_feats_list = torch.split(all_feats, split_sizes)
-        all_feats = Indexing_ROI_result(all_feats_list, indices, emb_size=(b, a, all_feats.shape[-1]))
+            all_feats, _, global_feats = self.map_encoder(image_batch, rois=rois)  # approximately B * A
+            split_sizes = [len(l) for l in indices]
+            all_feats_list = torch.split(all_feats, split_sizes)
+            all_feats = Indexing_ROI_result(all_feats_list, indices, emb_size=(b, a, all_feats.shape[-1]))
+        else:
+            rois = self._get_roi_boxes(curr_pos_all, trans_mat=data_batch["raster_from_agent"])
+            all_feats, _, global_feats = self.map_encoder(image_batch, rois=rois)
+
         all_feats = all_feats.reshape(b, a, -1)
+        # tile global feature and concat w/ agent-wise feature
+        all_feats = torch.cat((all_feats, TensorUtils.unsqueeze_expand_at(global_feats, a, 1)), dim=-1)
 
-        all_feats = self.transformer(
-            all_feats,
-            states_all["history_availabilities"][:, :, -1],
-            states_all["history_positions"][:, :, -1]
-        )
+        if self.transformer is not None:
+            all_feats = self.transformer(
+                all_feats,
+                states_all["history_availabilities"][:, :, -1],
+                states_all["history_positions"][:, :, -1]
+            )
 
         if self.goal_conditional:
             # optionally condition the prediction on goal locations
@@ -242,7 +253,7 @@ class AgentAwareRasterizedModel(nn.Module):
             "predictions": {"positions": pred_positions, "yaws": pred_yaws},
             # "rois_raster": rois[:, 1:].reshape(b, a, 2, 2)
         }
-        if self.decoder.dyn is None:
+        if self.decoder.dyn is not None:
             out_dict["controls"] = all_pred["controls"]
 
         return out_dict

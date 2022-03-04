@@ -420,7 +420,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             agents_rot_rads=obs["agents"]["yaw"][..., None, None] if self.generate_agent_obs else None
         )
         if actions.has_agents:
-            agent_track_ids = obs["agents"]["track_id"].tolist()
+            agent_track_ids = obs["agents"]["track_id"]
+            agent_scene_indices = obs["agents"]["scene_index"]
 
         renderings = []
         for step_i in range(num_steps_to_take):
@@ -431,8 +432,10 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             actions_world_d = actions_world.to_dict()
             if actions.has_agents:
                 # some agents might get dropped in the middle, filter agent actions by active agent track ids
-                step_agent_track_ids = obs["agents"]["track_id"]
-                active_agent_index = np.array([agent_track_ids.index(tid) for tid in step_agent_track_ids])
+                active_agent_index = np.zeros(agent_track_ids.shape[0], dtype=np.bool)
+                for i, (tid, sid) in enumerate(zip(agent_track_ids, agent_scene_indices)):
+                    agent_exists = np.bitwise_and(tid == obs["agents"]["track_id"], sid == obs["agents"]["scene_index"])
+                    active_agent_index[i] = np.sum(agent_exists) > 0
                 actions_world_d["agents"] = TensorUtils.map_ndarray(
                     actions_world_d["agents"], lambda x: x[active_agent_index]
                 )
