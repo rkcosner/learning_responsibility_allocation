@@ -868,6 +868,17 @@ def pad_sequence(seq, padding, batched=False, pad_same=False, pad_values=0.):
         },
     )
 
+def left_right_average(seq):
+    """Add 1 entry to the seq by averaging the left appended seq and right appended seq
+
+    Args:
+        seq (np.ndarray or torch.Tensor): 
+    """
+    concat_func = np.concatenate if isinstance(seq, np.ndarray) else torch.cat
+    seq_left = concat_func((seq[:1],seq),0)
+    seq_right = concat_func((seq,seq[-1:]),0)
+    return 0.5*(seq_left+seq_right)
+
 
 def assert_size_at_dim_single(x, size, dim, msg):
     """

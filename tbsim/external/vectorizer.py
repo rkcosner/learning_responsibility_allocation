@@ -180,6 +180,10 @@ class Vectorizer:
         # num_other_agents (M) x sequence_length x self._vector_length
         other_agents_polyline = np.concatenate([agents_points, agents_yaws], axis=-1)
         other_agents_polyline_availability = all_other_agents_history_availability.copy()
+        all_other_agents_track_id = np.zeros(self.other_agents_num, dtype=np.float32)
+        all_other_agents_track_id[: len(list_agents_to_take)] = np.array(
+            list_agents_to_take
+        )
 
         agent_dict = {
             "all_other_agents_history_positions": all_other_agents_history_positions,
@@ -195,6 +199,7 @@ class Vectorizer:
             "agent_polyline_availability": agent_polyline_availability.astype(np.bool),
             "other_agents_polyline": other_agents_polyline,
             "other_agents_polyline_availability": other_agents_polyline_availability.astype(np.bool),
+            "all_other_agents_track_id": all_other_agents_track_id,
         }
 
         return agent_dict

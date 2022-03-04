@@ -9,6 +9,7 @@ from collections import OrderedDict
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
+import tbsim.utils.tensor_utils as TensorUtils
 
 
 def clones(module, n):
@@ -196,7 +197,7 @@ class StaticEncoder(nn.Module):
         self.agent_encs = clones(agent_enc, N_layer)
         self.XY_pe = XY_pe
 
-    def forward(self, x, src_mask, src_pos, map_emb):
+    def forward(self, x, src_mask, src_pos, map_emb=None):
         """Pass the input (and mask) through each layer in turn.
         Args:
             x:[B,Num_agent,T,d_model]
@@ -206,13 +207,14 @@ class StaticEncoder(nn.Module):
         Returns:
             embedding of size [B,Num_agent,T,d_model]
         """
+        inputs = [x, self.XY_pe(x, src_pos)]
+        if map_emb is not None:
+            inputs.append(map_emb)
 
         x = (
             torch.cat(
                 (
-                    x,
-                    self.XY_pe(x, src_pos),
-                    map_emb,
+                    inputs
                 ),
                 dim=-1,
             )
@@ -537,6 +539,7 @@ def attention(query, key, value, mask=None, dropout=None):
     "Compute 'Scaled Dot Product Attention'"
     d_k = query.size(-1)
     scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
+
     if mask is not None:
         scores = scores.masked_fill(mask == 0, -1e9)
 
@@ -809,6 +812,33 @@ def make_transformer_model(
     )
 
     return Transformer_Model, Summary_Model
+
+
+class SimpleTransformer(nn.Module):
+    def __init__(
+            self,
+            src_dim,
+            N_a=3,
+            d_model=384,
+            XY_pe_dim=64,
+            d_ff=2048,
+            head=8,
+            dropout=0.1,
+            step_size=[0.1, 0.1],
+    ):
+        super(SimpleTransformer, self).__init__()
+        c = copy.deepcopy
+        agent_attn = MultiHeadedAttention(head, d_model, pooling_dim=-3)
+        ff = PositionwiseFeedForward(d_model, d_ff, dropout)
+        XY_pe = PositionalEncodingNd(XY_pe_dim, dropout, step_size=step_size)
+        self.agent_enc = StaticEncoder(EncoderLayer(d_model, c(agent_attn), c(ff), dropout), XY_pe, N_a)
+        self.pre_emb = nn.Linear(src_dim, d_model - XY_pe_dim)
+        self.post_emb = nn.Linear(d_model, src_dim)
+
+    def forward(self, feats, avails, pos):
+        x = self.pre_emb(feats)
+        x = self.agent_enc(x, avails, pos)
+        return self.post_emb(x)
 
 
 class simplelinear(nn.Module):

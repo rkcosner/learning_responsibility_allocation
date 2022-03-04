@@ -163,6 +163,7 @@ class L5KitMixedEnvConfig(EnvConfig):
         self.data_generation_params.lane_params.max_points_per_crosswalk = 5
         self.data_generation_params.lane_params.max_retrieval_distance_m = 35
         self.data_generation_params.lane_params.max_num_crosswalks = 20
+        self.data_generation_params.rasterize_agents = False
 
         # step size of lane interpolation
         self.data_generation_params.lane_params.lane_interp_step_size = 5.0
@@ -176,7 +177,7 @@ class L5KitMixedEnvConfig(EnvConfig):
         # From 0 to 1 per axis, [0.5,0.5] would show the ego centered in the image.
         self.rasterizer.ego_center = (0.25, 0.5)
 
-        self.rasterizer.map_type = "semantic_debug"
+        self.rasterizer.map_type = "py_semantic"
         # self.rasterizer.map_type = "scene_semantic"
 
         # the keys are relative to the dataset environment variable
@@ -246,7 +247,8 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.loss_weights.prediction_loss = 1.0
         self.loss_weights.goal_loss = 0.0
         self.loss_weights.collision_loss = 0.0
-        self.loss_weights.yaw_reg_loss = 0.0
+        self.loss_weights.yaw_reg_loss = 1.0
+        self.loss_weights.lane_reg_loss = 0.5
 
         self.optim_params.policy.learning_rate.initial = 1e-3  # policy learning rate
         self.optim_params.policy.learning_rate.decay_factor = (
@@ -275,9 +277,7 @@ class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
         self.agent_feature_dim = 128
         self.ego_feature_dim = 128
         self.context_size = (30, 30)
-        self.agent_aware = True
-        self.disable_dynamics_for_other_agents = False
-        self.goal_conditional = True
+        self.goal_conditional = False
         self.goal_feature_dim = 32
         self.decoder.layer_dims = (128, 128)
 
@@ -312,10 +312,10 @@ class L5TransformerPredConfig(AlgoConfig):
 
         self.name = "TransformerPred"
         self.model_architecture = "Factorized"
-        self.history_num_frames = 10
-        self.history_num_frames_ego = 10  # this will also create raster history (we need to remove the raster from train/eval dataset - only visualization)
-        self.history_num_frames_agents = 10
-        self.future_num_frames = 20
+        self.history_num_frames = 5
+        self.history_num_frames_ego = 5  # this will also create raster history (we need to remove the raster from train/eval dataset - only visualization)
+        self.history_num_frames_agents = 5
+        self.future_num_frames = 25
         self.step_time = 0.2
         self.N_t = 2
         self.N_a = 1
@@ -327,11 +327,11 @@ class L5TransformerPredConfig(AlgoConfig):
         self.head = 4
         self.dropout = 0.01
         self.XY_step_size = [2.0, 2.0]
-        self.weights_scaling = [1.0, 1.0, 1.0]
-        self.ego_weight = 1.0
-        self.all_other_weight = 0.5
+
         self.disable_other_agents = False
         self.disable_map = False
+        self.goal_conditioned = True
+
         # self.disable_lane_boundaries = True
         self.global_head_dropout = 0.0
         self.training_num_N = 10000
@@ -340,17 +340,23 @@ class L5TransformerPredConfig(AlgoConfig):
         self.N_layer_tgt_dec = 1
         self.vmax = 30
         self.vmin = -10
-        self.reg_weight = 10
         self.calc_likelihood = False
         self.calc_collision = False
-        self.collision_weight = 1
+
         self.map_enc_mode = "all"
         self.temporal_bias = 0.5
-        self.lane_regulation_weight = 1.5
+        self.weights.lane_regulation_weight = 1.5
+        self.weights.weights_scaling = [1.0, 1.0, 1.0]
+        self.weights.ego_weight = 1.0
+        self.weights.all_other_weight = 0.5
+        self.weights.collision_weight = 1
+        self.weights.reg_weight = 10
+        self.weights.goal_reaching_weight = 2
 
         # map encoding parameters
-        self.CNN.map_channels = 3
-        self.CNN.hidden_channels = [10, 20, 20, 10]
+        self.CNN.map_channels = (self.history_num_frames+1)*2+3
+        self.CNN.lane_channel = (self.history_num_frames+1)*2
+        self.CNN.hidden_channels = [20, 20, 20, 10]
         self.CNN.ROI_outdim = 10
         self.CNN.output_size = self.map_emb_dim
         self.CNN.patch_size = [15, 35, 25, 25]
@@ -358,6 +364,7 @@ class L5TransformerPredConfig(AlgoConfig):
         self.CNN.strides = [1, 1, 1, 1]
         self.CNN.input_size = [224, 224]
         self.CNN.veh_ROI_outdim = 4
+        self.CNN.veh_patch_scale = 1.5
 
         # Multi-modal prediction
         self.M = 1
@@ -393,7 +400,7 @@ class L5TransformerGANConfig(L5TransformerPredConfig):
         self.name = "TransformerGAN"
         self.calc_likelihood = True
         self.f_steps = 5
-        self.GAN_weight = 0.2
+        self.weights.GAN_weight = 0.2
         self.GAN_static = True
 
         self.optim_params_discriminator.learning_rate.initial = (

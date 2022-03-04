@@ -51,7 +51,7 @@ def get_box_world_coords_np(pos, yaw, extent):
 
 def get_upright_box(pos, extent):
     yaws = torch.zeros(*pos.shape[:-1], 1).to(pos.device)
-    boxes = get_box_agent_coords_np(pos, yaws, extent)
+    boxes = get_box_world_coords(pos, yaws, extent)
     upright_boxes = boxes[..., [0, 2], :]
     return upright_boxes
 
@@ -358,3 +358,22 @@ def detect_collision(
             collision_type = CollisionType(remap_argmax)
             return collision_type, i
     return None
+
+
+def calc_distance_map(road_flag,max_dis = 10):
+    """mark the image with manhattan distance to the drivable area
+
+    Args:
+        road_flag (torch.Tensor[B,W,H]): an image with 1 channel, 1 for drivable area, 0 for non-drivable area
+        max_dis (int, optional): maximum distance that the result saturates to. Defaults to 10.
+    """
+    out = torch.zeros_like(road_flag,dtype=torch.float)
+    out[road_flag==0] = max_dis 
+    out[road_flag==1] = 0
+    for i in range(max_dis-1):
+        out[...,1:,:] = torch.min(out[...,1:,:],out[...,:-1,:]+1)
+        out[...,:-1,:] = torch.min(out[...,:-1,:],out[...,1:,:]+1)
+        out[...,:,1:] = torch.min(out[...,:,1:],out[...,:,:-1]+1)
+        out[...,:,:-1] = torch.min(out[...,:,:-1],out[...,:,1:]+1)
+
+    return out

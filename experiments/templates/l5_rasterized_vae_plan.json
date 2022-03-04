@@ -88,7 +88,8 @@
         "step_time": 0.1,
         "render_ego_history": false,
         "decoder": {
-            "layer_dims": []
+            "layer_dims": [],
+            "state_as_input": true
         },
         "dynamics": {
             "type": null,
@@ -102,8 +103,7 @@
                 -6.283185307179586,
                 6.283185307179586
             ],
-            "max_speed": 40.0,
-            "predict_current_states": false
+            "max_speed": 40.0
         },
         "spatial_softmax": {
             "enabled": false,
@@ -117,6 +117,8 @@
             "prediction_loss": 1.0,
             "goal_loss": 0.0,
             "collision_loss": 0.0,
+            "yaw_reg_loss": 1.0,
+            "lane_reg_loss": 0.5,
             "kl_loss": 0.0001
         },
         "optim_params": {

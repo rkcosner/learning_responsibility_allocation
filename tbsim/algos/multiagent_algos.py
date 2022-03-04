@@ -7,7 +7,6 @@ import torch.optim as optim
 import pytorch_lightning as pl
 
 from tbsim.models.multiagent_models import (
-    MultiAgentRasterizedModel,
     AgentAwareRasterizedModel
 )
 import tbsim.utils.tensor_utils as TensorUtils
@@ -21,34 +20,23 @@ class MATrafficModel(pl.LightningModule):
         self.nets = nn.ModuleDict()
         assert modality_shapes["image"][0] == 15
 
-        if algo_config.agent_aware:
-            self.model = AgentAwareRasterizedModel(
-                model_arch=algo_config.model_architecture,
-                input_image_shape=modality_shapes["image"],  # [C, H, W]
-                ego_feature_dim=algo_config.ego_feature_dim,
-                agent_feature_dim=algo_config.agent_feature_dim,
-                context_size=algo_config.context_size,
-                future_num_frames=algo_config.future_num_frames,
-                dynamics_type=algo_config.dynamics.type,
-                dynamics_kwargs=algo_config.dynamics,
-                step_time=algo_config.step_time,
-                decoder_kwargs=algo_config.decoder,
-                goal_conditional=algo_config.goal_conditional,
-                goal_feature_dim=algo_config.goal_feature_dim,
-                disable_dynamics_for_other_agents=algo_config.disable_dynamics_for_other_agents
-            )
-        else:
-            self.model = MultiAgentRasterizedModel(
-                model_arch=algo_config.model_architecture,
-                input_image_shape=modality_shapes["image"],  # [C, H, W]
-                agent_feature_dim=algo_config.agent_feature_dim,
-                context_size=algo_config.context_size,
-                future_num_frames=algo_config.future_num_frames,
-                dynamics_type=algo_config.dynamics.type,
-                dynamics_kwargs=algo_config.dynamics,
-                step_time=algo_config.step_time,
-                decoder_kwargs=algo_config.decoder,
-            )
+        self.model = AgentAwareRasterizedModel(
+            model_arch=algo_config.model_architecture,
+            input_image_shape=modality_shapes["image"],  # [C, H, W]
+            global_feature_dim=algo_config.global_feature_dim,
+            agent_feature_dim=algo_config.agent_feature_dim,
+            context_size=algo_config.context_size,
+            future_num_frames=algo_config.future_num_frames,
+            dynamics_type=algo_config.dynamics.type,
+            dynamics_kwargs=algo_config.dynamics,
+            step_time=algo_config.step_time,
+            decoder_kwargs=algo_config.decoder,
+            goal_conditional=algo_config.goal_conditional,
+            goal_feature_dim=algo_config.goal_feature_dim,
+            use_rotated_roi=algo_config.use_rotated_roi,
+            use_transformer=algo_config.use_transformer,
+            roi_layer_key=algo_config.roi_layer_key
+        )
 
     @property
     def checkpoint_monitor_keys(self):

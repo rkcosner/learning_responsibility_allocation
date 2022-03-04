@@ -132,24 +132,28 @@ class RolloutCallback(pl.Callback):
             and trainer.global_step % self._every_n_steps == 0
         )
         if should_run:
-            stats, _, _ = rollout_episodes(
-                env=self._env,
-                policy=RolloutWrapper(ego_policy=pl_module),
-                num_episodes=self._num_episodes,
-                n_step_action=self._n_step_action,
-            )
-            self.print_if_verbose(
-                "\nStep %i rollout (%i episodes): "
-                % (trainer.global_step, self._num_episodes)
-            )
-            for k, v in stats.items():
-                # Set on_step=True and on_epoch=False to force the logger to log stats at the step
-                # See https://github.com/PyTorchLightning/pytorch-lightning/issues/9772 for explanation
-                pl_module.log(
-                    "rollout/metrics_" + k, np.mean(v), on_step=True, on_epoch=False
+            try:
+                stats, _, _ = rollout_episodes(
+                    env=self._env,
+                    policy=RolloutWrapper(ego_policy=pl_module),
+                    num_episodes=self._num_episodes,
+                    n_step_action=self._n_step_action,
                 )
-                self.print_if_verbose(("rollout/metrics_" + k, np.mean(v)))
-            self.print_if_verbose("\n")
+                self.print_if_verbose(
+                    "\nStep %i rollout (%i episodes): "
+                    % (trainer.global_step, self._num_episodes)
+                )
+                for k, v in stats.items():
+                    # Set on_step=True and on_epoch=False to force the logger to log stats at the step
+                    # See https://github.com/PyTorchLightning/pytorch-lightning/issues/9772 for explanation
+                    pl_module.log(
+                        "rollout/metrics_" + k, np.mean(v), on_step=True, on_epoch=False
+                    )
+                    self.print_if_verbose(("rollout/metrics_" + k, np.mean(v)))
+                self.print_if_verbose("\n")
+            except Exception as e:
+                print("Rollout failed because:")
+                print(e)
 
 
 class Action(object):

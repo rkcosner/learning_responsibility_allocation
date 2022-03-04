@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 
 from l5kit.rasterization import build_rasterizer
 from l5kit.rasterization.rasterizer import Rasterizer
+from tbsim.external.vectorizer import build_vectorizer
 from l5kit.data import LocalDataManager, ChunkedDataset
 from l5kit.dataset import EgoDataset, AgentDataset
 

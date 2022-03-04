@@ -3,6 +3,9 @@ TransformerPred_trained_models/
 l5_rasterized_vae_trained_models/
 wandb/
 tbsim-ws/
+videos/
+result/
+
 
 ## config files
 *.yaml
