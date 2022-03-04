@@ -269,11 +269,13 @@ def generate_ROIs(
         )
         world_xy = ((pos.unsqueeze(-2)) @ (rotM.transpose(-1, -2))).squeeze(-2)
         world_xy += centroid.view(-1, 1, 1, 2).type(torch.float)
+        
         Mat = raster_from_world.view(-1, 1, 1, 3, 3).type(torch.float)
         raster_xy = batch_nd_transform_points(world_xy, Mat)
+        raster_mult = torch.linalg.norm(raster_from_world[0,0,0:2],dim=[-1]).item()
+        patch_size*=raster_mult
         ROI = [None] * bs
         index = [None] * bs
-
         for i in range(bs):
             ii, jj = torch.where(mask[i])
             index[i] = (ii, jj)
@@ -396,6 +398,38 @@ def obtain_lane_flag(
             lane_flags.append(Indexing_ROI_result(lane_flag_i, index, emb_size))
         lane_flags = torch.stack(lane_flags, dim=1)
     return lane_flags
+
+
+def obtain_map_enc(
+    image,
+    map_encoder,
+    pos,
+    yaw,
+    centroid,
+    raster_from_world,
+    mask,
+    patch_size,
+    output_size,
+    mode,
+):
+    ROI, index = generate_ROIs(
+        pos,
+        yaw,
+        centroid,
+        raster_from_world,
+        mask,
+        patch_size,
+        mode,
+    )
+    CNN_out = map_encoder(image, ROI)
+    if mode == "all":
+        emb_size = (*pos.shape[:-1], output_size)
+    elif mode == "last":
+        emb_size = (*pos.shape[:-2], output_size)
+
+    # put the CNN output in the right location of the embedding
+    map_emb = Indexing_ROI_result(CNN_out, index, emb_size)
+    return map_emb
 
 
 if __name__ == "__main__":

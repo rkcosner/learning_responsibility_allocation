@@ -6,8 +6,10 @@ import torch
 import torch.nn as nn
 
 import tbsim.models.base_models as base_models
+import tbsim.models.cnn_roi_encoder as roi_model
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.metrics as Metrics
+import tbsim.utils.geometry_utils as GeoUtils
 
 import tbsim.models.vaes as vaes
 import tbsim.utils.l5_utils as L5Utils
@@ -15,8 +17,11 @@ from tbsim.utils.geometry_utils import get_upright_box, transform_points_tensor
 from tbsim.utils.loss_utils import (
     trajectory_loss,
     goal_reaching_loss,
-    collision_loss
+    collision_loss,
+    lane_regulation_loss
 )
+
+import pdb
 
 
 class MultiAgentRasterizedModel(nn.Module):
@@ -53,6 +58,7 @@ class MultiAgentRasterizedModel(nn.Module):
             step_time=step_time,
             network_kwargs=decoder_kwargs
         )
+        self.step_time = step_time
         assert len(context_size) == 2
         self.context_size = nn.Parameter(torch.Tensor(context_size), requires_grad=False)
         self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
@@ -224,6 +230,7 @@ class AgentAwareRasterizedModel(MultiAgentRasterizedModel):
         )
 
         self.goal_conditional = goal_conditional
+        self.step_time = step_time
         goal_dim = 0
         if self.goal_conditional:
             self.goal_encoder = base_models.MLP(
@@ -277,7 +284,12 @@ class AgentAwareRasterizedModel(MultiAgentRasterizedModel):
         # use per-agent features for predicting non-ego trajectories
         agent_feats = agent_feats.reshape(b, a, -1)
         # TODO: get agent states
-        agent_pred = self.agents_decoder.forward(inputs=agent_feats)
+        
+        if self.ego_decoder.dyn is not None:
+            agent_curr_state = L5Utils.get_agent_current_states(data_batch,self.agents_decoder.dyn.type(),self.step_time)
+        else:
+            agent_curr_state = None
+        agent_pred = self.agents_decoder.forward(inputs=agent_feats, current_states = agent_curr_state)
 
         # use global feature for predicting ego trajectories
         if self.goal_conditional:
@@ -316,6 +328,28 @@ class AgentAwareRasterizedModel(MultiAgentRasterizedModel):
         elif self.ego_decoder.dyn is not None and self.agents_decoder.dyn is None:
             out_dict["controls"] = ego_pred["controls"]
 
+        
+        lane_mask = (image_batch[:, -3] < 1.0).type(torch.float)
+        dis_map = GeoUtils.calc_distance_map(lane_mask)
+        target_mask = torch.cat([data_batch["target_availabilities"].unsqueeze(1),data_batch["all_other_agents_future_availability"]],1)
+        agent_mask = target_mask.any(dim=-1).unsqueeze(-1).repeat(1, 1, target_mask.size(-1))
+        extents = torch.cat(
+            (
+                data_batch["extent"][..., :2].unsqueeze(1),
+                torch.max(data_batch["all_other_agents_history_extents"], dim=-2)[0],
+            ),
+            dim=1,
+        )
+        lane_flags = roi_model.obtain_lane_flag(dis_map,
+                        pred_positions,
+                        pred_yaws,
+                        data_batch["centroid"].type(torch.float),
+                        data_batch["raster_from_world"],
+                        agent_mask,
+                        extents.type(torch.float),
+                        3,
+                        ).squeeze(-1)
+        out_dict["lane_flags"] = lane_flags
         return out_dict
 
     def compute_losses(self, pred_batch, data_batch):
@@ -339,15 +373,21 @@ class AgentAwareRasterizedModel(MultiAgentRasterizedModel):
         # compute collision loss
         # since we don't assume control over other agents, the loss should only backprop through the ego prediction
         preds = TensorUtils.clone(pred_batch["predictions"])
-        preds["positions"][:, 1:] = preds["positions"][:, 1:].detach()
-        preds["yaws"][:, 1:] = preds["yaws"][:, 1:].detach()
+        # preds["positions"][:, 1:] = preds["positions"][:, 1:].detach()
+        # preds["yaws"][:, 1:] = preds["yaws"][:, 1:].detach()
         pred_edges = L5Utils.get_edges_from_batch(
             data_batch=data_batch,
             all_predictions=preds
         )
 
         coll_loss = collision_loss(pred_edges=pred_edges)
-        losses = OrderedDict(prediction_loss=pred_loss, goal_loss=goal_loss, collision_loss=coll_loss)
+
+        target_mask = torch.cat([data_batch["target_availabilities"].unsqueeze(1),data_batch["all_other_agents_future_availability"]],1)
+        agent_mask = target_mask.any(dim=-1)
+        
+        lane_reg_loss = lane_regulation_loss(pred_batch["lane_flags"],agent_mask)
+
+        losses = OrderedDict(prediction_loss=pred_loss, goal_loss=goal_loss, collision_loss=coll_loss, lane_reg_loss=lane_reg_loss)
 
         if "controls" in pred_batch:
             losses["yaw_reg_loss"] = torch.mean(pred_batch["controls"][..., 1] ** 2)

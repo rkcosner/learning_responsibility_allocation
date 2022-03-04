@@ -178,3 +178,15 @@ def optimize_trajectories(
     )
 
     return dict(positions=final_pos, yaws=final_yaw), final_raw_trajs, curr_u, losses
+
+def combine_ego_agent_data(batch,ego_keys,agent_keys,mask=None):
+    assert len(ego_keys)==len(agent_keys)
+    combined_batch = dict()
+    for ego_key,agent_key in zip(ego_keys,agent_keys):
+        if mask is None:
+            size_dim0 = batch[agent_key].shape[0]*batch[agent_key].shape[1]
+            combined_batch[ego_key] = torch.cat((batch[ego_key],batch[agent_key].reshape(size_dim0,*batch[agent_key].shape[2:])),dim=0)
+        else:
+            size_dim0 = mask.sum()
+            combined_batch[ego_key] = torch.cat((batch[ego_key],batch[agent_key][mask].reshape(size_dim0,*batch[agent_key].shape[2:])),dim=0)
+    return combined_batch

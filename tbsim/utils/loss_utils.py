@@ -287,3 +287,5 @@ def collision_loss(pred_edges: Dict[str, torch.Tensor], col_funcs=None):
         coll_loss += torch.mean(torch.sigmoid(-dis - 4.0))  # smooth collision loss
     return coll_loss
 
+def lane_regulation_loss(lane_flag,agent_mask):
+    return (lane_flag.mean(-1)*agent_mask).sum()/agent_mask.sum()

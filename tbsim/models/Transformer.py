@@ -9,7 +9,7 @@ from collections import OrderedDict
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-
+import pdb
 
 def clones(module, n):
     "Produce N identical layers."
@@ -537,6 +537,7 @@ def attention(query, key, value, mask=None, dropout=None):
     "Compute 'Scaled Dot Product Attention'"
     d_k = query.size(-1)
     scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
+
     if mask is not None:
         scores = scores.masked_fill(mask == 0, -1e9)
 
