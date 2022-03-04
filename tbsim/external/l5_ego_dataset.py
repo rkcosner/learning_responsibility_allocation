@@ -13,8 +13,9 @@ from l5kit.rasterization import Rasterizer, RenderContext
 from l5kit.sampling.agent_sampling import generate_agent_sample
 from l5kit.sampling.agent_sampling_vectorized import generate_agent_sample_vectorized
 from tbsim.external.agent_sampling_mixed import generate_agent_sample_mixed
-from l5kit.vectorization.vectorizer import Vectorizer
+from tbsim.external.vectorization.vectorizer import Vectorizer
 from l5kit.dataset.ego import BaseEgoDataset
+from tbsim.utils.timer import Timers
 
 
 class EgoDatasetMixed(BaseEgoDataset):
@@ -39,7 +40,15 @@ class EgoDatasetMixed(BaseEgoDataset):
         self.perturbation = perturbation
         self.vectorizer = vectorizer
         self.rasterizer = rasterizer
+        self.timer = Timers()
+        self._skimp = False
         super().__init__(cfg, zarr_dataset)
+
+    def set_skimp(self, skimp):
+        self._skimp = skimp
+
+    def is_skimp(self):
+        return self._skimp
 
     def _get_sample_function(self) -> Callable[..., dict]:
         render_context = RenderContext(
@@ -60,10 +69,14 @@ class EgoDatasetMixed(BaseEgoDataset):
             filter_agents_threshold=self.cfg["raster_params"][
                 "filter_agents_threshold"
             ],
+            timer=self.timer,
             perturbation=self.perturbation,
             vectorizer=self.vectorizer,
             rasterizer=self.rasterizer,
+            skimp_fn=self.is_skimp,
             vectorize_lane=self.cfg["data_generation_params"]["vectorize_lane"],
+            rasterize_agents = self.cfg["data_generation_params"]["rasterize_agents"] if "rasterize_agents" in self.cfg["data_generation_params"] else False,
+
         )
 
     def get_scene_dataset(self, scene_index: int) -> "EgoDatasetMixed":
@@ -79,9 +92,12 @@ class EgoDatasetMixed(BaseEgoDataset):
     def get_frame(
             self, scene_index: int, state_index: int, track_id: Optional[int] = None
     ) -> dict:
-        data = super().get_frame(scene_index, state_index, track_id=track_id)
+        with self.timer.timed("get_frame"):
+            data = super().get_frame(scene_index, state_index, track_id=track_id)
         # TODO (@lberg): this should not be here but in the rasterizer
         data["image"] = data["image"].transpose(2, 0, 1)  # 0,1,C -> C,0,1
+        if "other_agents_image" in data:
+            data["other_agents_image"] = data["other_agents_image"].transpose(0,3,1,2)
         return data
 
 
@@ -130,6 +146,7 @@ class EgoReplayBufferMixed(Dataset):
             vectorizer=self.vectorizer,
             rasterizer=self.rasterizer,
             vectorize_lane=self.cfg["data_generation_params"]["vectorize_lane"],
+            rasterize_agents = self.cfg["data_generation_params"]["rasterize_agents"],
         )
 
     def append_experience(self, episodes_data: List):

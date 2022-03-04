@@ -6,7 +6,7 @@ import torch
 from l5kit.data import LocalDataManager, ChunkedDataset
 from l5kit.dataset import EgoDataset
 from l5kit.rasterization import build_rasterizer
-from l5kit.vectorization.vectorizer_builder import build_vectorizer
+from tbsim.external.vectorization.vectorizer_builder import build_vectorizer
 
 from tbsim.algos.l5kit_algos import L5TrafficModel, L5VAETrafficModel, L5TrafficModelGC, SpatialPlanner
 from tbsim.algos.multiagent_algos import MATrafficModel
