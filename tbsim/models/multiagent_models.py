@@ -21,7 +21,7 @@ from tbsim.utils.loss_utils import (
 from tbsim.models.roi_align import ROI_align, generate_ROIs, Indexing_ROI_result
 from tbsim.models.cnn_roi_encoder import obtain_lane_flag
 from tbsim.models.Transformer import SimpleTransformer
-
+import pdb
 
 class AgentAwareRasterizedModel(nn.Module):
     """Ego-centric model that is aware of other agents' future trajectories through auxiliary prediction task"""
@@ -183,7 +183,7 @@ class AgentAwareRasterizedModel(nn.Module):
 
     def _get_goal_states(self, data_batch):
         all_targets = L5Utils.batch_to_target_all_agents(data_batch)
-        target_traj = torch.cat((all_targets["target_positions"], all_targets["target_yaws"]), dim=2)
+        target_traj = torch.cat((all_targets["target_positions"], all_targets["target_yaws"]), dim=-1)
         goal_inds = L5Utils.get_last_available_index(all_targets["target_availabilities"])  # [B, A]
         goal_state = torch.gather(
             target_traj,  # [B, A, T, 3]
@@ -270,6 +270,7 @@ class AgentAwareRasterizedModel(nn.Module):
             ),
             dim=1,
         )
+        pred_world_yaws = pred_yaws + data_batch['yaw'].reshape(-1,1,1,1)
         lane_flags = obtain_lane_flag(dis_map,
                         pred_positions,
                         pred_yaws,
