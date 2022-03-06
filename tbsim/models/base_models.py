@@ -833,11 +833,13 @@ class ConditionEncoder(nn.Module):
             trajectory_shape: tuple,  # [T, D]
             condition_dim: int,
             mlp_layer_dims: tuple = (128, 128),
+            goal_encoder=None,
             rnn_hidden_size: int = 100
     ) -> None:
         super(ConditionEncoder, self).__init__()
         self.map_encoder = map_encoder
         self.trajectory_shape = trajectory_shape
+        self.goal_encoder = goal_encoder
 
         # TODO: history encoder
         # self.hist_lstm = nn.LSTM(trajectory_shape[-1], hidden_size=rnn_hidden_size, batch_first=True)
@@ -851,7 +853,11 @@ class ConditionEncoder(nn.Module):
 
     def forward(self, condition_inputs):
         map_feat = self.map_encoder(condition_inputs["image"])
-        return self.mlp(map_feat)
+        c_feat = self.mlp(map_feat)
+        if self.goal_encoder is not None:
+            goal_feat = self.goal_encoder(condition_inputs["goal"])
+            c_feat = torch.cat([c_feat, goal_feat], dim=-1)
+        return c_feat
 
 
 class PosteriorNet(nn.Module):

@@ -24,16 +24,16 @@ class L5KitTrainConfig(TrainConfig):
         ## training config
         self.training.batch_size = 100
         self.training.num_steps = 200000
-        self.training.num_data_workers = 4
+        self.training.num_data_workers = 8
 
         self.save.every_n_steps = 1000
 
         ## validation config
         self.validation.enabled = True
         self.validation.batch_size = 32
-        self.validation.num_data_workers = 4
+        self.validation.num_data_workers = 6
         self.validation.every_n_steps = 500
-        self.validation.num_steps_per_epoch = 100
+        self.validation.num_steps_per_epoch = 50
 
 
 class L5KitMixedTrainConfig(L5KitTrainConfig):
@@ -78,52 +78,12 @@ class L5KitEnvConfig(EnvConfig):
         self.rasterizer.set_origin_to_bottom = True
 
         #  if a tracked agent is closed than this value to ego, it will be controlled
-        self.simulation.distance_th_close = 15
+        self.simulation.distance_th_close = 50
+
         self.simulation.distance_th_far = 50
 
         #  whether to disable agents that are not returned at start_frame_index
-        self.simulation.disable_new_agents = True
-
-        # maximum number of simulation steps to run (0.1sec / step)
-        self.simulation.num_simulation_steps = 50
-
-        # which frame to start an simulation episode with
-        self.simulation.start_frame_index = 0
-
-
-class L5KitVectorizedEnvConfig(EnvConfig):
-    def __init__(self):
-        super(L5KitVectorizedEnvConfig, self).__init__()
-        self.name = "l5_vectorized"
-
-        # the keys are relative to the dataset environment variable
-        self.rasterizer.semantic_map_key = "semantic_map/semantic_map.pb"
-        self.rasterizer.dataset_meta_key = "meta.json"
-
-        # e.g. 0.0 include every obstacle, 0.5 show those obstacles with >0.5 probability of being
-        # one of the classes we care about (cars, bikes, peds, etc.), >=1.0 filter all other agents.
-        self.rasterizer.filter_agents_threshold = 0.5
-
-        # whether to completely disable traffic light faces in the semantic rasterizer
-        # this disable option is not supported in avsw_semantic
-        self.rasterizer.disable_traffic_light_faces = False
-
-        self.data_generation_params.other_agents_num = 20
-        self.data_generation_params.max_agents_distance = 50
-        self.data_generation_params.lane_params.max_num_lanes = 15
-        self.data_generation_params.lane_params.max_points_per_lane = MAX_POINTS_LANE
-        self.data_generation_params.lane_params.max_points_per_crosswalk = 5
-        self.data_generation_params.lane_params.max_retrieval_distance_m = 35
-        self.data_generation_params.lane_params.max_num_crosswalks = 20
-
-        #  if a tracked agent is closed than this value to ego, it will be controlled
-        self.simulation.distance_th_far = 30
-
-        #  if a new agent is closer than this value to ego, it will be controlled
-        self.simulation.distance_th_close = 15
-
-        #  whether to disable agents that are not returned at start_frame_index
-        self.simulation.disable_new_agents = True
+        self.simulation.disable_new_agents = False
 
         # maximum number of simulation steps to run (0.1sec / step)
         self.simulation.num_simulation_steps = 50
@@ -274,7 +234,7 @@ class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
         self.agent_feature_dim = 128
         self.global_feature_dim = 128
         self.context_size = (30, 30)
-        self.goal_conditional = False
+        self.goal_conditional = True
         self.goal_feature_dim = 32
         self.decoder.layer_dims = (128, 128)
 
@@ -296,7 +256,10 @@ class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
         super(L5RasterizedVAEConfig, self).__init__()
         self.name = "l5_rasterized_vae"
         self.map_feature_dim = 256
-        self.vae.latent_dim = 2
+        self.goal_conditional = True
+        self.goal_feature_dim = 32
+
+        self.vae.latent_dim = 4
         self.vae.condition_dim = 128
         self.vae.num_eval_samples = 10
         self.vae.encoder.rnn_hidden_size = 100

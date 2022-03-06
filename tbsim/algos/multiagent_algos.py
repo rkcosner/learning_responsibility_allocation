@@ -25,7 +25,7 @@ class MATrafficModel(pl.LightningModule):
             input_image_shape=modality_shapes["image"],  # [C, H, W]
             global_feature_dim=algo_config.global_feature_dim,
             agent_feature_dim=algo_config.agent_feature_dim,
-            context_size=algo_config.context_size,
+            roi_size=algo_config.context_size,
             future_num_frames=algo_config.future_num_frames,
             dynamics_type=algo_config.dynamics.type,
             dynamics_kwargs=algo_config.dynamics,
