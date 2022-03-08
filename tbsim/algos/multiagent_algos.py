@@ -10,7 +10,7 @@ from tbsim.models.multiagent_models import (
     AgentAwareRasterizedModel
 )
 import tbsim.utils.tensor_utils as TensorUtils
-from tbsim.utils.env_utils import Action, Plan
+from tbsim.utils.env_utils import Action, Plan, Trajectory
 
 
 class MATrafficModel(pl.LightningModule):
@@ -106,3 +106,12 @@ class MATrafficModel(pl.LightningModule):
             yaws=ego_preds["predictions"]["yaws"]
         )
         return action, {}
+
+    def get_prediction(self, obs_dict, **kwargs):
+        preds = self(obs_dict)
+        agent_preds = self.model.get_agents_predictions(preds)
+        agent_trajs = Trajectory(
+            positions=agent_preds["predictions"]["positions"],
+            yaws=agent_preds["predictions"]["yaws"]
+        )
+        return agent_trajs, {}

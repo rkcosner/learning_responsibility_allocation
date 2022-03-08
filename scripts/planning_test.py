@@ -1,29 +1,151 @@
+
+import argparse
+from copy import deepcopy
+
+from collections import OrderedDict
 import os
-from matplotlib import pyplot as plt
-import numpy as np
 import torch
 from torch.utils.data import DataLoader
-import tbsim.utils.geometry_utils as GeoUtils
 
-from l5kit.data import ChunkedDataset, LocalDataManager
-from tbsim.external.l5_ego_dataset import EgoDatasetMixed
-from tbsim.external.vectorizer import build_vectorizer
-from tbsim.utils.config_utils import (
-    translate_l5kit_cfg,
-    get_experiment_config_from_file,
-)
+from l5kit.data import LocalDataManager, ChunkedDataset
+from l5kit.dataset import EgoDataset
 from l5kit.rasterization import build_rasterizer
+
+from tbsim.external.vectorizer import build_vectorizer
+import tbsim.utils.geometry_utils as GeoUtils
+from tbsim.algos.l5kit_algos import L5TrafficModel, L5VAETrafficModel, L5TrafficModelGC, SpatialPlanner
+from tbsim.algos.multiagent_algos import MATrafficModel
+from tbsim.configs.registry import get_registered_experiment_config
+from tbsim.envs.env_l5kit import EnvL5KitSimulation, BatchedEnv
+from tbsim.utils.config_utils import translate_l5kit_cfg, get_experiment_config_from_file
+from tbsim.utils.env_utils import rollout_episodes, PolicyWrapper, OptimController, HierarchicalWrapper, GTPlanner, RolloutWrapper, SamplingPolicy
+from tbsim.utils.tensor_utils import to_torch, to_numpy
+from tbsim.external.l5_ego_dataset import EgoDatasetMixed, EgoReplayBufferMixed, ExperienceIterableWrapper
+from tbsim.utils.experiment_utils import get_checkpoint
+from tbsim.utils.vis_utils import build_visualization_rasterizer_l5kit
+from imageio import get_writer
+from tbsim.utils.timer import Timers
+
 
 import tbsim.utils.planning_utils as PlanUtils
 
-os.environ["L5KIT_DATA_FOLDER"] = "/home/chenyx/repos/l5kit/prediction-dataset"
 
 
 
+def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
+    policy_ckpt_path, policy_config_path = get_checkpoint(
+        ngc_job_id="2646092", # gcvae_dynUnicycle_yrl0.1_gcTrue_vaeld4_klw0.001_rlFalse
+        # ckpt_key="iter37999",
+        ckpt_key="iter72999_",
+        ckpt_root_dir=ckpt_dir
+    )
+    policy_cfg = get_experiment_config_from_file(policy_config_path)
+
+    planner_ckpt_path, planner_config_path = get_checkpoint(
+        ngc_job_id="2573128",  # spatial_archresnet50_bs64_pcl1.0_pbl0.0_rlFalse
+        ckpt_key="iter55999_",
+        ckpt_root_dir=ckpt_dir
+    )
+    planner_cfg = get_experiment_config_from_file(planner_config_path)
+
+    predictor_ckpt_path, predictor_config_path = get_checkpoint(
+        ngc_job_id="2645989",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
+        ckpt_key="iter92999_",
+        ckpt_root_dir=ckpt_dir
+    )
+    predictor_cfg = get_experiment_config_from_file(predictor_config_path)
+
+    print(policy_ckpt_path)
+    print(policy_config_path)
+    print(planner_ckpt_path)
+    print(planner_config_path)
+    print(predictor_ckpt_path)
+    print(predictor_config_path)
+
+    data_cfg = get_experiment_config_from_file(policy_config_path)
+    assert data_cfg.env.rasterizer.map_type == "py_semantic"
+    os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath("/home/danfeix/workspace/lfs/lyft/lyft_prediction/")
+    dm = LocalDataManager(None)
+    l5_config = translate_l5kit_cfg(data_cfg)
+    rasterizer = build_rasterizer(l5_config, dm)
+    vectorizer = build_vectorizer(l5_config, dm)
+    eval_zarr = ChunkedDataset(dm.require(data_cfg.train.dataset_valid_key)).open()
+    env_dataset = EgoDatasetMixed(l5_config, eval_zarr, vectorizer, rasterizer)
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    modality_shapes = OrderedDict(image=[rasterizer.num_channels()] + data_cfg.env.rasterizer.raster_size)
+
+    planner = SpatialPlanner.load_from_checkpoint(
+        planner_ckpt_path,
+        algo_config=planner_cfg.algo,
+        modality_shapes=modality_shapes,
+    ).to(device).eval()
+
+    controller = L5VAETrafficModel.load_from_checkpoint(
+        policy_ckpt_path,
+        algo_config=policy_cfg.algo,
+        modality_shapes=modality_shapes
+    ).to(device).eval()
+
+    predictor = MATrafficModel.load_from_checkpoint(
+        predictor_ckpt_path,
+        algo_config=predictor_cfg.algo,
+        modality_shapes=modality_shapes
+    ).to(device).eval()
+
+    sampler = PolicyWrapper.wrap_controller(controller, sample=True, num_action_samples=10)
+    planner = PolicyWrapper.wrap_planner(planner, mask_drivable=True, sample=False)
+
+    sampler = HierarchicalWrapper(planner, sampler)
+    policy = SamplingPolicy(ego_action_sampler=sampler, agent_traj_predictor=predictor)
+
+    policy = RolloutWrapper(ego_policy=policy, agents_policy=policy)
+    # policy = RolloutWrapper(ego_policy=policy)
+
+    dm = LocalDataManager(None)
+    l5_config = deepcopy(l5_config)
+    l5_config["raster_params"]["raster_size"] = (1000, 1000)
+    l5_config["raster_params"]["pixel_size"] = (0.1, 0.1)
+    render_rasterizer = build_visualization_rasterizer_l5kit(l5_config, dm)
+    data_cfg.env.simulation.num_simulation_steps = 200
+    data_cfg.env.simulation.distance_th_far = 1e+5
+    data_cfg.env.simulation.disable_new_agents = True
+    data_cfg.env.generate_agent_obs = True
+    env = EnvL5KitSimulation(
+        data_cfg.env,
+        dataset=env_dataset,
+        seed=4,
+        num_scenes=1,
+        prediction_only=False,
+        renderer=render_rasterizer,
+        compute_metrics=True,
+        skimp_rollout=False
+    )
+
+    stats, info, renderings = rollout_episodes(
+        env,
+        policy,
+        num_episodes=1,
+        n_step_action=10,
+        render=True,
+        skip_first_n=1,
+        # scene_indices=[11, 16, 35, 38, 45, 58, 150, 152, 154, 156],
+        #scene_indices=[35, 45, 58],
+        scene_indices=[10206],
+        # scene_indices=[2772, 10206, 13734, 14248, 15083, 15147, 15453]
+        # scene_indices=[150, 1652, 2258, 3496, 14962, 15756]
+    )
+    print(stats)
+    for i, scene_images in enumerate(renderings[0]):
+        writer = get_writer(os.path.join(video_dir, "{}.mp4".format(info["scene_index"][i])), fps=10)
+        for im in scene_images:
+            writer.append_data(im)
+        writer.close()
 
 
 
 def test_sample_planner():
+    os.environ["L5KIT_DATA_FOLDER"] = "/home/chenyx/repos/l5kit/prediction-dataset"
     config_file = "/home/chenyx/repos/behavior-generation/experiments/templates/l5_ma_rasterized_plan.json"
     pred_cfg = get_experiment_config_from_file(config_file)
 
@@ -99,4 +221,5 @@ def test_sample_planner():
 
 
 if __name__ == "__main__":
-    test_sample_planner()
+    run_checkpoint()
+    # test_sample_planner()

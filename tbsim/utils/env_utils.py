@@ -7,11 +7,13 @@ from copy import deepcopy
 from tbsim.envs.base import BatchedEnv, BaseEnv
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.dynamics as dynamics
-from tbsim.utils.l5_utils import get_current_states
+from tbsim.utils.l5_utils import get_current_states, get_drivable_region_map
 from tbsim.algos.algo_utils import optimize_trajectories
-from tbsim.utils.geometry_utils import transform_points_tensor
+from tbsim.utils.geometry_utils import transform_points_tensor, calc_distance_map
 from l5kit.geometry import transform_points
 from tbsim.utils.timer import Timers
+from tbsim.utils.planning_utils import ego_sample_planning
+
 
 def rollout_episodes(
     env,
@@ -156,14 +158,20 @@ class RolloutCallback(pl.Callback):
                 print(e)
 
 
-class Action(object):
+class Trajectory(object):
     def __init__(self, positions, yaws):
-        assert positions.ndim == 3  # [B, T, 2]
         assert positions.shape[:-1] == yaws.shape[:-1]
         assert positions.shape[-1] == 2
         assert yaws.shape[-1] == 1
         self._positions = positions
         self._yaws = yaws
+
+    @property
+    def trajectories(self):
+        if isinstance(self.positions, np.ndarray):
+            return np.concatenate([self._positions, self._yaws], axis=-1)
+        else:
+            return torch.cat([self._positions, self._yaws], dim=-1)
 
     @property
     def positions(self):
@@ -196,7 +204,11 @@ class Action(object):
         return self.__class__(**TensorUtils.to_numpy(self.to_dict()))
 
 
-class Plan(object):
+class Action(Trajectory):
+    pass
+
+
+class Plan(Trajectory):
     def __init__(self, positions, yaws, availabilities, controls=None):
         assert positions.ndim == 3  # [B, T, 2]
         b, t, s = positions.shape
@@ -209,29 +221,12 @@ class Plan(object):
         self._controls = controls
 
     @property
-    def positions(self):
-        return TensorUtils.clone(self._positions)
-
-    @property
-    def yaws(self):
-        return TensorUtils.clone(self._yaws)
-
-    @property
     def availabilities(self):
         return TensorUtils.clone(self._availabilities)
 
     @property
     def controls(self):
         return TensorUtils.clone(self._controls)
-
-    def transform(self, trans_mats, rot_rads):
-        if isinstance(self.positions, np.ndarray):
-            pos = transform_points(self.positions, trans_mats)
-        else:
-            pos = transform_points_tensor(self.positions, trans_mats)
-
-        yaw = self.yaws + rot_rads
-        return self.__class__(pos, yaw, self.availabilities, self.controls)
 
     def to_dict(self):
         p = dict(
@@ -243,12 +238,14 @@ class Plan(object):
             p["controls"] = self.controls
         return p
 
-    @classmethod
-    def from_dict(cls, d):
-        return cls(**d)
+    def transform(self, trans_mats, rot_rads):
+        if isinstance(self.positions, np.ndarray):
+            pos = transform_points(self.positions, trans_mats)
+        else:
+            pos = transform_points_tensor(self.positions, trans_mats)
 
-    def to_numpy(self):
-        return self.__class__(**TensorUtils.to_numpy(self.to_dict()))
+        yaw = self.yaws + rot_rads
+        return self.__class__(pos, yaw, self.availabilities)
 
 
 class RolloutAction(object):
@@ -425,6 +422,61 @@ class HierarchicalWrapper(object):
         return actions, action_info
 
 
+class SamplingPolicy(object):
+    def __init__(self, ego_action_sampler, agent_traj_predictor):
+        """
+
+        Args:
+            ego_action_sampler: a policy that generates N action samples
+            agent_traj_predictor: a model that predicts the motion of non-ego agents
+        """
+        self.device = ego_action_sampler.device
+        self.sampler = ego_action_sampler
+        self.predictor = agent_traj_predictor
+
+    def eval(self):
+        self.sampler.eval()
+
+    def get_action(self, obs) -> Tuple[Action, Dict]:
+        _, action_info = self.sampler.get_action(obs)  # actions of shape [B, num_samples, ...]
+        action_samples = action_info["action_samples"]
+        agent_preds, _ = self.predictor.get_prediction(obs) # preds of shape [B, A - 1, ...]
+
+        ego_trajs = action_samples.trajectories
+        agent_pred_trajs = agent_preds.trajectories
+
+        agent_extents = obs["all_other_agents_future_extents"][..., :2].max(dim=-2)[0]
+        drivable_map = get_drivable_region_map(obs["image"]).float()
+        dis_map = calc_distance_map(drivable_map)
+        action_idx = ego_sample_planning(
+            ego_trajectories=ego_trajs,
+            agent_trajectories=agent_pred_trajs,
+            ego_extents=obs["extent"][:, :2],
+            agent_extents=agent_extents,
+            raw_types=obs["all_other_agents_types"],
+            centroid=obs["centroid"],
+            scene_yaw=obs["yaw"],
+            raster_from_world=obs["raster_from_world"],
+            dis_map=dis_map,
+            weights={"collision_weight":1.0,"lane_weight":1.0},
+        )
+
+        ego_trajs_best = torch.gather(
+            ego_trajs,
+            dim=1,
+            index=action_idx[:, None, None, None].expand(-1, 1, *ego_trajs.shape[2:])
+        ).squeeze(1)
+
+        ego_actions = Action(positions=ego_trajs_best[..., :2], yaws=ego_trajs_best[..., 2:])
+        info = dict(
+            plan=action_info["plan"],
+            plan_info=action_info["plan_info"],
+            action_samples=action_samples.to_dict()
+        )
+        return ego_actions, info
+
+
+
 class PolicyWrapper(object):
     """A convenient wrapper for specifying run-time keyword arguments"""
     def __init__(self, model, get_action_kwargs=None, get_plan_kwargs=None):
@@ -436,11 +488,11 @@ class PolicyWrapper(object):
     def eval(self):
         self.model.eval()
 
-    def get_action(self, obs) -> Tuple[Action, Dict]:
-        return self.model.get_action(obs, **self.action_kwargs)
+    def get_action(self, obs, **kwargs) -> Tuple[Action, Dict]:
+        return self.model.get_action(obs, **self.action_kwargs, **kwargs)
 
-    def get_plan(self, obs) -> Tuple[Plan, Dict]:
-        return self.model.get_plan(obs, **self.plan_kwargs)
+    def get_plan(self, obs, **kwargs) -> Tuple[Plan, Dict]:
+        return self.model.get_plan(obs, **self.plan_kwargs, **kwargs)
 
     @classmethod
     def wrap_controller(cls, model, **kwargs):

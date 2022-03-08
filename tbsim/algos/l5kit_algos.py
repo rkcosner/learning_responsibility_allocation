@@ -525,19 +525,33 @@ class L5VAETrafficModel(pl.LightningModule):
             weight_decay=optim_params["regularization"]["L2"],
         )
 
-    def get_action(self, obs_dict, sample=True, **kwargs):
-        if sample:
-            preds = self.nets["policy"].sample(obs_dict, n=1)["predictions"]  # [B, 1, T, 3]
-            preds = TensorUtils.squeeze(preds, dim=1)
-        else:
-            preds = self.nets["policy"].predict(obs_dict)["predictions"]
+    def get_action(self, obs_dict, sample=True, num_action_samples=1, plan=None, **kwargs):
+        obs_dict = dict(obs_dict)
+        if "plan" is not None and self.algo_config.goal_conditional:
+            assert isinstance(plan, Plan)
+            obs_dict["target_positions"] = plan.positions
+            obs_dict["target_yaws"] = plan.yaws
+            obs_dict["target_availabilities"] = plan.availabilities
 
-        # get trajectory samples for visualization purposes
+        if sample:
+            preds = self.nets["policy"].sample(obs_dict, n=num_action_samples)["predictions"]  # [B, N, T, 3]
+            action_preds = TensorUtils.map_tensor(preds, lambda x: x[:, 0])  # use the first sample as the action
+            info = dict(
+                action_samples=Action(
+                    positions=preds["positions"],
+                    yaws=preds["yaws"]
+                )
+            )
+        else:
+            # otherwise, sample action from posterior
+            action_preds = self.nets["policy"].predict(obs_dict)["predictions"]
+            info = dict()
+
         action = Action(
-            positions=preds["positions"],
-            yaws=preds["yaws"]
+            positions=action_preds["positions"],
+            yaws=action_preds["yaws"]
         )
-        return action, dict()
+        return action, info
 
 
 class L5TransformerTrafficModel(pl.LightningModule):
