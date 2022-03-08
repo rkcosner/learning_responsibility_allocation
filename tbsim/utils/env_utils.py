@@ -210,11 +210,10 @@ class Action(Trajectory):
 
 class Plan(Trajectory):
     def __init__(self, positions, yaws, availabilities, controls=None):
-        assert positions.ndim == 3  # [B, T, 2]
-        b, t, s = positions.shape
-        assert s == 2
-        assert yaws.shape == (b, t, 1)
-        assert availabilities.shape == (b, t), (availabilities.shape, (b, t))
+        assert positions.shape[:-1] == yaws.shape[:-1]
+        assert positions.shape[-1] == 2
+        assert yaws.shape[-1] == 1
+        assert availabilities.shape == positions.shape[:-1]
         self._positions = positions
         self._yaws = yaws
         self._availabilities = availabilities
@@ -245,7 +244,7 @@ class Plan(Trajectory):
             pos = transform_points_tensor(self.positions, trans_mats)
 
         yaw = self.yaws + rot_rads
-        return self.__class__(pos, yaw, self.availabilities)
+        return self.__class__(pos, yaw, self.availabilities, controls=self.controls)
 
 
 class RolloutAction(object):
@@ -399,7 +398,7 @@ class GTPlanner(object):
         return plan, {}
 
 
-class HierarchicalWrapper(object):
+class HierarchicalPolicy(object):
     """A wrapper policy that feeds subgoal from a planner to a controller"""
     def __init__(self, planner, controller):
         self.device = planner.device
@@ -422,6 +421,39 @@ class HierarchicalWrapper(object):
         return actions, action_info
 
 
+class HierarchicalSampler(HierarchicalPolicy):
+    """A wrapper policy that feeds plan samples from a stochastic planner to a controller"""
+    def get_action(self, obs) -> Tuple[None, Dict]:
+        _, plan_info = self.planner.get_plan(obs)
+        plan_samples = plan_info.pop("plan_samples")
+        b, n = plan_samples.positions.shape[:2]
+
+        obs_tiled = TensorUtils.unsqueeze_expand_at(obs, size=n, dim=1)
+        obs_tiled = TensorUtils.join_dimensions(obs_tiled, begin_axis=0, end_axis=2)
+
+        plan_tiled = TensorUtils.join_dimensions(plan_samples.to_dict(), begin_axis=0, end_axis=2)
+        plan_tiled = Plan.from_dict(plan_tiled)
+
+        actions_tiled, _ = self.controller.get_action(
+            obs_tiled,
+            plan=plan_tiled,
+            init_u=plan_tiled.controls
+        )
+
+        action_samples = TensorUtils.reshape_dimensions(
+            actions_tiled.to_dict(), begin_axis=0, end_axis=1, target_dims=(b, n)
+        )
+        action_samples = Action.from_dict(action_samples)
+
+        action_info = dict(
+            plan_samples=plan_samples,
+            action_samples=action_samples,
+            plan_info=plan_info
+        )
+        return None, action_info
+
+
+
 class SamplingPolicy(object):
     def __init__(self, ego_action_sampler, agent_traj_predictor):
         """
@@ -436,6 +468,7 @@ class SamplingPolicy(object):
 
     def eval(self):
         self.sampler.eval()
+        self.predictor.eval()
 
     def get_action(self, obs) -> Tuple[Action, Dict]:
         _, action_info = self.sampler.get_action(obs)  # actions of shape [B, num_samples, ...]
@@ -468,12 +501,11 @@ class SamplingPolicy(object):
         ).squeeze(1)
 
         ego_actions = Action(positions=ego_trajs_best[..., :2], yaws=ego_trajs_best[..., 2:])
-        info = dict(
-            plan=action_info["plan"],
-            plan_info=action_info["plan_info"],
-            action_samples=action_samples.to_dict()
-        )
-        return ego_actions, info
+        action_info["action_samples"] = action_samples.to_dict()
+        if "plan_samples" in action_info:
+            action_info["plan_samples"] = action_info["plan_samples"].to_dict()
+
+        return ego_actions, action_info
 
 
 

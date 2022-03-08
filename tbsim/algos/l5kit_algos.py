@@ -397,24 +397,28 @@ class SpatialPlanner(pl.LightningModule):
             weight_decay=optim_params["regularization"]["L2"],
         )
 
-    def get_plan(self, obs_dict, mask_drivable=False, sample=False, **kwargs):
-        num_samples = 1 if sample else None
-        preds = self.forward(obs_dict, mask_drivable=mask_drivable, num_samples=num_samples)
-        plan_preds = TensorUtils.squeeze(preds["predictions"], dim=1)
+    def get_plan(self, obs_dict, mask_drivable=False, sample=False, num_plan_samples=1, **kwargs):
+        num_samples = num_plan_samples if sample else None
+        preds = self.forward(obs_dict, mask_drivable=mask_drivable, num_samples=num_samples)  # [B, num_sample, ...]
+        b, n = preds["predictions"]["positions"].shape[:2]
         plan_dict = dict(
-            predictions=TensorUtils.to_sequence(plan_preds),
-            availabilities=torch.ones(plan_preds["positions"].shape[0], 1).to(self.device),
+            predictions=TensorUtils.unsqueeze(preds["predictions"], dim=1),  # [B, 1, num_sample...]
+            availabilities=torch.ones(b, 1, n).to(self.device),  # [B, 1, num_sample]
         )
         # pad plans to the same size as the future trajectories
         n_steps_to_pad = self.algo_config.future_num_frames - 1
         plan_dict = TensorUtils.pad_sequence(plan_dict, padding=(n_steps_to_pad, 0), batched=True, pad_values=0.)
-        plan = Plan(
-            positions=plan_dict["predictions"]["positions"],
-            yaws=plan_dict["predictions"]["yaws"],
-            availabilities=plan_dict["availabilities"]
+        plan_samples = Plan(
+            positions=plan_dict["predictions"]["positions"].permute(0, 2, 1, 3),  # [B, num_sample, T, 2]
+            yaws=plan_dict["predictions"]["yaws"].permute(0, 2, 1, 3),  # [B, num_sample, T, 1]
+            availabilities=plan_dict["availabilities"].permute(0, 2, 1)  # [B, num_sample, T]
         )
 
-        return plan, dict(location_map=preds["location_map"])
+        # take the first sample as the plan
+        plan = TensorUtils.map_tensor(plan_samples.to_dict(), lambda x: x[:, 0])
+        plan = Plan.from_dict(plan)
+
+        return plan, dict(location_map=preds["location_map"], plan_samples=plan_samples)
 
 
 class L5VAETrafficModel(pl.LightningModule):
