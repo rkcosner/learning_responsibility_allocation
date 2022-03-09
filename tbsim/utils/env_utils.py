@@ -417,6 +417,7 @@ class HierarchicalPolicy(object):
             init_u=plan.controls
         )
         action_info["plan"] = plan.to_dict()
+        plan_info.pop("plan_samples")
         action_info["plan_info"] = plan_info
         return actions, action_info
 
