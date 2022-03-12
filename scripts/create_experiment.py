@@ -60,8 +60,9 @@ def configs_to_search(base_cfg):
     plan.add_const_param(Param("train.rollout.enabled", alias="rl", value=False))
     plan.extend(plan.compose_cartesian([
         ParamRange("algo.model_architecture", alias="arch", range=["resnet50"]),
-        ParamRange("train.training.batch_size", alias="bs", range=[64, 80]),
-        ParamRange("algo.optim_params.policy.learning_rate.initial", alias="lr", range=[5e-5, 1e-4, 3e-4]),
+        # ParamRange("train.training.batch_size", alias="bs", range=[64, 80]),
+        ParamRange("algo.loss_weights.GAN_loss", alias="Gw", range=[0.1, 0.2,0.5]),
+        ParamRange("algo.optim_params.policy.learning_rate.initial", alias="lr", range=[1e-4, 3e-4]),
     ]))
 
 

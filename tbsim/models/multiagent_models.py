@@ -4,6 +4,7 @@ from collections import OrderedDict
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 import tbsim.models.base_models as base_models
 import tbsim.utils.tensor_utils as TensorUtils
@@ -16,7 +17,7 @@ from tbsim.utils.loss_utils import (
     trajectory_loss,
     goal_reaching_loss,
     collision_loss,
-    lane_regulation_loss
+    lane_regulation_loss,
 )
 from tbsim.models.roi_align import ROI_align, generate_ROIs, Indexing_ROI_result
 from tbsim.models.cnn_roi_encoder import obtain_lane_flag
@@ -42,6 +43,7 @@ class AgentAwareRasterizedModel(nn.Module):
             weights_scaling : tuple = (1.0, 1.0, 1.0),
             use_transformer=True,
             use_rotated_roi=True,
+            use_GAN = False,
             roi_layer_key="layer4"
     ) -> None:
 
@@ -92,6 +94,18 @@ class AgentAwareRasterizedModel(nn.Module):
             self.transformer = SimpleTransformer(src_dim=agent_feature_dim + global_feature_dim)
         else:
             self.transformer = None
+        
+        if use_GAN:
+            
+            traj_enc_dim = 64
+            self.traj_encoder = base_models.MLP(input_dim=2*future_num_frames,output_dim = traj_enc_dim,layer_dims=(64,64))
+            # TODO: make this part of the config
+            self.GAN = base_models.MLP(input_dim=agent_feature_dim + global_feature_dim + goal_dim+traj_enc_dim,
+                                       output_dim = 1,
+                                       layer_dims=(256,128),
+                                       output_activation = nn.Sigmoid)
+        else:
+            self.GAN = None
 
         assert len(roi_size) == 2
         self.roi_size = nn.Parameter(
@@ -160,8 +174,8 @@ class AgentAwareRasterizedModel(nn.Module):
         indexed_rois_raster = torch.cat((roi_indices, rois_raster), dim=1)  # [B * A, 5]
         return indexed_rois_raster
 
-    def _get_roi_boxes_rotated(self, pos, yaw, centroid, avails, trans_mat, patch_size):
-        rois, indices = generate_ROIs(pos, yaw, centroid, trans_mat, avails, patch_size, mode="last")
+    def _get_roi_boxes_rotated(self, pos, yaw, avails, trans_mat, patch_size):
+        rois, indices = generate_ROIs(pos, yaw, trans_mat, avails, patch_size, mode="last")
         return rois, indices
 
     def _get_goal_states(self, data_batch) -> torch.Tensor:
@@ -191,8 +205,7 @@ class AgentAwareRasterizedModel(nn.Module):
         lane_flags = obtain_lane_flag(dis_map,
                                       pred_positions,
                                       pred_yaws,
-                                      data_batch["centroid"].type(torch.float),
-                                      data_batch["raster_from_world"],
+                                      data_batch["raster_from_agent"],
                                       agent_mask,
                                       extents.type(torch.float),
                                       3,
@@ -209,9 +222,8 @@ class AgentAwareRasterizedModel(nn.Module):
             rois, indices = self._get_roi_boxes_rotated(
                 pos=states_all["history_positions"],
                 yaw=states_all["history_yaws"],
-                centroid=data_batch["centroid"],
                 avails=states_all["history_availabilities"],
-                trans_mat=data_batch["raster_from_world"],
+                trans_mat=data_batch["raster_from_agent"],
                 patch_size=self.roi_size
             )
 
@@ -242,7 +254,7 @@ class AgentAwareRasterizedModel(nn.Module):
                 states_all["history_availabilities"][:, :, -1],
                 states_all["history_positions"][:, :, -1]
             )
-
+        
         ego_feats = all_feats[:, [0]]
         agents_feats = all_feats[:, 1:]
 
@@ -283,7 +295,13 @@ class AgentAwareRasterizedModel(nn.Module):
         }
         if self.ego_decoder.dyn is not None:
             out_dict["controls"] = all_preds["controls"]
-
+        if self.GAN is not None:
+            traj_enc_feat_GT = self.traj_encoder(data_batch["target_positions"][...,:2].reshape(b,-1).detach())
+            likelihood_GT = self.GAN(torch.cat((ego_feats.squeeze(1).detach(),traj_enc_feat_GT),-1))
+            traj_enc_feat_pred = self.traj_encoder(ego_preds["trajectories"][...,:2].reshape(b,-1))
+            likelihood_pred = self.GAN(torch.cat((ego_feats.squeeze(1).detach(),traj_enc_feat_pred),-1))
+            out_dict["likelihood_GT"] = likelihood_GT
+            out_dict["likelihood_pred"] = likelihood_pred
         return out_dict
 
     def compute_losses(self, pred_batch, data_batch):
@@ -314,6 +332,8 @@ class AgentAwareRasterizedModel(nn.Module):
 
         coll_loss = collision_loss(pred_edges=pred_edges)
 
+        
+
         # target_mask = torch.cat(
         #     [
         #         data_batch["target_availabilities"].unsqueeze(1),
@@ -329,7 +349,10 @@ class AgentAwareRasterizedModel(nn.Module):
             goal_loss=goal_loss,
             collision_loss=coll_loss
         )
-
+        if self.GAN is not None:
+            imitation_loss = F.binary_cross_entropy(pred_batch["likelihood_pred"],torch.ones_like(pred_batch["likelihood_pred"]))
+            losses["GAN_loss"] = imitation_loss
+            
         if "controls" in pred_batch:
             # regularize the magnitude of yaw control
             losses["yaw_reg_loss"] = torch.mean(pred_batch["controls"][..., 1] ** 2)

@@ -6,7 +6,7 @@ import pdb
 from tbsim.utils.geometry_utils import batch_nd_transform_points
 
 
-def bilinear_interpolate(img, x, y, floattype=torch.float):
+def bilinear_interpolate(img, x, y, floattype=torch.float,flip_y=True):
     """Return bilinear interpolation of 4 nearest pts w.r.t to x,y from img
     Args:
         img (torch.Tensor): Tensor of size cxwxh. Usually one channel of feature layer
@@ -16,6 +16,8 @@ def bilinear_interpolate(img, x, y, floattype=torch.float):
     Returns:
         torch.Tensor: interpolated value
     """
+    if flip_y:
+        y = img.shape[-2]-1-y
     if img.device.type == "cuda":
         x0 = torch.floor(x).type(torch.cuda.LongTensor)
         y0 = torch.floor(y).type(torch.cuda.LongTensor)
@@ -27,10 +29,10 @@ def bilinear_interpolate(img, x, y, floattype=torch.float):
     x1 = x0 + 1
     y1 = y0 + 1
 
-    x0 = torch.clamp(x0, 0, img.shape[-2] - 1)
-    x1 = torch.clamp(x1, 0, img.shape[-2] - 1)
-    y0 = torch.clamp(y0, 0, img.shape[-1] - 1)
-    y1 = torch.clamp(y1, 0, img.shape[-1] - 1)
+    x0 = torch.clamp(x0, 0, img.shape[-1] - 1)
+    x1 = torch.clamp(x1, 0, img.shape[-1] - 1)
+    y0 = torch.clamp(y0, 0, img.shape[-2] - 1)
+    y1 = torch.clamp(y1, 0, img.shape[-2] - 1)
 
     Ia = img[..., y0, x0]
     Ib = img[..., y1, x0]
@@ -122,8 +124,7 @@ def ROI_align(features, ROI, outdim):
 def generate_ROIs(
         pos,
         yaw,
-        centroid,
-        raster_from_world,
+        raster_from_agent,
         mask,
         patch_size,
         mode="last",
@@ -134,18 +135,13 @@ def generate_ROIs(
     if mode == "all":
         bs = pos.shape[0]
         yaw = yaw.type(torch.float)
-        s = torch.sin(yaw).unsqueeze(-1)
-        c = torch.cos(yaw).unsqueeze(-1)
-        rotM = torch.cat(
-            (torch.cat((c, -s), dim=-1), torch.cat((s, c), dim=-1)), dim=-2
-        )
-        world_xy = ((pos.unsqueeze(-2)) @ (rotM.transpose(-1, -2))).squeeze(-2)
-        world_xy += centroid.view(-1, 1, 1, 2).type(torch.float)
-        Mat = raster_from_world.view(-1, 1, 1, 3, 3).type(torch.float)
-        raster_xy = batch_nd_transform_points(world_xy, Mat)
+        Mat = raster_from_agent.view(-1, 1, 1, 3, 3).type(torch.float)
+        raster_xy = batch_nd_transform_points(pos, Mat)
+        raster_mult = torch.linalg.norm(raster_from_agent[0,0,0:2],dim=[-1]).item()
+        patch_size = patch_size.type(torch.float)
+        patch_size*=raster_mult
         ROI = [None] * bs
         index = [None] * bs
-
         for i in range(bs):
             ii, jj = torch.where(mask[i])
             index[i] = (ii, jj)
@@ -176,15 +172,11 @@ def generate_ROIs(
         nummask = num * mask
         last_idx, _ = torch.max(nummask, dim=2)
         bs = pos.shape[0]
-        s = torch.sin(yaw).unsqueeze(-1)
-        c = torch.cos(yaw).unsqueeze(-1)
-        rotM = torch.cat(
-            (torch.cat((c, -s), dim=-1), torch.cat((s, c), dim=-1)), dim=-2
-        )
-        world_xy = ((pos.unsqueeze(-2)) @ (rotM.transpose(-1, -2))).squeeze(-2)
-        world_xy += centroid.view(-1, 1, 1, 2).type(torch.float)
-        Mat = raster_from_world.view(-1, 1, 1, 3, 3).type(torch.float)
-        raster_xy = batch_nd_transform_points(world_xy, Mat)
+        Mat = raster_from_agent.view(-1, 1, 1, 3, 3).type(torch.float)
+        raster_xy = batch_nd_transform_points(pos, Mat)
+        raster_mult = torch.linalg.norm(raster_from_agent[0,0,0:2],dim=[-1]).item()
+        patch_size = patch_size.type(torch.float)
+        patch_size*=raster_mult
         agent_mask = mask.any(dim=2)
         ROI = [None] * bs
         index = [None] * bs
@@ -215,7 +207,6 @@ def generate_ROIs(
         return ROI, index
     else:
         raise ValueError("mode must be 'all' or 'last'")
-
 
 def Indexing_ROI_result(CNN_out, index, emb_size):
     """put the lists of ROI align result into embedding tensor with the help of index"""

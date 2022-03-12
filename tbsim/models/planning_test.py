@@ -235,7 +235,7 @@ def test_sample_planner():
         dis_map,
         batch["extent"][:, :2],
     )
-    idx = PlanUtils.ego_sample_planning(
+    idx = PlanUtils.obtain_lane_flag(
         ego_trajectories,
         agent_trajectories,
         batch["extent"][:, :2],

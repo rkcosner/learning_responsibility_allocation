@@ -9,7 +9,7 @@ class L5KitTrainConfig(TrainConfig):
     def __init__(self):
         super(L5KitTrainConfig, self).__init__()
 
-        self.dataset_path = "YOUR_DAFA_FOLDER"
+        self.dataset_path = "/home/chenyx/repos/l5kit/prediction-dataset"
         self.dataset_valid_key = "scenes/validate.zarr"
         self.dataset_train_key = "scenes/train.zarr"
         self.dataset_meta_key = "meta.json"
@@ -206,6 +206,7 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.loss_weights.collision_loss = 0.0
         self.loss_weights.yaw_reg_loss = 1.0
         self.loss_weights.lane_reg_loss = 0.5
+        self.loss_weights.GAN_loss = 0.5
 
         self.optim_params.policy.learning_rate.initial = 1e-3  # policy learning rate
         self.optim_params.policy.learning_rate.decay_factor = (
@@ -215,6 +216,15 @@ class L5RasterizedPlanningConfig(AlgoConfig):
             []
         )  # epochs where LR decay occurs
         self.optim_params.policy.regularization.L2 = 0.00  # L2 regularization strength
+
+        self.optim_params.GAN.learning_rate.initial = 3e-4  # policy learning rate
+        self.optim_params.GAN.learning_rate.decay_factor = (
+            0.1  # factor to decay LR by (if epoch schedule non-empty)
+        )
+        self.optim_params.GAN.learning_rate.epoch_schedule = (
+            []
+        )  # epochs where LR decay occurs
+        self.optim_params.GAN.regularization.L2 = 0.00  # L2 regularization strength
 
 
 class SpatialPlannerConfig(L5RasterizedPlanningConfig):
@@ -241,6 +251,7 @@ class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
         self.use_rotated_roi = False
         self.use_transformer = False
         self.roi_layer_key = "layer4"
+        self.use_GAN = False
 
 
 class L5RasterizedGCConfig(L5RasterizedPlanningConfig):

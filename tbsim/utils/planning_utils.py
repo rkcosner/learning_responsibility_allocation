@@ -46,15 +46,14 @@ def get_collision_loss(
 
 
 def get_drivable_area_loss(
-    ego_trajectories, centroid, scene_yaw, raster_from_world, dis_map, ego_extents
+    ego_trajectories, centroid, scene_yaw, raster_from_agent, dis_map, ego_extents
 ):
     with torch.no_grad():
         lane_flags = obtain_lane_flag(
             dis_map,
             ego_trajectories[..., :2],
-            ego_trajectories[..., 2:]+scene_yaw.reshape(-1,1,1,1),
-            centroid.type(torch.float),
-            raster_from_world,
+            ego_trajectories[..., 2:],
+            raster_from_agent,
             torch.ones(*ego_trajectories.shape[:3]).to(ego_trajectories.device),
             ego_extents.unsqueeze(1).repeat(1, ego_trajectories.shape[1], 1),
             1,
@@ -68,9 +67,7 @@ def ego_sample_planning(
     ego_extents,
     agent_extents,
     raw_types,
-    centroid,
-    scene_yaw,
-    raster_from_world,
+    raster_from_agent,
     dis_map,
     weights,
     likelihood=None,
@@ -85,7 +82,7 @@ def ego_sample_planning(
         col_funcs,
     )
     lane_loss = get_drivable_area_loss(
-        ego_trajectories, centroid, scene_yaw, raster_from_world, dis_map, ego_extents
+        ego_trajectories, raster_from_agent, dis_map, ego_extents
     )
     if likelihood is None:
         total_score = (

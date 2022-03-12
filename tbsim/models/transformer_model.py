@@ -212,9 +212,8 @@ class TransformerModel(nn.Module):
             data_batch["image"],
             self.CNNmodel,
             src_pos,
-            src_world_yaw,
-            data_batch["centroid"],
-            data_batch["raster_from_world"],
+            src_yaw,
+            data_batch["raster_from_agent"],
             src_mask,
             torch.tensor(self.algo_config.CNN.patch_size).to(src_pos.device),
             self.algo_config.CNN.output_size,
@@ -272,21 +271,12 @@ class TransformerModel(nn.Module):
             curr_state, u_pred, dyn_type
         )
         lane_mask = (data_batch["image"][:, self.algo_config.CNN.lane_channel] < 1.0).type(torch.float)
-        if self.M == 1:
-            pred_world_yaw = yaw_pred + (data_batch["yaw"].view(-1, 1, 1, 1)).type(
-                torch.float
-            )
 
-        else:
-            pred_world_yaw = yaw_pred + (data_batch["yaw"].view(-1, 1, 1, 1, 1)).type(
-                torch.float
-            )
         lane_flags = obtain_lane_flag(
             lane_mask,
             pos_pred,
-            pred_world_yaw,
-            data_batch["centroid"].type(torch.float),
-            data_batch["raster_from_world"],
+            yaw_pred,
+            data_batch["raster_from_agent"],
             tgt_mask_agent,
             extents.type(torch.float)*self.algo_config.CNN.veh_patch_scale,
             self.algo_config.CNN.veh_ROI_outdim,

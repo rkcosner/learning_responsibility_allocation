@@ -420,6 +420,28 @@ class HierarchicalPolicy(object):
         action_info["plan_info"] = plan_info
         return actions, action_info
 
+class HierarchicalWrapper(object):
+    """A wrapper policy that feeds subgoal from a planner to a controller"""
+    def __init__(self, planner, controller):
+        self.device = planner.device
+        self.planner = planner
+        self.controller = controller
+
+    def eval(self):
+        self.planner.eval()
+        self.controller.eval()
+
+    def get_action(self, obs) -> Tuple[Action, Dict]:
+        plan, plan_info = self.planner.get_plan(obs)
+        actions, action_info = self.controller.get_action(
+            obs,
+            plan=plan,
+            init_u=plan.controls
+        )
+        action_info["plan"] = plan.to_dict()
+        action_info["plan_info"] = plan_info
+        return actions, action_info
+
 
 class HierarchicalSampler(HierarchicalPolicy):
     """A wrapper policy that feeds plan samples from a stochastic planner to a controller"""
@@ -487,9 +509,7 @@ class SamplingPolicy(object):
             ego_extents=obs["extent"][:, :2],
             agent_extents=agent_extents,
             raw_types=obs["all_other_agents_types"],
-            centroid=obs["centroid"],
-            scene_yaw=obs["yaw"],
-            raster_from_world=obs["raster_from_world"],
+            raster_from_agent=obs["raster_from_agent"],
             dis_map=dis_map,
             weights={"collision_weight":1.0,"lane_weight":1.0},
         )
