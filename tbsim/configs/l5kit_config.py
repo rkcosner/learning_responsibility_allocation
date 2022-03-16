@@ -21,14 +21,14 @@ class L5KitTrainConfig(TrainConfig):
         self.rollout.num_scenes = 3
         self.rollout.n_step_action = 10
 
-        ## training config
+        # training config
         self.training.batch_size = 100
         self.training.num_steps = 200000
         self.training.num_data_workers = 8
 
         self.save.every_n_steps = 1000
 
-        ## validation config
+        # validation config
         self.validation.enabled = True
         self.validation.batch_size = 32
         self.validation.num_data_workers = 6
@@ -189,7 +189,7 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.decoder.layer_dims = ()
         self.decoder.state_as_input = True
 
-        self.dynamics.type = None
+        self.dynamics.type = "Unicycle"
         self.dynamics.max_steer = 0.5
         self.dynamics.max_yawvel = math.pi * 2.0
         self.dynamics.acce_bound = (-10, 8)
@@ -204,7 +204,7 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.loss_weights.prediction_loss = 1.0
         self.loss_weights.goal_loss = 0.0
         self.loss_weights.collision_loss = 0.0
-        self.loss_weights.yaw_reg_loss = 1.0
+        self.loss_weights.yaw_reg_loss = 0.5
         self.loss_weights.lane_reg_loss = 0.5
         self.loss_weights.GAN_loss = 0.5
 
@@ -288,7 +288,8 @@ class L5TransformerPredConfig(AlgoConfig):
         self.name = "TransformerPred"
         self.model_architecture = "Factorized"
         self.history_num_frames = 5
-        self.history_num_frames_ego = 5  # this will also create raster history (we need to remove the raster from train/eval dataset - only visualization)
+        # this will also create raster history (we need to remove the raster from train/eval dataset - only visualization)
+        self.history_num_frames_ego = 5
         self.history_num_frames_agents = 5
         self.future_num_frames = 25
         self.step_time = 0.2

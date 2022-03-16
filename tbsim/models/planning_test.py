@@ -39,11 +39,9 @@ import pdb
 import tbsim.utils.planning_utils as PlanUtils
 
 
-
-
 def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
     policy_ckpt_path, policy_config_path = get_checkpoint(
-        ngc_job_id="2646092", # gcvae_dynUnicycle_yrl0.1_gcTrue_vaeld4_klw0.001_rlFalse
+        ngc_job_id="2646092",  # gcvae_dynUnicycle_yrl0.1_gcTrue_vaeld4_klw0.001_rlFalse
         ckpt_key="iter72999_",
         # ngc_job_id="2596419", # gc_clip_regyaw_dynUnicycle_decmlp128,128_decstateTrue_yrl1.0
         # ckpt_key="iter120999",
@@ -74,16 +72,19 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
 
     data_cfg = get_experiment_config_from_file(policy_config_path)
     assert data_cfg.env.rasterizer.map_type == "py_semantic"
-    os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath("/home/chenyx/repos/l5kit/prediction-dataset")
+    os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath(
+        "/home/chenyx/repos/l5kit/prediction-dataset")
     dm = LocalDataManager(None)
     l5_config = translate_l5kit_cfg(data_cfg)
     rasterizer = build_rasterizer(l5_config, dm)
     vectorizer = build_vectorizer(l5_config, dm)
-    eval_zarr = ChunkedDataset(dm.require(data_cfg.train.dataset_valid_key)).open()
+    eval_zarr = ChunkedDataset(dm.require(
+        data_cfg.train.dataset_valid_key)).open()
     env_dataset = EgoDatasetMixed(l5_config, eval_zarr, vectorizer, rasterizer)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    modality_shapes = OrderedDict(image=[rasterizer.num_channels()] + data_cfg.env.rasterizer.raster_size)
+    modality_shapes = OrderedDict(
+        image=[rasterizer.num_channels()] + data_cfg.env.rasterizer.raster_size)
 
     planner = SpatialPlanner.load_from_checkpoint(
         planner_ckpt_path,
@@ -105,11 +106,14 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
             modality_shapes=modality_shapes
         ).to(device).eval()
 
-        sampler = PolicyWrapper.wrap_controller(controller, sample=True, num_action_samples=10)
-        planner = PolicyWrapper.wrap_planner(planner, mask_drivable=True, sample=False)
+        sampler = PolicyWrapper.wrap_controller(
+            controller, sample=True, num_action_samples=10)
+        planner = PolicyWrapper.wrap_planner(
+            planner, mask_drivable=True, sample=False)
 
         sampler = HierarchicalPolicy(planner, sampler)
-        policy = SamplingPolicy(ego_action_sampler=sampler, agent_traj_predictor=predictor)
+        policy = SamplingPolicy(
+            ego_action_sampler=sampler, agent_traj_predictor=predictor)
 
     if False:
         # Option 2: Stochastic planner -> goal-conditional controller
@@ -118,10 +122,11 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
             algo_config=policy_cfg.algo,
             modality_shapes=modality_shapes
         ).to(device).eval()
-        plan_sampler = PolicyWrapper.wrap_planner(planner, mask_drivable=True, sample=True, num_plan_samples=10)
+        plan_sampler = PolicyWrapper.wrap_planner(
+            planner, mask_drivable=True, sample=True, num_plan_samples=10)
         sampler = HierarchicalSampler(plan_sampler, controller)
-        policy = SamplingPolicy(ego_action_sampler=sampler, agent_traj_predictor=predictor)
-
+        policy = SamplingPolicy(
+            ego_action_sampler=sampler, agent_traj_predictor=predictor)
 
     policy = RolloutWrapper(ego_policy=policy, agents_policy=policy)
     # policy = RolloutWrapper(ego_policy=policy)
@@ -154,18 +159,18 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
         render=True,
         skip_first_n=1,
         # scene_indices=[11, 16, 35, 38, 45, 58, 150, 152, 154, 156],
-        #scene_indices=[35, 45, 58],
-        scene_indices=[10206],
+        scene_indices=[35, 45, 58],
+        # scene_indices=[10206],
         # scene_indices=[2772, 10206, 13734, 14248, 15083, 15147, 15453]
         # scene_indices=[150, 1652, 2258, 3496, 14962, 15756]
     )
     print(stats)
     for i, scene_images in enumerate(renderings[0]):
-        writer = get_writer(os.path.join(video_dir, "{}.mp4".format(info["scene_index"][i])), fps=10)
+        writer = get_writer(os.path.join(
+            video_dir, "{}.mp4".format(info["scene_index"][i])), fps=10)
         for im in scene_images:
             writer.append_data(im)
         writer.close()
-
 
 
 def test_sample_planner():
@@ -174,17 +179,19 @@ def test_sample_planner():
     pred_cfg = get_experiment_config_from_file(config_file)
 
     # set env variable for data
-    os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath(pred_cfg.train.dataset_path)
+    os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath(
+        pred_cfg.train.dataset_path)
     dm = LocalDataManager(None)
     l5_config = translate_l5kit_cfg(pred_cfg)
     rasterizer = build_rasterizer(l5_config, dm)
     vectorizer = build_vectorizer(l5_config, dm)
 
-
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    train_zarr = ChunkedDataset(dm.require(pred_cfg.train.dataset_valid_key)).open()
-    train_dataset = EgoDatasetMixed(l5_config, train_zarr, vectorizer, rasterizer)
+    train_zarr = ChunkedDataset(dm.require(
+        pred_cfg.train.dataset_valid_key)).open()
+    train_dataset = EgoDatasetMixed(
+        l5_config, train_zarr, vectorizer, rasterizer)
     train_dataloader = DataLoader(
         train_dataset,
         shuffle=False,
@@ -199,10 +206,12 @@ def test_sample_planner():
 
     # model(batch)
     N = 10
-    ego_trajectories = torch.cat((batch["target_positions"], batch["target_yaws"]), -1)
+    ego_trajectories = torch.cat(
+        (batch["target_positions"], batch["target_yaws"]), -1)
     ego_trajectories = ego_trajectories.unsqueeze(1).repeat(1, N, 1, 1)
     ego_trajectories += torch.normal(
-        torch.zeros_like(ego_trajectories), torch.ones_like(ego_trajectories) *0.5
+        torch.zeros_like(ego_trajectories), torch.ones_like(
+            ego_trajectories) * 0.5
     )
     agent_trajectories = torch.cat(
         (
@@ -212,10 +221,11 @@ def test_sample_planner():
         -1,
     )
     raw_types = batch["all_other_agents_types"]
-    agent_extents = batch["all_other_agents_future_extents"][..., :2].max(dim=-2)[0]
+    agent_extents = batch["all_other_agents_future_extents"][..., :2].max(
+        dim=-2)[0]
     lane_mask = (batch["image"][:, -3] < 1.0).type(torch.float)
     dis_map = GeoUtils.calc_distance_map(lane_mask)
-    xx = torch.tensor([0,-20.,0.],dtype=torch.float).tile(2,1,1,1).cuda()
+    xx = torch.tensor([0, -20., 0.], dtype=torch.float).tile(2, 1, 1, 1).cuda()
     pdb.set_trace()
 
     col_loss = PlanUtils.get_collision_loss(
@@ -225,7 +235,7 @@ def test_sample_planner():
         agent_extents,
         raw_types,
     )
-    xx = torch.tensor([0,-20.,0],dtype=torch.float).tile(2,1,1,1).cuda()
+    xx = torch.tensor([0, -20., 0], dtype=torch.float).tile(2, 1, 1, 1).cuda()
 
     lane_loss = PlanUtils.get_drivable_area_loss(
         ego_trajectories,
@@ -243,7 +253,7 @@ def test_sample_planner():
         raw_types,
         batch["raster_from_agent"],
         dis_map,
-        weights={"collision_weight":1.0,"lane_weight":1.0},
+        weights={"collision_weight": 1.0, "lane_weight": 1.0},
     )
 
 

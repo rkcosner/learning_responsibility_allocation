@@ -134,7 +134,7 @@ class CNNROIMapEncoder(nn.Module):
 #         + Ic * wc.unsqueeze(1)
 #         + Id * wd.unsqueeze(1)
 #     )
-def bilinear_interpolate(img, x, y, floattype=torch.float,flip_y=True):
+def bilinear_interpolate(img, x, y, floattype=torch.float,flip_y=False):
     """Return bilinear interpolation of 4 nearest pts w.r.t to x,y from img
     Args:
         img (torch.Tensor): Tensor of size cxwxh. Usually one channel of feature layer
