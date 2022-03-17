@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import tbsim.models.base_models as base_models
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.metrics as Metrics
+import tbsim.utils.env_utils as EnvUtils
 
 import tbsim.models.vaes as vaes
 import tbsim.utils.l5_utils as L5Utils
@@ -22,10 +23,11 @@ from tbsim.utils.loss_utils import (
 from tbsim.models.roi_align import ROI_align, generate_ROIs, Indexing_ROI_result
 from tbsim.models.cnn_roi_encoder import obtain_lane_flag
 from tbsim.models.Transformer import SimpleTransformer
-import pdb
+
 
 class AgentAwareRasterizedModel(nn.Module):
     """Ego-centric model that is aware of other agents' future trajectories through auxiliary prediction task"""
+
     def __init__(
             self,
             model_arch: str,
@@ -39,11 +41,11 @@ class AgentAwareRasterizedModel(nn.Module):
             step_time: float,
             decoder_kwargs: dict = None,
             goal_conditional: bool = False,
-            goal_feature_dim : int = 32,
-            weights_scaling : tuple = (1.0, 1.0, 1.0),
+            goal_feature_dim: int = 32,
+            weights_scaling: tuple = (1.0, 1.0, 1.0),
             use_transformer=True,
             use_rotated_roi=True,
-            use_GAN = False,
+            use_GAN=False,
             roi_layer_key="layer4"
     ) -> None:
 
@@ -91,28 +93,32 @@ class AgentAwareRasterizedModel(nn.Module):
             network_kwargs=decoder_kwargs
         )
         if use_transformer:
-            self.transformer = SimpleTransformer(src_dim=agent_feature_dim + global_feature_dim)
+            self.transformer = SimpleTransformer(
+                src_dim=agent_feature_dim + global_feature_dim)
         else:
             self.transformer = None
-        
+
         if use_GAN:
-            
+
             traj_enc_dim = 64
-            self.traj_encoder = base_models.MLP(input_dim=2*future_num_frames,output_dim = traj_enc_dim,layer_dims=(64,64))
+            self.traj_encoder = base_models.MLP(
+                input_dim=2*future_num_frames, output_dim=traj_enc_dim, layer_dims=(64, 64))
             # TODO: make this part of the config
             self.GAN = base_models.MLP(input_dim=agent_feature_dim + global_feature_dim + goal_dim+traj_enc_dim,
-                                       output_dim = 1,
-                                       layer_dims=(256,128),
-                                       output_activation = nn.Sigmoid)
+                                       output_dim=1,
+                                       layer_dims=(256, 128),
+                                       output_activation=nn.Sigmoid)
         else:
             self.GAN = None
 
         assert len(roi_size) == 2
         self.roi_size = nn.Parameter(
-            torch.Tensor([roi_size[0], roi_size[0], roi_size[1], roi_size[1]]),  # [W1, W2, H1, H2]
+            torch.Tensor([roi_size[0], roi_size[0], roi_size[1],
+                         roi_size[1]]),  # [W1, W2, H1, H2]
             requires_grad=False
         )
-        self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
+        self.weights_scaling = nn.Parameter(
+            torch.Tensor(weights_scaling), requires_grad=False)
 
     @staticmethod
     def get_ego_predictions(pred_batch):
@@ -144,12 +150,15 @@ class AgentAwareRasterizedModel(nn.Module):
 
         # agent ADE & FDE
         agents_preds = self.get_agents_predictions(pred_batch)
-        pos_preds = TensorUtils.to_numpy(agents_preds["predictions"]["positions"])
+        pos_preds = TensorUtils.to_numpy(
+            agents_preds["predictions"]["positions"])
         num_frames = pos_preds.shape[2]
         pos_preds = pos_preds.reshape(-1, num_frames, 2)
         all_targets = L5Utils.batch_to_target_all_agents(data_batch)
-        gt = TensorUtils.to_numpy(all_targets["target_positions"][:, 1:]).reshape(-1, num_frames, 2)
-        avail = TensorUtils.to_numpy(all_targets["target_availabilities"][:, 1:]).reshape(-1, num_frames)
+        gt = TensorUtils.to_numpy(
+            all_targets["target_positions"][:, 1:]).reshape(-1, num_frames, 2)
+        avail = TensorUtils.to_numpy(
+            all_targets["target_availabilities"][:, 1:]).reshape(-1, num_frames)
 
         ade = Metrics.single_mode_metrics(
             Metrics.batch_average_displacement_error, gt, pos_preds, avail
@@ -167,37 +176,62 @@ class AgentAwareRasterizedModel(nn.Module):
         b, a = pos.shape[:2]
         curr_pos_raster = transform_points_tensor(pos, trans_mat.float())
         extents = torch.ones_like(curr_pos_raster) * patch_size  # [B, A, 2]
-        rois_raster = get_upright_box(curr_pos_raster, extent=extents).reshape(b * a, 2, 2)
+        rois_raster = get_upright_box(
+            curr_pos_raster, extent=extents).reshape(b * a, 2, 2)
         rois_raster = torch.flatten(rois_raster, start_dim=1)  # [B * A, 4]
 
-        roi_indices = torch.arange(0, b).unsqueeze(1).expand(-1, a).reshape(-1, 1).to(rois_raster.device)  # [B * A, 1]
-        indexed_rois_raster = torch.cat((roi_indices, rois_raster), dim=1)  # [B * A, 5]
+        roi_indices = torch.arange(0, b).unsqueeze(
+            1).expand(-1, a).reshape(-1, 1).to(rois_raster.device)  # [B * A, 1]
+        indexed_rois_raster = torch.cat(
+            (roi_indices, rois_raster), dim=1)  # [B * A, 5]
         return indexed_rois_raster
 
     def _get_roi_boxes_rotated(self, pos, yaw, avails, trans_mat, patch_size):
-        rois, indices = generate_ROIs(pos, yaw, trans_mat, avails, patch_size, mode="last")
+        rois, indices = generate_ROIs(
+            pos, yaw, trans_mat, avails, patch_size, mode="last")
         return rois, indices
 
-    def _get_goal_states(self, data_batch) -> torch.Tensor:
-        all_targets = L5Utils.batch_to_target_all_agents(data_batch)
-        target_traj = torch.cat((all_targets["target_positions"], all_targets["target_yaws"]), dim=-1)
-        goal_inds = L5Utils.get_last_available_index(all_targets["target_availabilities"])  # [B, A]
-        goal_state = torch.gather(
-            target_traj,  # [B, A, T, 3]
-            dim=2,
-            index=goal_inds[:, :, None, None].expand(-1, -1, 1, target_traj.shape[-1])  # [B, A, 1, 3]
-        ).squeeze(2)  # -> [B, A, 3]
-        return goal_state
+    def _get_goal_states(self, data_batch, plan=None) -> torch.Tensor:
+        if plan is None:
+            all_targets = L5Utils.batch_to_target_all_agents(data_batch)
+            target_traj = torch.cat(
+                (all_targets["target_positions"], all_targets["target_yaws"]), dim=-1)
+            goal_inds = L5Utils.get_last_available_index(
+                all_targets["target_availabilities"])  # [B, A]
+            goal_state = torch.gather(
+                target_traj,  # [B, A, T, 3]
+                dim=2,
+                # [B, A, 1, 3]
+                index=goal_inds[:, :, None,
+                                None].expand(-1, -1, 1, target_traj.shape[-1])
+            ).squeeze(2)  # -> [B, A, 3]
+            return goal_state
+        else:
+            assert isinstance(plan, EnvUtils.Plan)
+            goal_inds = L5Utils.get_last_available_index(
+                plan.availabilities)  # [B, A]
+            goal_state = torch.gather(
+                plan.trajectories,  # [B, T, 3]
+                dim=1,
+                # [B, 1, 3]
+                index=goal_inds[:, None,
+                                None].expand(-1, 1, plan.trajectories.shape[-1])
+            ).squeeze(1)  # -> [B, 3]
+            return goal_state
 
     def _get_lane_flags(self, data_batch, pred_yaws, pred_positions):
-        lane_mask = L5Utils.get_drivable_region_map(data_batch["image"]).float()
+        lane_mask = L5Utils.get_drivable_region_map(
+            data_batch["image"]).float()
         dis_map = calc_distance_map(lane_mask)
-        target_mask = torch.cat([data_batch["target_availabilities"].unsqueeze(1),data_batch["all_other_agents_future_availability"]],1)
-        agent_mask = target_mask.any(dim=-1).unsqueeze(-1).repeat(1, 1, target_mask.size(-1))
+        target_mask = torch.cat([data_batch["target_availabilities"].unsqueeze(
+            1), data_batch["all_other_agents_future_availability"]], 1)
+        agent_mask = target_mask.any(
+            dim=-1).unsqueeze(-1).repeat(1, 1, target_mask.size(-1))
         extents = torch.cat(
             (
                 data_batch["extent"][..., :2].unsqueeze(1),
-                torch.max(data_batch["all_other_agents_history_extents"], dim=-2)[0],
+                torch.max(
+                    data_batch["all_other_agents_history_extents"], dim=-2)[0],
             ),
             dim=1,
         )
@@ -212,9 +246,10 @@ class AgentAwareRasterizedModel(nn.Module):
                                       ).squeeze(-1)
         return lane_flags
 
-    def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def forward(self, data_batch: Dict[str, torch.Tensor], plan=None) -> Dict[str, torch.Tensor]:
         image_batch = data_batch["image"]
-        states_all = L5Utils.batch_to_raw_all_agents(data_batch, self.ego_decoder.step_time)
+        states_all = L5Utils.batch_to_raw_all_agents(
+            data_batch, self.ego_decoder.step_time)
         b, a = states_all["history_positions"].shape[:2]
 
         # extract agent-wise features
@@ -227,10 +262,13 @@ class AgentAwareRasterizedModel(nn.Module):
                 patch_size=self.roi_size
             )
 
-            all_feats, _, global_feats = self.map_encoder(image_batch, rois=rois)  # approximately B * A
+            all_feats, _, global_feats = self.map_encoder(
+                image_batch, rois=rois)  # approximately B * A
             split_sizes = [len(l) for l in indices]
             all_feats_list = torch.split(all_feats, split_sizes)
-            all_feats = Indexing_ROI_result(all_feats_list, indices, emb_size=(b, a, all_feats.shape[-1]))
+            all_feats = Indexing_ROI_result(
+                all_feats_list, indices, emb_size=(b, a, all_feats.shape[-1]))
+
         else:
             curr_pos_all = torch.cat((
                 data_batch["history_positions"].unsqueeze(1),
@@ -241,11 +279,13 @@ class AgentAwareRasterizedModel(nn.Module):
                 trans_mat=data_batch["raster_from_agent"],
                 patch_size=self.roi_size[[0, 2]]
             )
-            all_feats, _, global_feats = self.map_encoder(image_batch, rois=rois)
+            all_feats, _, global_feats = self.map_encoder(
+                image_batch, rois=rois)
 
         # tile global feature and concat w/ agent-wise features
         all_feats = all_feats.reshape(b, a, -1)
-        all_feats = torch.cat((all_feats, TensorUtils.unsqueeze_expand_at(global_feats, a, 1)), dim=-1)
+        all_feats = torch.cat(
+            (all_feats, TensorUtils.unsqueeze_expand_at(global_feats, a, 1)), dim=-1)
 
         # optionally pass information using transformer
         if self.transformer is not None:
@@ -254,14 +294,18 @@ class AgentAwareRasterizedModel(nn.Module):
                 states_all["history_availabilities"][:, :, -1],
                 states_all["history_positions"][:, :, -1]
             )
-        
+
         ego_feats = all_feats[:, [0]]
         agents_feats = all_feats[:, 1:]
 
         if self.goal_conditional:
-            # optionally condition the ego prediction on a goal location
-            goal_state = self._get_goal_states(data_batch)[:, [0]]
-            goal_feat = self.goal_encoder(goal_state) # -> [B, 1, D]
+            if plan is None:
+                # optionally condition the ego prediction on a goal location
+                goal_state = self._get_goal_states(data_batch)[:, [0]]
+            else:
+                goal_state = self._get_goal_states(
+                    data_batch, plan).unsqueeze(1)
+            goal_feat = self.goal_encoder(goal_state)  # -> [B, 1, D]
             ego_feats = torch.cat((ego_feats, goal_feat), dim=-1)
 
         # for dynamics models
@@ -278,8 +322,10 @@ class AgentAwareRasterizedModel(nn.Module):
             agents_states = None
 
         # make predictions
-        ego_preds = self.ego_decoder.forward(inputs=ego_feats, current_states=ego_states)
-        agents_preds = self.agents_decoder.forward(inputs=agents_feats, current_states=agents_states)
+        ego_preds = self.ego_decoder.forward(
+            inputs=ego_feats, current_states=ego_states)
+        agents_preds = self.agents_decoder.forward(
+            inputs=agents_feats, current_states=agents_states)
 
         # summarize predictions
         all_preds = dict()
@@ -296,17 +342,22 @@ class AgentAwareRasterizedModel(nn.Module):
         if self.ego_decoder.dyn is not None:
             out_dict["controls"] = all_preds["controls"]
         if self.GAN is not None:
-            traj_enc_feat_GT = self.traj_encoder(data_batch["target_positions"][...,:2].reshape(b,-1).detach())
-            likelihood_GT = self.GAN(torch.cat((ego_feats.squeeze(1).detach(),traj_enc_feat_GT),-1))
-            traj_enc_feat_pred = self.traj_encoder(ego_preds["trajectories"][...,:2].reshape(b,-1))
-            likelihood_pred = self.GAN(torch.cat((ego_feats.squeeze(1).detach(),traj_enc_feat_pred),-1))
+            traj_enc_feat_GT = self.traj_encoder(
+                data_batch["target_positions"][..., :2].reshape(b, -1).detach())
+            likelihood_GT = self.GAN(
+                torch.cat((ego_feats.squeeze(1).detach(), traj_enc_feat_GT), -1))
+            traj_enc_feat_pred = self.traj_encoder(
+                ego_preds["trajectories"][..., :2].reshape(b, -1))
+            likelihood_pred = self.GAN(
+                torch.cat((ego_feats.squeeze(1).detach(), traj_enc_feat_pred), -1))
             out_dict["likelihood_GT"] = likelihood_GT
             out_dict["likelihood_pred"] = likelihood_pred
         return out_dict
 
     def compute_losses(self, pred_batch, data_batch):
         all_targets = L5Utils.batch_to_target_all_agents(data_batch)
-        target_traj = torch.cat((all_targets["target_positions"], all_targets["target_yaws"]), dim=-1)
+        target_traj = torch.cat(
+            (all_targets["target_positions"], all_targets["target_yaws"]), dim=-1)
         pred_loss = trajectory_loss(
             predictions=pred_batch["trajectories"],
             targets=target_traj,
@@ -332,8 +383,6 @@ class AgentAwareRasterizedModel(nn.Module):
 
         coll_loss = collision_loss(pred_edges=pred_edges)
 
-        
-
         # target_mask = torch.cat(
         #     [
         #         data_batch["target_availabilities"].unsqueeze(1),
@@ -350,11 +399,13 @@ class AgentAwareRasterizedModel(nn.Module):
             collision_loss=coll_loss
         )
         if self.GAN is not None:
-            imitation_loss = F.binary_cross_entropy(pred_batch["likelihood_pred"],torch.ones_like(pred_batch["likelihood_pred"]))
+            imitation_loss = F.binary_cross_entropy(
+                pred_batch["likelihood_pred"], torch.ones_like(pred_batch["likelihood_pred"]))
             losses["GAN_loss"] = imitation_loss
-            
+
         if "controls" in pred_batch:
             # regularize the magnitude of yaw control
-            losses["yaw_reg_loss"] = torch.mean(pred_batch["controls"][..., 1] ** 2)
+            losses["yaw_reg_loss"] = torch.mean(
+                pred_batch["controls"][..., 1] ** 2)
 
         return losses

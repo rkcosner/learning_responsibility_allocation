@@ -12,7 +12,7 @@ from tbsim.models.multiagent_models import (
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.utils.env_utils import Action, Plan, Trajectory
 from tbsim.utils.loss_utils import discriminator_loss
-import pdb
+
 
 class MATrafficModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):
@@ -37,7 +37,7 @@ class MATrafficModel(pl.LightningModule):
             use_rotated_roi=algo_config.use_rotated_roi,
             use_transformer=algo_config.use_transformer,
             roi_layer_key=algo_config.roi_layer_key,
-            use_GAN= algo_config.use_GAN
+            use_GAN=algo_config.use_GAN
         )
 
     @property
@@ -46,8 +46,8 @@ class MATrafficModel(pl.LightningModule):
             "valLoss": "val/losses_prediction_loss"
         }
 
-    def forward(self, obs_dict):
-        return self.model(obs_dict)
+    def forward(self, obs_dict, plan=None):
+        return self.model(obs_dict, plan)
 
     def training_step(self, batch, batch_idx):
         pout = self.model.forward(batch)
@@ -90,7 +90,8 @@ class MATrafficModel(pl.LightningModule):
     def get_plan(self, obs_dict, **kwargs):
         preds = self(obs_dict)
         ego_preds = self.model.get_ego_predictions(preds)
-        avails = torch.ones(ego_preds["predictions"]["positions"].shape[:-1]).to(ego_preds["predictions"]["positions"].device)
+        avails = torch.ones(ego_preds["predictions"]["positions"].shape[:-1]).to(
+            ego_preds["predictions"]["positions"].device)
 
         plan = Plan(
             positions=ego_preds["predictions"]["positions"],
@@ -101,7 +102,11 @@ class MATrafficModel(pl.LightningModule):
         return plan, {}
 
     def get_action(self, obs_dict, **kwargs):
-        preds = self(obs_dict)
+        if "plan" in kwargs:
+            plan = kwargs["plan"]
+        else:
+            plan = None
+        preds = self(obs_dict, plan)
         ego_preds = self.model.get_ego_predictions(preds)
         action = Action(
             positions=ego_preds["predictions"]["positions"],
@@ -110,7 +115,11 @@ class MATrafficModel(pl.LightningModule):
         return action, {}
 
     def get_prediction(self, obs_dict, **kwargs):
-        preds = self(obs_dict)
+        if "plan" in kwargs:
+            plan = kwargs["plan"]
+        else:
+            plan = None
+        preds = self(obs_dict, plan)
         agent_preds = self.model.get_agents_predictions(preds)
         agent_trajs = Trajectory(
             positions=agent_preds["predictions"]["positions"],
@@ -127,18 +136,19 @@ class MAGANTrafficModel(MATrafficModel):
             "valLoss": "val/losses_prediction_loss"
         }
 
-    def forward(self, obs_dict):
-        return self.model(obs_dict)
+    def forward(self, obs_dict, plan=None):
+        return self.model(obs_dict, plan)
 
-    def discriminator_loss(self,pred_batch):
-        d_loss = discriminator_loss(pred_batch["likelihood_pred"],pred_batch["likelihood_GT"])
+    def discriminator_loss(self, pred_batch):
+        d_loss = discriminator_loss(
+            pred_batch["likelihood_pred"], pred_batch["likelihood_GT"])
         self.log("train/discriminator_loss", d_loss)
         return d_loss
 
-    def training_step(self, batch, batch_idx,optimizer_idx):
-        
+    def training_step(self, batch, batch_idx, optimizer_idx):
+
         pout = self.model.forward(batch)
-        if optimizer_idx==0:
+        if optimizer_idx == 0:
             losses = self.model.compute_losses(pout, batch)
             total_loss = 0.0
             for lk, l in losses.items():
@@ -149,17 +159,14 @@ class MAGANTrafficModel(MATrafficModel):
             metrics = self.model.compute_metrics(pout, batch)
             for mk, m in metrics.items():
                 self.log("train/metrics_" + mk, m)
-            
+
             return total_loss
-        elif optimizer_idx==1:
+        elif optimizer_idx == 1:
             d_loss = self.discriminator_loss(pout)
-            
-            for mk in ["likelihood_pred","likelihood_GT"]:
+
+            for mk in ["likelihood_pred", "likelihood_GT"]:
                 self.log("train/metrics_" + mk, pout[mk].mean())
             return d_loss
-            
-
-            
 
     def validation_step(self, batch, batch_idx):
         pout = self.model.forward(batch)
@@ -179,11 +186,11 @@ class MAGANTrafficModel(MATrafficModel):
     def configure_optimizers(self):
         gen_params = list()
         discr_params = list()
-        for com_name,com in self.model.named_children():
-            if com_name not in ["GAN","traj_encoder"]:
-                gen_params+=list(com.parameters())
+        for com_name, com in self.model.named_children():
+            if com_name not in ["GAN", "traj_encoder"]:
+                gen_params += list(com.parameters())
             else:
-                discr_params+=list(com.parameters())
+                discr_params += list(com.parameters())
         gen_optim_params = self.algo_config.optim_params.policy
         discr_optim_params = self.algo_config.optim_params.GAN
         gen_optim = optim.Adam(
@@ -202,7 +209,8 @@ class MAGANTrafficModel(MATrafficModel):
     def get_plan(self, obs_dict, **kwargs):
         preds = self(obs_dict)
         ego_preds = self.model.get_ego_predictions(preds)
-        avails = torch.ones(ego_preds["predictions"]["positions"].shape[:-1]).to(ego_preds["predictions"]["positions"].device)
+        avails = torch.ones(ego_preds["predictions"]["positions"].shape[:-1]).to(
+            ego_preds["predictions"]["positions"].device)
 
         plan = Plan(
             positions=ego_preds["predictions"]["positions"],
@@ -213,7 +221,11 @@ class MAGANTrafficModel(MATrafficModel):
         return plan, {}
 
     def get_action(self, obs_dict, **kwargs):
-        preds = self(obs_dict)
+        if "plan" in kwargs:
+            plan = kwargs["plan"]
+        else:
+            plan = None
+        preds = self(obs_dict, plan)
         ego_preds = self.model.get_ego_predictions(preds)
         action = Action(
             positions=ego_preds["predictions"]["positions"],
@@ -222,7 +234,11 @@ class MAGANTrafficModel(MATrafficModel):
         return action, {}
 
     def get_prediction(self, obs_dict, **kwargs):
-        preds = self(obs_dict)
+        if "plan" in kwargs:
+            plan = kwargs["plan"]
+        else:
+            plan = None
+        preds = self(obs_dict, plan)
         agent_preds = self.model.get_agents_predictions(preds)
         agent_trajs = Trajectory(
             positions=agent_preds["predictions"]["positions"],

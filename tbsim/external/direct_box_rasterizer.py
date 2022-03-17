@@ -15,7 +15,6 @@ from l5kit.l5kit.rasterizer import (
 )
 from l5kit.l5kit.render_context import RenderContext
 from l5kit.l5kit.semantic_rasterizer import CV2_SUB_VALUES, cv2_subpixel
-import pdb
 
 
 # TODO this can be useful to have around
@@ -47,7 +46,8 @@ def get_box_world_coords(agents: np.ndarray) -> np.ndarray:
 
     # compute the corner in world-space (start in origin, rotate and then translate)
     # extend extent to shape (N, 1, 2) so that op gives (N, 4, 2)
-    corners_m = corners_base_coords * agents["extent"][:, None, :2]  # corners in zero
+    corners_m = corners_base_coords * \
+        agents["extent"][:, None, :2]  # corners in zero
     s = np.sin(agents["yaw"])
     c = np.cos(agents["yaw"])
     # note this is clockwise because it's right-multiplied and not left-multiplied later,
@@ -86,7 +86,6 @@ def draw_boxes(
     )
 
     # fillPoly wants polys in a sequence with points inside as (x,y)
-    # pdb.set_trace()
     box_raster_coords = cv2_subpixel(box_raster_coords.reshape((-1, 4, 2)))
 
     cv2.fillPoly(im, box_raster_coords, color=color, **CV2_SUB_VALUES)
@@ -157,14 +156,16 @@ class BoxRasterizer(Rasterizer):
         ego_images = np.zeros(out_shape, dtype=np.uint8)
 
         for i, (frame, agents) in enumerate(zip(history_frames, history_agents)):
-            agents = filter_agents_by_labels(agents, self.filter_agents_threshold)
+            agents = filter_agents_by_labels(
+                agents, self.filter_agents_threshold)
             # note the cast is for legacy support of dataset before April 2020
             av_agent = get_ego_as_agent(frame).astype(agents.dtype)
 
             if agent is None:
                 ego_agent = av_agent
             else:
-                ego_agent = filter_agents_by_track_id(agents, agent["track_id"])
+                ego_agent = filter_agents_by_track_id(
+                    agents, agent["track_id"])
                 agents = np.append(agents, av_agent)  # add av_agent to agents
                 if len(ego_agent) > 0:  # check if ego_agent is in the frame
                     agents = agents[
@@ -197,7 +198,8 @@ class BoxRasterizer(Rasterizer):
         out_im_agent = np.zeros(
             (self.raster_size[1], self.raster_size[0], 3), dtype=np.float32
         )
-        agent_chs = in_im[:hist_frames][::-1]  # reverse to start from the furthest one
+        # reverse to start from the furthest one
+        agent_chs = in_im[:hist_frames][::-1]
         agent_color = (
             (0, 0, 1) if "agent_color" not in kwargs else kwargs["agent_color"]
         )
@@ -209,12 +211,14 @@ class BoxRasterizer(Rasterizer):
             (self.raster_size[1], self.raster_size[0], 3), dtype=np.float32
         )
         ego_chs = in_im[hist_frames:][::-1]
-        ego_color = (0, 1, 0) if "ego_color" not in kwargs else kwargs["ego_color"]
+        ego_color = (
+            0, 1, 0) if "ego_color" not in kwargs else kwargs["ego_color"]
         for ch in ego_chs:
             out_im_ego *= 0.85
             out_im_ego[ch > 0] = ego_color
 
-        out_im = (np.clip(out_im_agent + out_im_ego, 0, 1) * 255).astype(np.uint8)
+        out_im = (np.clip(out_im_agent + out_im_ego, 0, 1)
+                  * 255).astype(np.uint8)
         return out_im
 
     def num_channels(self) -> int:

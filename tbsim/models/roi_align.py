@@ -2,11 +2,10 @@ from logging import raiseExceptions
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pdb
 from tbsim.utils.geometry_utils import batch_nd_transform_points
 
 
-def bilinear_interpolate(img, x, y, floattype=torch.float,flip_y=True):
+def bilinear_interpolate(img, x, y, floattype=torch.float, flip_y=False):
     """Return bilinear interpolation of 4 nearest pts w.r.t to x,y from img
     Args:
         img (torch.Tensor): Tensor of size cxwxh. Usually one channel of feature layer
@@ -40,7 +39,7 @@ def bilinear_interpolate(img, x, y, floattype=torch.float,flip_y=True):
     Id = img[..., y1, x1]
 
     step = (x1.type(floattype) - x0.type(floattype)) * (
-            y1.type(floattype) - y0.type(floattype)
+        y1.type(floattype) - y0.type(floattype)
     )
     step = torch.clamp(step, 1e-3, 2)
     norm_const = 1 / step
@@ -50,10 +49,10 @@ def bilinear_interpolate(img, x, y, floattype=torch.float,flip_y=True):
     wc = (x - x0.type(floattype)) * (y1.type(floattype) - y) * norm_const
     wd = (x - x0.type(floattype)) * (y - y0.type(floattype)) * norm_const
     return (
-            Ia * wa.unsqueeze(0)
-            + Ib * wb.unsqueeze(0)
-            + Ic * wc.unsqueeze(0)
-            + Id * wd.unsqueeze(0)
+        Ia * wa.unsqueeze(0)
+        + Ib * wb.unsqueeze(0)
+        + Ic * wc.unsqueeze(0)
+        + Id * wd.unsqueeze(0)
     )
 
 
@@ -69,24 +68,24 @@ def ROI_align(features, ROI, outdim):
     bs, num_channels, h, w = features.shape
 
     xg = (
-            torch.cat(
-                (
-                    torch.arange(0, outdim).view(-1, 1) - (outdim - 1) / 2,
-                    torch.zeros([outdim, 1]),
-                ),
-                dim=-1,
-            )
-            / outdim
+        torch.cat(
+            (
+                torch.arange(0, outdim).view(-1, 1) - (outdim - 1) / 2,
+                torch.zeros([outdim, 1]),
+            ),
+            dim=-1,
+        )
+        / outdim
     )
     yg = (
-            torch.cat(
-                (
-                    torch.zeros([outdim, 1]),
-                    torch.arange(0, outdim).view(-1, 1) - (outdim - 1) / 2,
-                ),
-                dim=-1,
-            )
-            / outdim
+        torch.cat(
+            (
+                torch.zeros([outdim, 1]),
+                torch.arange(0, outdim).view(-1, 1) - (outdim - 1) / 2,
+            ),
+            dim=-1,
+        )
+        / outdim
     )
     gg = xg.view(1, -1, 2) + yg.view(-1, 1, 2)
     gg = gg.to(features.device)
@@ -137,9 +136,10 @@ def generate_ROIs(
         yaw = yaw.type(torch.float)
         Mat = raster_from_agent.view(-1, 1, 1, 3, 3).type(torch.float)
         raster_xy = batch_nd_transform_points(pos, Mat)
-        raster_mult = torch.linalg.norm(raster_from_agent[0,0,0:2],dim=[-1]).item()
+        raster_mult = torch.linalg.norm(
+            raster_from_agent[0, 0, 0:2], dim=[-1]).item()
         patch_size = patch_size.type(torch.float)
-        patch_size*=raster_mult
+        patch_size *= raster_mult
         ROI = [None] * bs
         index = [None] * bs
         for i in range(bs):
@@ -174,9 +174,10 @@ def generate_ROIs(
         bs = pos.shape[0]
         Mat = raster_from_agent.view(-1, 1, 1, 3, 3).type(torch.float)
         raster_xy = batch_nd_transform_points(pos, Mat)
-        raster_mult = torch.linalg.norm(raster_from_agent[0,0,0:2],dim=[-1]).item()
+        raster_mult = torch.linalg.norm(
+            raster_from_agent[0, 0, 0:2], dim=[-1]).item()
         patch_size = patch_size.type(torch.float)
-        patch_size*=raster_mult
+        patch_size *= raster_mult
         agent_mask = mask.any(dim=2)
         ROI = [None] * bs
         index = [None] * bs
@@ -208,6 +209,7 @@ def generate_ROIs(
     else:
         raise ValueError("mode must be 'all' or 'last'")
 
+
 def Indexing_ROI_result(CNN_out, index, emb_size):
     """put the lists of ROI align result into embedding tensor with the help of index"""
     bs = len(CNN_out)
@@ -223,4 +225,3 @@ def Indexing_ROI_result(CNN_out, index, emb_size):
         raise ValueError("wrong dimension for the map embedding!")
 
     return map_emb
-

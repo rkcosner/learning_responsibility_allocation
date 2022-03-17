@@ -2,7 +2,6 @@ from logging import raiseExceptions
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pdb
 from tbsim.utils.geometry_utils import batch_nd_transform_points
 
 
@@ -17,7 +16,6 @@ class CNNROIMapEncoder(nn.Module):
             strides,
             input_size,
     ):
-
         """
         multi-layer CNN with ROI align for the output
         Args:
@@ -134,7 +132,7 @@ class CNNROIMapEncoder(nn.Module):
 #         + Ic * wc.unsqueeze(1)
 #         + Id * wd.unsqueeze(1)
 #     )
-def bilinear_interpolate(img, x, y, floattype=torch.float,flip_y=False):
+def bilinear_interpolate(img, x, y, floattype=torch.float, flip_y=False):
     """Return bilinear interpolation of 4 nearest pts w.r.t to x,y from img
     Args:
         img (torch.Tensor): Tensor of size cxwxh. Usually one channel of feature layer
@@ -161,7 +159,6 @@ def bilinear_interpolate(img, x, y, floattype=torch.float,flip_y=False):
     x1 = torch.clamp(x1, 0, img.shape[-1] - 1)
     y0 = torch.clamp(y0, 0, img.shape[-2] - 1)
     y1 = torch.clamp(y1, 0, img.shape[-2] - 1)
-    
 
     Ia = img[..., y0, x0]
     Ib = img[..., y1, x0]
@@ -169,7 +166,7 @@ def bilinear_interpolate(img, x, y, floattype=torch.float,flip_y=False):
     Id = img[..., y1, x1]
 
     step = (x1.type(floattype) - x0.type(floattype)) * (
-            y1.type(floattype) - y0.type(floattype)
+        y1.type(floattype) - y0.type(floattype)
     )
     step = torch.clamp(step, 1e-3, 2)
     norm_const = 1 / step
@@ -179,10 +176,10 @@ def bilinear_interpolate(img, x, y, floattype=torch.float,flip_y=False):
     wc = (x - x0.type(floattype)) * (y1.type(floattype) - y) * norm_const
     wd = (x - x0.type(floattype)) * (y - y0.type(floattype)) * norm_const
     return (
-            Ia * wa.unsqueeze(0)
-            + Ib * wb.unsqueeze(0)
-            + Ic * wc.unsqueeze(0)
-            + Id * wd.unsqueeze(0)
+        Ia * wa.unsqueeze(0)
+        + Ib * wb.unsqueeze(0)
+        + Ic * wc.unsqueeze(0)
+        + Id * wd.unsqueeze(0)
     )
 
 
@@ -198,24 +195,24 @@ def ROI_align(features, ROI, outdim):
     bs, num_channels, h, w = features.shape
 
     xg = (
-            torch.cat(
-                (
-                    torch.arange(0, outdim).view(-1, 1) - (outdim - 1) / 2,
-                    torch.zeros([outdim, 1]),
-                ),
-                dim=-1,
-            )
-            / outdim
+        torch.cat(
+            (
+                torch.arange(0, outdim).view(-1, 1) - (outdim - 1) / 2,
+                torch.zeros([outdim, 1]),
+            ),
+            dim=-1,
+        )
+        / outdim
     )
     yg = (
-            torch.cat(
-                (
-                    torch.zeros([outdim, 1]),
-                    torch.arange(0, outdim).view(-1, 1) - (outdim - 1) / 2,
-                ),
-                dim=-1,
-            )
-            / outdim
+        torch.cat(
+            (
+                torch.zeros([outdim, 1]),
+                torch.arange(0, outdim).view(-1, 1) - (outdim - 1) / 2,
+            ),
+            dim=-1,
+        )
+        / outdim
     )
     gg = xg.view(1, -1, 2) + yg.view(-1, 1, 2)
     gg = gg.to(features.device)
@@ -267,8 +264,8 @@ def generate_ROIs_deprecated(
         bs = pos.shape[0]
         yaw = yaw.type(torch.float)
         scene_yaw = scene_yaw.type(torch.float)
-        s = torch.sin(scene_yaw).reshape(-1,1,1,1)
-        c = torch.cos(scene_yaw).reshape(-1,1,1,1)
+        s = torch.sin(scene_yaw).reshape(-1, 1, 1, 1)
+        c = torch.cos(scene_yaw).reshape(-1, 1, 1, 1)
         rotM = torch.cat(
             (torch.cat((c, -s), dim=-1), torch.cat((s, c), dim=-1)), dim=-2
         )
@@ -277,9 +274,10 @@ def generate_ROIs_deprecated(
 
         Mat = raster_from_world.view(-1, 1, 1, 3, 3).type(torch.float)
         raster_xy = batch_nd_transform_points(world_xy, Mat)
-        raster_mult = torch.linalg.norm(raster_from_world[0,0,0:2],dim=[-1]).item()
+        raster_mult = torch.linalg.norm(
+            raster_from_world[0, 0, 0:2], dim=[-1]).item()
         patch_size = patch_size.type(torch.float)
-        patch_size*=raster_mult
+        patch_size *= raster_mult
         ROI = [None] * bs
         index = [None] * bs
         for i in range(bs):
@@ -313,8 +311,8 @@ def generate_ROIs_deprecated(
         last_idx, _ = torch.max(nummask, dim=2)
         bs = pos.shape[0]
         scene_yaw = scene_yaw.type(torch.float)
-        s = torch.sin(scene_yaw).reshape(-1,1,1,1)
-        c = torch.cos(scene_yaw).reshape(-1,1,1,1)
+        s = torch.sin(scene_yaw).reshape(-1, 1, 1, 1)
+        c = torch.cos(scene_yaw).reshape(-1, 1, 1, 1)
         rotM = torch.cat(
             (torch.cat((c, -s), dim=-1), torch.cat((s, c), dim=-1)), dim=-2
         )
@@ -352,6 +350,8 @@ def generate_ROIs_deprecated(
         return ROI, index
     else:
         raise ValueError("mode must be 'all' or 'last'")
+
+
 def generate_ROIs(
         pos,
         yaw,
@@ -368,9 +368,10 @@ def generate_ROIs(
         yaw = yaw.type(torch.float)
         Mat = raster_from_agent.view(-1, 1, 1, 3, 3).type(torch.float)
         raster_xy = batch_nd_transform_points(pos, Mat)
-        raster_mult = torch.linalg.norm(raster_from_agent[0,0,0:2],dim=[-1]).item()
+        raster_mult = torch.linalg.norm(
+            raster_from_agent[0, 0, 0:2], dim=[-1]).item()
         patch_size = patch_size.type(torch.float)
-        patch_size*=raster_mult
+        patch_size *= raster_mult
         ROI = [None] * bs
         index = [None] * bs
         for i in range(bs):
@@ -405,9 +406,10 @@ def generate_ROIs(
         bs = pos.shape[0]
         Mat = raster_from_agent.view(-1, 1, 1, 3, 3).type(torch.float)
         raster_xy = batch_nd_transform_points(pos, Mat)
-        raster_mult = torch.linalg.norm(raster_from_agent[0,0,0:2],dim=[-1]).item()
+        raster_mult = torch.linalg.norm(
+            raster_from_agent[0, 0, 0:2], dim=[-1]).item()
         patch_size = patch_size.type(torch.float)
-        patch_size*=raster_mult
+        patch_size *= raster_mult
         agent_mask = mask.any(dim=2)
         ROI = [None] * bs
         index = [None] * bs
@@ -471,7 +473,8 @@ def obtain_lane_flag(
         )
         lane_flags = ROI_align(lane_mask.unsqueeze(1), ROI, out_dim)
         lane_flags = [x.mean([-2, -1]).view(x.size(0), 1) for x in lane_flags]
-        lane_flags = Indexing_ROI_result(lane_flags, index, [*pos.shape[:3], 1])
+        lane_flags = Indexing_ROI_result(
+            lane_flags, index, [*pos.shape[:3], 1])
     elif pos.ndim == 5:
         lane_flags = list()
         emb_size = (*pos[:, 0].shape[:-1], 1)
@@ -485,8 +488,10 @@ def obtain_lane_flag(
                 mode="all",
             )
             lane_flag_i = ROI_align(lane_mask.unsqueeze(1), ROI, out_dim)
-            lane_flag_i = [x.mean([-2, -1]).view(x.size(0), 1) for x in lane_flag_i]
-            lane_flags.append(Indexing_ROI_result(lane_flag_i, index, emb_size))
+            lane_flag_i = [x.mean([-2, -1]).view(x.size(0), 1)
+                           for x in lane_flag_i]
+            lane_flags.append(Indexing_ROI_result(
+                lane_flag_i, index, emb_size))
         lane_flags = torch.stack(lane_flags, dim=1)
     return lane_flags
 
@@ -542,7 +547,8 @@ if __name__ == "__main__":
     ROI = [ROI[i] for i in range(ROI.shape[0])]
     res1 = ROI_align(features, ROI, 6)[0].transpose(0, 1)
 
-    ROI_star = torch.cat((xy - WH[..., [0, 2]], xy + WH[..., [1, 3]]), dim=-1)[0]
+    ROI_star = torch.cat(
+        (xy - WH[..., [0, 2]], xy + WH[..., [1, 3]]), dim=-1)[0]
 
     roi_align_obj = RoIAlign(6, 1, sampling_ratio=2, aligned=False)
     res2 = roi_align_obj(features, [ROI_star])

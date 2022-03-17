@@ -57,14 +57,17 @@ def configs_to_search(base_cfg):
     #     ParamRange("algo.decoder.layer_dims", alias="decmlp", range=[[128, 128]])
     # ]))
 
-    plan.add_const_param(Param("train.rollout.enabled", alias="rl", value=False))
+    plan.add_const_param(
+        Param("train.rollout.enabled", alias="rl", value=False))
     plan.extend(plan.compose_cartesian([
-        ParamRange("algo.model_architecture", alias="arch", range=["resnet50"]),
-        # ParamRange("train.training.batch_size", alias="bs", range=[64, 80]),
-        ParamRange("algo.loss_weights.GAN_loss", alias="Gw", range=[0.1, 0.2,0.5]),
-        ParamRange("algo.optim_params.policy.learning_rate.initial", alias="lr", range=[1e-4, 3e-4]),
+        ParamRange("algo.model_architecture",
+                   alias="arch", range=["resnet50"]),
+        ParamRange("algo.loss_weights.GAN_loss", alias="Gw", range=[0.1, 0.2]),
+        ParamRange("algo.use_transformer", alias="trans", range=[True, False]),
+        # ParamRange("algo.optim_params.policy.learning_rate.initial", alias="lr", range=[3e-4]),
+        ParamRange("algo.loss_weights.lane_reg_loss",
+                   alias="lreg", range=[0.5, 1.0]),
     ]))
-
 
     return plan.generate_configs(base_cfg=base_cfg)
 

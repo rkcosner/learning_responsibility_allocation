@@ -101,7 +101,8 @@ def rollout_episodes(
         if render:
             frames = np.stack(frames)
             if is_batched_env:
-                frames = frames.transpose((1, 0, 2, 3, 4))  # [step, scene] -> [scene, step]
+                # [step, scene] -> [scene, step]
+                frames = frames.transpose((1, 0, 2, 3, 4))
             renderings.append(frames)
 
     return stats, info, renderings
@@ -270,7 +271,8 @@ class RolloutAction(object):
     def transform(self, ego_trans_mats, ego_rot_rads, agents_trans_mats=None, agents_rot_rads=None):
         trans_action = RolloutAction()
         if self.has_ego:
-            trans_action.ego = self.ego.transform(trans_mats=ego_trans_mats, rot_rads=ego_rot_rads)
+            trans_action.ego = self.ego.transform(
+                trans_mats=ego_trans_mats, rot_rads=ego_rot_rads)
             if self.ego_info is not None:
                 trans_action.ego_info = deepcopy(self.ego_info)
                 if "plan" in trans_action.ego_info:
@@ -280,7 +282,8 @@ class RolloutAction(object):
                     ).to_dict()
         if self.has_agents:
             assert agents_trans_mats is not None and agents_rot_rads is not None
-            trans_action.agents = self.agents.transform(trans_mats=agents_trans_mats, rot_rads=agents_rot_rads)
+            trans_action.agents = self.agents.transform(
+                trans_mats=agents_trans_mats, rot_rads=agents_rot_rads)
             if self.agents_info is not None:
                 trans_action.agents_info = deepcopy(self.agents_info)
                 if "plan" in trans_action.agents_info:
@@ -303,9 +306,11 @@ class RolloutAction(object):
     def to_numpy(self):
         return self.__class__(
             ego=self.ego.to_numpy() if self.has_ego else None,
-            ego_info=TensorUtils.to_numpy(self.ego_info) if self.has_ego else None,
+            ego_info=TensorUtils.to_numpy(
+                self.ego_info) if self.has_ego else None,
             agents=self.agents.to_numpy() if self.has_agents else None,
-            agents_info=TensorUtils.to_numpy(self.agents_info) if self.has_agents else None,
+            agents_info=TensorUtils.to_numpy(
+                self.agents_info) if self.has_agents else None,
         )
 
     @classmethod
@@ -320,6 +325,7 @@ class RolloutAction(object):
 
 class OptimController(object):
     """An optimization-based controller"""
+
     def __init__(
         self,
         dynamics_type,
@@ -382,6 +388,7 @@ class OptimController(object):
 
 class GTPlanner(object):
     """A (fake) planner tha sets ground truth trajectory as (sub)goal"""
+
     def __init__(self, device):
         self.device = device
 
@@ -400,6 +407,7 @@ class GTPlanner(object):
 
 class HierarchicalPolicy(object):
     """A wrapper policy that feeds subgoal from a planner to a controller"""
+
     def __init__(self, planner, controller):
         self.device = planner.device
         self.planner = planner
@@ -421,8 +429,10 @@ class HierarchicalPolicy(object):
         action_info["plan_info"] = plan_info
         return actions, action_info
 
+
 class HierarchicalWrapper(object):
     """A wrapper policy that feeds subgoal from a planner to a controller"""
+
     def __init__(self, planner, controller):
         self.device = planner.device
         self.planner = planner
@@ -446,17 +456,19 @@ class HierarchicalWrapper(object):
 
 class HierarchicalSampler(HierarchicalPolicy):
     """A wrapper policy that feeds plan samples from a stochastic planner to a controller"""
+
     def get_action(self, obs) -> Tuple[None, Dict]:
         _, plan_info = self.planner.get_plan(obs)
         plan_samples = plan_info.pop("plan_samples")
         b, n = plan_samples.positions.shape[:2]
 
         obs_tiled = TensorUtils.unsqueeze_expand_at(obs, size=n, dim=1)
-        obs_tiled = TensorUtils.join_dimensions(obs_tiled, begin_axis=0, end_axis=2)
+        obs_tiled = TensorUtils.join_dimensions(
+            obs_tiled, begin_axis=0, end_axis=2)
 
-        plan_tiled = TensorUtils.join_dimensions(plan_samples.to_dict(), begin_axis=0, end_axis=2)
+        plan_tiled = TensorUtils.join_dimensions(
+            plan_samples.to_dict(), begin_axis=0, end_axis=2)
         plan_tiled = Plan.from_dict(plan_tiled)
-
         actions_tiled, _ = self.controller.get_action(
             obs_tiled,
             plan=plan_tiled,
@@ -476,7 +488,6 @@ class HierarchicalSampler(HierarchicalPolicy):
         return None, action_info
 
 
-
 class SamplingPolicy(object):
     def __init__(self, ego_action_sampler, agent_traj_predictor):
         """
@@ -494,14 +505,17 @@ class SamplingPolicy(object):
         self.predictor.eval()
 
     def get_action(self, obs) -> Tuple[Action, Dict]:
-        _, action_info = self.sampler.get_action(obs)  # actions of shape [B, num_samples, ...]
+        # actions of shape [B, num_samples, ...]
+        _, action_info = self.sampler.get_action(obs)
         action_samples = action_info["action_samples"]
-        agent_preds, _ = self.predictor.get_prediction(obs) # preds of shape [B, A - 1, ...]
+        agent_preds, _ = self.predictor.get_prediction(
+            obs)  # preds of shape [B, A - 1, ...]
 
         ego_trajs = action_samples.trajectories
         agent_pred_trajs = agent_preds.trajectories
 
-        agent_extents = obs["all_other_agents_future_extents"][..., :2].max(dim=-2)[0]
+        agent_extents = obs["all_other_agents_future_extents"][..., :2].max(
+            dim=-2)[0]
         drivable_map = get_drivable_region_map(obs["image"]).float()
         dis_map = calc_distance_map(drivable_map)
         action_idx = ego_sample_planning(
@@ -512,16 +526,18 @@ class SamplingPolicy(object):
             raw_types=obs["all_other_agents_types"],
             raster_from_agent=obs["raster_from_agent"],
             dis_map=dis_map,
-            weights={"collision_weight":1.0,"lane_weight":1.0},
+            weights={"collision_weight": 1.0, "lane_weight": 1.0},
         )
 
         ego_trajs_best = torch.gather(
             ego_trajs,
             dim=1,
-            index=action_idx[:, None, None, None].expand(-1, 1, *ego_trajs.shape[2:])
+            index=action_idx[:, None, None,
+                             None].expand(-1, 1, *ego_trajs.shape[2:])
         ).squeeze(1)
 
-        ego_actions = Action(positions=ego_trajs_best[..., :2], yaws=ego_trajs_best[..., 2:])
+        ego_actions = Action(
+            positions=ego_trajs_best[..., :2], yaws=ego_trajs_best[..., 2:])
         action_info["action_samples"] = action_samples.to_dict()
         if "plan_samples" in action_info:
             action_info["plan_samples"] = action_info["plan_samples"].to_dict()
@@ -529,9 +545,9 @@ class SamplingPolicy(object):
         return ego_actions, action_info
 
 
-
 class PolicyWrapper(object):
     """A convenient wrapper for specifying run-time keyword arguments"""
+
     def __init__(self, model, get_action_kwargs=None, get_plan_kwargs=None):
         self.model = model
         self.device = model.device
@@ -558,6 +574,7 @@ class PolicyWrapper(object):
 
 class RolloutWrapper(object):
     """A wrapper policy that can (optionally) control both ego and other agents in a scene"""
+
     def __init__(self, ego_policy=None, agents_policy=None):
         self.device = ego_policy.device if agents_policy is None else agents_policy.device
         self.ego_policy = ego_policy
@@ -575,9 +592,11 @@ class RolloutWrapper(object):
         if self.ego_policy is not None:
             assert obs["ego"] is not None
             with torch.no_grad():
-                ego_action, ego_action_info = self.ego_policy.get_action(obs["ego"])
+                ego_action, ego_action_info = self.ego_policy.get_action(
+                    obs["ego"])
         if self.agents_policy is not None:
             assert obs["agents"] is not None
             with torch.no_grad():
-                agents_action, agents_action_info = self.agents_policy.get_action(obs["agents"])
+                agents_action, agents_action_info = self.agents_policy.get_action(
+                    obs["agents"])
         return RolloutAction(ego_action, ego_action_info, agents_action, agents_action_info)

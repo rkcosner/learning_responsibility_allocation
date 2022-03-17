@@ -39,9 +39,9 @@ def get_collision_loss(
                 ego_edges[..., 6:8],
                 ego_edges[..., 8:],
             ).min(dim=-1)[0]
-            col_loss += torch.mean(
+            col_loss += torch.max(
                 torch.sigmoid(-dis - 4.0) * type_mask[et].unsqueeze(1), dim=2
-            )
+            )[0]
     return col_loss
 
 
@@ -59,7 +59,7 @@ def get_drivable_area_loss(
             ego_extents.unsqueeze(1).repeat(1, ego_trajectories.shape[1], 1),
             1,
         ).squeeze(-1)
-    return lane_flags.mean(dim=-1)
+    return lane_flags.max(dim=-1)[0]
 
 
 def ego_sample_planning(
@@ -93,7 +93,9 @@ def ego_sample_planning(
     else:
         total_score = (
             likelihood
-            - weights.collision_weight * col_loss
-            - weights.lane_weight * lane_loss
+            - weights["collision_weight"] * col_loss
+            - weights["lane_weight"] * lane_loss
         )
+    # if total_score.shape[0] == 1 and total_score.min() < -0.5:
+    #     pdb.set_trace()
     return torch.argmax(total_score, dim=1)

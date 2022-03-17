@@ -2,7 +2,6 @@ from tbsim.dynamics.base import DynType, Dynamics
 import torch
 import numpy as np
 from copy import deepcopy
-import pdb
 
 
 class Unicycle(Dynamics):
@@ -31,7 +30,8 @@ class Unicycle(Dynamics):
             assert isinstance(u, torch.Tensor)
             theta = x[..., 3:4]
             dxdt = torch.cat(
-                (torch.cos(theta) * x[..., 2:3], torch.sin(theta) * x[..., 2:3], u),
+                (torch.cos(theta) * x[..., 2:3],
+                 torch.sin(theta) * x[..., 2:3], u),
                 dim=-1,
             )
         else:
