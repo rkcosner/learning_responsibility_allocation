@@ -159,11 +159,13 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
     data_cfg.env.simulation.distance_th_far = 1e+5
     data_cfg.env.simulation.disable_new_agents = True
     data_cfg.env.generate_agent_obs = True
+
+    num_scenes_per_batch = 3
     env = EnvL5KitSimulation(
         data_cfg.env,
         dataset=env_dataset,
         seed=4,
-        num_scenes=1,
+        num_scenes=num_scenes_per_batch,
         prediction_only=False,
         renderer=render_rasterizer,
         compute_metrics=True,
@@ -190,6 +192,7 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
         for im in scene_images:
             writer.append_data(im)
         writer.close()
+
 
 
 def test_sample_planner():
