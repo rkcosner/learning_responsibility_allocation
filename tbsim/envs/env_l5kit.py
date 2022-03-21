@@ -446,13 +446,12 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             obs = self.get_observation()
             actions_world_d = actions_world.to_dict()
             if actions.has_agents:
-                # some agents might get dropped in the middle, filter agent actions by active agent track ids
-                active_agent_index = np.zeros(
-                    agent_track_ids.shape[0], dtype=np.bool)
-                for i, (tid, sid) in enumerate(zip(agent_track_ids, agent_scene_indices)):
-                    agent_exists = np.bitwise_and(
-                        tid == obs["agents"]["track_id"], sid == obs["agents"]["scene_index"])
-                    active_agent_index[i] = np.sum(agent_exists) > 0
+                # some agents might get dropped in the middle,
+                # index actions by the current agent track ids and scene index
+                active_agent_index = np.zeros(obs["agents"]["scene_index"].shape[0], dtype=np.int64)
+                for i, (tid, sid) in enumerate(zip(obs["agents"]["track_id"], obs["agents"]["scene_index"])):
+                    action_index = np.bitwise_and(tid == agent_track_ids, sid == agent_scene_indices)
+                    active_agent_index[i] = np.where(action_index)[0][0]
                 actions_world_d["agents"] = TensorUtils.map_ndarray(
                     actions_world_d["agents"], lambda x: x[active_agent_index]
                 )
