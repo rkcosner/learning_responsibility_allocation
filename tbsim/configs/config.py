@@ -185,3 +185,6 @@ class Dict(dict):
         self.unlock()
         yield
         self.lock()
+
+    def clone(self):
+        return deepcopy(self)

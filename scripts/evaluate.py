@@ -14,10 +14,10 @@ from l5kit.dataset import EgoDataset
 from l5kit.rasterization import build_rasterizer
 
 from tbsim.external.vectorizer import build_vectorizer
-from tbsim.configs.config import Dict
 from tbsim.algos.l5kit_algos import L5TrafficModel, L5VAETrafficModel, L5TrafficModelGC, SpatialPlanner
 from tbsim.algos.multiagent_algos import MATrafficModel
 from tbsim.configs.registry import get_registered_experiment_config
+from tbsim.configs.eval_configs import EvaluationConfig
 from tbsim.envs.env_l5kit import EnvL5KitSimulation, BatchedEnv
 from tbsim.utils.config_utils import translate_l5kit_cfg, get_experiment_config_from_file
 from tbsim.utils.env_utils import (
@@ -37,27 +37,6 @@ from tbsim.utils.vis_utils import build_visualization_rasterizer_l5kit
 from imageio import get_writer
 from tbsim.utils.timer import Timers
 
-import tbsim.utils.planning_utils as PlanUtils
-
-
-class EvaluationConfig(Dict):
-    def __init__(self):
-        super(EvaluationConfig, self).__init__()
-        self.dataset_path = None
-        self.eval_class = "HierAgentAware"
-        self.seed = 0
-        self.num_scenes_per_batch = 4
-        self.num_scenes_to_evaluate = 100
-        self.ego_only = False
-        self.n_step_action = 5
-        self.ckpt_dir = "checkpoints/"
-
-        self.render_to_video = False
-        self.results_dir = "results/"
-
-        self.policy.mask_drivable = True
-        self.policy.num_plan_samples = 10
-
 
 class Evaluation(object):
     def __init__(self, modality_shapes, device, ckpt_dir="checkpoints/"):
@@ -71,10 +50,7 @@ class Evaluation(object):
         return self.policy
 
 
-class HierAgentAware(Evaluation):
-    def __init__(self, modality_shapes, device, ckpt_dir="checkpoints/"):
-        super(HierAgentAware, self).__init__(modality_shapes, device, ckpt_dir)
-
+class Hierarchical(Evaluation):
     def _get_planner(self):
         planner_ckpt_path, planner_config_path = get_checkpoint(
             ngc_job_id="2573128",  # spatial_archresnet50_bs64_pcl1.0_pbl0.0_rlFalse
@@ -88,6 +64,33 @@ class HierAgentAware(Evaluation):
             modality_shapes=self.modality_shapes,
         ).to(self.device).eval()
         return planner
+
+    def _get_controller(self):
+        policy_ckpt_path, policy_config_path = get_checkpoint(
+            ngc_job_id="2573128",  # gc_clip_regyaw_dynUnicycle_decmlp128,128_decstateTrue_yrl1.0
+            ckpt_key="iter120999_",
+            ckpt_root_dir=self.ckpt_dir
+        )
+        policy_cfg = get_experiment_config_from_file(policy_config_path)
+
+        controller = L5TrafficModelGC.load_from_checkpoint(
+            policy_ckpt_path,
+            algo_config=policy_cfg.algo,
+            modality_shapes=self.modality_shapes
+        ).to(self.device).eval()
+        return controller
+
+    def get_policy(self, **kwargs):
+        planner = self._get_planner()
+        controller = self._get_controller()
+        planner = PolicyWrapper.wrap_planner(planner, mask_drivable=kwargs.get("mask_drivable"), sample=False)
+        self.policy = HierarchicalPolicy(planner, controller)
+        return self.policy
+
+
+class HierAgentAware(Hierarchical):
+    def __init__(self, modality_shapes, device, ckpt_dir="checkpoints/"):
+        super(HierAgentAware, self).__init__(modality_shapes, device, ckpt_dir)
 
     def _get_predictor(self):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
@@ -121,7 +124,6 @@ class HierAgentAware(Evaluation):
 
 
 def create_env(sim_cfg, num_scenes_per_batch, num_simulation_steps=200, skimp_rollout=False, seed=1):
-    # print(sim_cfg)
 
     dm = LocalDataManager(None)
     l5_config = translate_l5kit_cfg(sim_cfg)
@@ -229,7 +231,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--eval_config",
+        "--config_file",
         type=str,
         default=None,
         help="A json file containing evaluation configs"
@@ -281,8 +283,8 @@ if __name__ == "__main__":
 
     cfg = EvaluationConfig()
 
-    if args.eval_config is not None:
-        external_cfg = json.load(open(args.eval_config, "r"))
+    if args.config_file is not None:
+        external_cfg = json.load(open(args.config_file, "r"))
         cfg.update(**external_cfg)
 
     if args.ckpt_dir is not None:
