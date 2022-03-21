@@ -160,7 +160,7 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
     data_cfg.env.simulation.disable_new_agents = True
     data_cfg.env.generate_agent_obs = True
 
-    num_scenes_per_batch = 3
+    num_scenes_per_batch = 1
     env = EnvL5KitSimulation(
         data_cfg.env,
         dataset=env_dataset,

@@ -82,8 +82,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self._metrics = dict()
         if compute_metrics:
             self._metrics = dict(
-                ego_off_road_rate=EnvMetrics.OffRoadRate(),
-                agents_off_road_rate=EnvMetrics.OffRoadRate(),
+                all_off_road_rate=EnvMetrics.OffRoadRate(),
+                # agents_off_road_rate=EnvMetrics.OffRoadRate(),
                 all_collision_rate=EnvMetrics.CollisionRate()
             )
         self._skimp = skimp_rollout
@@ -103,7 +103,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             )
         else:
             scene_indices = np.array(scene_indices)
-        assert len(scene_indices) == self.num_instances
+            self._num_scenes = len(scene_indices)
+
         assert (
             np.max(scene_indices) < self._num_total_scenes
             and np.min(scene_indices) >= 0
@@ -147,6 +148,10 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
     @property
     def num_instances(self):
         return self._num_scenes
+
+    @property
+    def total_num_scenes(self):
+        return self._num_total_scenes
 
     def get_info(self):
         return {
