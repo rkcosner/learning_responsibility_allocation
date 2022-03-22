@@ -88,6 +88,7 @@ class MATrafficModel(pl.LightningModule):
         )
 
     def get_plan(self, obs_dict, **kwargs):
+        """If using the model as a planner (setting subgoals)"""
         preds = self(obs_dict)
         ego_preds = self.model.get_ego_predictions(preds)
         avails = torch.ones(ego_preds["predictions"]["positions"].shape[:-1]).to(
@@ -102,11 +103,25 @@ class MATrafficModel(pl.LightningModule):
         return plan, {}
 
     def get_action(self, obs_dict, **kwargs):
-        if "plan" in kwargs:
-            plan = kwargs["plan"]
+        """If using the model as an actor (generating actions)"""
+        # extract agent features from obs
+        feats = self.model.extract_features(obs_dict)
+        if "plan_samples" in kwargs:
+            # if evaluating multiple plan samples per obs
+            plan_samples = kwargs["plan_samples"]
+            b, n = plan_samples.positions.shape[:2]
+            # reuse features by tiling the feature tensors to the same size as plan samples
+            feats_tiled = TensorUtils.repeat_by_expand_at(feats, repeats=n, dim=0)
+            # flatten the sample dimension to the batch dimension
+            plan_tiled = TensorUtils.join_dimensions(plan_samples.to_dict(), begin_axis=0, end_axis=2)
+            plan_tiled = Plan.from_dict(plan_tiled)
+
+            obs_tiled = TensorUtils.repeat_by_expand_at(obs_dict, repeats=n, dim=0)
+            preds = self.model.forward_prediction(feats_tiled, obs_tiled, plan=plan_tiled)
         else:
-            plan = None
-        preds = self(obs_dict, plan)
+            plan = kwargs.get("plan", None)
+            preds = self.model.forward_prediction(feats, obs_dict, plan)
+
         ego_preds = self.model.get_ego_predictions(preds)
         action = Action(
             positions=ego_preds["predictions"]["positions"],
@@ -115,10 +130,8 @@ class MATrafficModel(pl.LightningModule):
         return action, {}
 
     def get_prediction(self, obs_dict, **kwargs):
-        if "plan" in kwargs:
-            plan = kwargs["plan"]
-        else:
-            plan = None
+        """If using the model as a trajectory predictor (generating trajs for non-ego agents)"""
+        plan = kwargs.get("plan", None)
         preds = self(obs_dict, plan)
         agent_preds = self.model.get_agents_predictions(preds)
         agent_trajs = Trajectory(

@@ -461,18 +461,10 @@ class HierarchicalSampler(HierarchicalPolicy):
         _, plan_info = self.planner.get_plan(obs)
         plan_samples = plan_info.pop("plan_samples")
         b, n = plan_samples.positions.shape[:2]
-
-        obs_tiled = TensorUtils.unsqueeze_expand_at(obs, size=n, dim=1)
-        obs_tiled = TensorUtils.join_dimensions(
-            obs_tiled, begin_axis=0, end_axis=2)
-
-        plan_tiled = TensorUtils.join_dimensions(
-            plan_samples.to_dict(), begin_axis=0, end_axis=2)
-        plan_tiled = Plan.from_dict(plan_tiled)
         actions_tiled, _ = self.controller.get_action(
-            obs_tiled,
-            plan=plan_tiled,
-            init_u=plan_tiled.controls
+            obs,
+            plan_samples=plan_samples,
+            init_u=plan_samples.controls
         )
 
         action_samples = TensorUtils.reshape_dimensions(

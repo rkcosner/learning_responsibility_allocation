@@ -246,7 +246,7 @@ class AgentAwareRasterizedModel(nn.Module):
                                       ).squeeze(-1)
         return lane_flags
 
-    def forward(self, data_batch: Dict[str, torch.Tensor], plan=None) -> Dict[str, torch.Tensor]:
+    def extract_features(self, data_batch):
         image_batch = data_batch["image"]
         states_all = L5Utils.batch_to_raw_all_agents(
             data_batch, self.ego_decoder.step_time)
@@ -295,6 +295,10 @@ class AgentAwareRasterizedModel(nn.Module):
                 states_all["history_positions"][:, :, -1]
             )
 
+
+        return all_feats
+
+    def forward_prediction(self, all_feats, data_batch, plan=None):
         ego_feats = all_feats[:, [0]]
         agents_feats = all_feats[:, 1:]
 
@@ -303,8 +307,7 @@ class AgentAwareRasterizedModel(nn.Module):
                 # optionally condition the ego prediction on a goal location
                 goal_state = self._get_goal_states(data_batch)[:, [0]]
             else:
-                goal_state = self._get_goal_states(
-                    data_batch, plan).unsqueeze(1)
+                goal_state = self._get_goal_states(data_batch, plan).unsqueeze(1)
             goal_feat = self.goal_encoder(goal_state)  # -> [B, 1, D]
             ego_feats = torch.cat((ego_feats, goal_feat), dim=-1)
 
@@ -341,18 +344,28 @@ class AgentAwareRasterizedModel(nn.Module):
         }
         if self.ego_decoder.dyn is not None:
             out_dict["controls"] = all_preds["controls"]
+        return out_dict
+
+    def forward(self, data_batch: Dict[str, torch.Tensor], plan=None) -> Dict[str, torch.Tensor]:
+        all_feats = self.extract_features(data_batch)
+        pred_dict = self.forward_prediction(all_feats, data_batch, plan=plan)
+
         if self.GAN is not None:
+            b = all_feats.shape[0]
+            ego_feats = all_feats[:, 0]
             traj_enc_feat_GT = self.traj_encoder(
                 data_batch["target_positions"][..., :2].reshape(b, -1).detach())
             likelihood_GT = self.GAN(
-                torch.cat((ego_feats.squeeze(1).detach(), traj_enc_feat_GT), -1))
+                torch.cat((ego_feats.detach(), traj_enc_feat_GT), -1))
+
+            ego_preds = self.get_ego_predictions(pred_dict)
             traj_enc_feat_pred = self.traj_encoder(
                 ego_preds["trajectories"][..., :2].reshape(b, -1))
             likelihood_pred = self.GAN(
-                torch.cat((ego_feats.squeeze(1).detach(), traj_enc_feat_pred), -1))
-            out_dict["likelihood_GT"] = likelihood_GT
-            out_dict["likelihood_pred"] = likelihood_pred
-        return out_dict
+                torch.cat((ego_feats.detach(), traj_enc_feat_pred), -1))
+            pred_dict["likelihood_GT"] = likelihood_GT
+            pred_dict["likelihood_pred"] = likelihood_pred
+        return pred_dict
 
     def compute_losses(self, pred_batch, data_batch):
         all_targets = L5Utils.batch_to_target_all_agents(data_batch)
