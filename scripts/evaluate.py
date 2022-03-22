@@ -67,13 +67,15 @@ class Hierarchical(Evaluation):
 
     def _get_controller(self):
         policy_ckpt_path, policy_config_path = get_checkpoint(
-            ngc_job_id="2573128",  # gc_clip_regyaw_dynUnicycle_decmlp128,128_decstateTrue_yrl1.0
-            ckpt_key="iter120999_",
+            # ngc_job_id="2596419",  # gc_clip_regyaw_dynUnicycle_decmlp128,128_decstateTrue_yrl1.0
+            # ckpt_key="iter120999_",
+            ngc_job_id="2645989",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
+            ckpt_key="iter92999_",
             ckpt_root_dir=self.ckpt_dir
         )
         policy_cfg = get_experiment_config_from_file(policy_config_path)
 
-        controller = L5TrafficModelGC.load_from_checkpoint(
+        controller = MATrafficModel.load_from_checkpoint(
             policy_ckpt_path,
             algo_config=policy_cfg.algo,
             modality_shapes=self.modality_shapes
@@ -158,8 +160,14 @@ def create_env(sim_cfg, num_scenes_per_batch, num_simulation_steps=200, skimp_ro
 def run_evaluation(eval_cfg):
     print(eval_cfg)
 
+    # for reproducibility
+    torch.manual_seed(eval_cfg.seed)
+    np.random.seed(eval_cfg.seed)
+
+    print('save results to {}'.format(eval_cfg.results_dir))
     os.makedirs(eval_cfg.results_dir, exist_ok=True)
     os.makedirs(os.path.join(eval_cfg.results_dir, "videos/"), exist_ok=True)
+    os.makedirs(eval_cfg.ckpt_dir, exist_ok=True)
 
     os.environ["L5KIT_DATA_FOLDER"] = eval_cfg.dataset_path
 
@@ -304,6 +312,8 @@ if __name__ == "__main__":
 
     if args.dataset_path is not None:
         cfg.dataset_path = args.dataset_path
+
+    cfg.results_dir = os.path.join(cfg.results_dir, cfg.name)
 
     cfg.lock()
     run_evaluation(cfg)

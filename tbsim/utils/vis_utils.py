@@ -42,14 +42,13 @@ def draw_actions(
         for point in raster_traj:
             circle = np.hstack([point - 3, point + 3])
             draw.ellipse(circle.tolist(), fill="#FE5F55", outline="#911A12")
-    if True:
-        if ego_action_samples is not None:
-            raster_traj = agent_to_raster_np(
-                ego_action_samples["positions"].reshape(-1, 2), trans_mat)
-            for point in raster_traj:
-                circle = np.hstack([point - 3, point + 3])
-                draw.ellipse(circle.tolist(), fill="#808080",
-                             outline="#911A12")
+    if ego_action_samples is not None:
+        raster_traj = agent_to_raster_np(
+            ego_action_samples["positions"].reshape(-1, 2), trans_mat)
+        for point in raster_traj:
+            circle = np.hstack([point - 3, point + 3])
+            draw.ellipse(circle.tolist(), fill="#808080",
+                         outline="#911A12")
 
     if pred_plan is not None:
         pos_raster = agent_to_raster_np(
@@ -155,10 +154,13 @@ def render_state_l5kit_ego_view(
         pred_plan_info = action.ego_info.get("plan_info", None)
         if action.ego_info is not None and "action_samples" in action.ego_info:
             ego_action_samples = action.ego_info["action_samples"]
+        else:
+            ego_action_samples = None
     else:
         pred_actions = None
         pred_plan = None
         pred_plan_info = None
+        ego_action_samples = None
 
     if pred_plan is not None:
         pred_plan = map_ndarray(pred_plan, lambda x:  x[ego_scene_index])
