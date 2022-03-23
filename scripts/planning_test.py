@@ -18,16 +18,9 @@ from tbsim.algos.multiagent_algos import MATrafficModel
 from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.envs.env_l5kit import EnvL5KitSimulation, BatchedEnv
 from tbsim.utils.config_utils import translate_l5kit_cfg, get_experiment_config_from_file
-from tbsim.utils.env_utils import (
-    rollout_episodes,
-    PolicyWrapper,
-    OptimController,
-    HierarchicalPolicy,
-    GTPlanner,
-    RolloutWrapper,
-    SamplingPolicy,
-    HierarchicalSampler
-)
+from tbsim.utils.env_utils import rollout_episodes
+from tbsim.policies.wrappers import PolicyWrapper, SamplingPolicyWrapper, HierarchicalSamplerWrapper, RolloutWrapper
+
 from tbsim.utils.tensor_utils import to_torch, to_numpy
 from tbsim.external.l5_ego_dataset import EgoDatasetMixed, EgoReplayBufferMixed, ExperienceIterableWrapper
 from tbsim.utils.experiment_utils import get_checkpoint
@@ -39,16 +32,16 @@ import tbsim.utils.planning_utils as PlanUtils
 
 
 def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
-    policy_ckpt_path, policy_config_path = get_checkpoint(
-        # ngc_job_id="2646092",  # gcvae_dynUnicycle_yrl0.1_gcTrue_vaeld4_klw0.001_rlFalse
-        # ckpt_key="iter72999_",
-        # ckpt_key="iter120999",
-        # ngc_job_id="2596419",  # gc_clip_regyaw_dynUnicycle_decmlp128,128_decstateTrue_yrl1.0
-        ngc_job_id="2717287",
-        ckpt_key="iter8999",
-        ckpt_root_dir=ckpt_dir
-    )
-    policy_cfg = get_experiment_config_from_file(policy_config_path)
+    # policy_ckpt_path, policy_config_path = get_checkpoint(
+    #     # ngc_job_id="2646092",  # gcvae_dynUnicycle_yrl0.1_gcTrue_vaeld4_klw0.001_rlFalse
+    #     # ckpt_key="iter72999_",
+    #     # ckpt_key="iter120999",
+    #     # ngc_job_id="2596419",  # gc_clip_regyaw_dynUnicycle_decmlp128,128_decstateTrue_yrl1.0
+    #     ngc_job_id="2717287",
+    #     ckpt_key="iter8999",
+    #     ckpt_root_dir=ckpt_dir
+    # )
+    # policy_cfg = get_experiment_config_from_file(policy_config_path)
 
     planner_ckpt_path, planner_config_path = get_checkpoint(
         ngc_job_id="2573128",  # spatial_archresnet50_bs64_pcl1.0_pbl0.0_rlFalse
@@ -57,29 +50,29 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
     )
     planner_cfg = get_experiment_config_from_file(planner_config_path)
 
-    # predictor_ckpt_path, predictor_config_path = get_checkpoint(
-    #     ngc_job_id="2645989",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
-    #     ckpt_key="iter92999_",
-    #     ckpt_root_dir=ckpt_dir
-    # )
     predictor_ckpt_path, predictor_config_path = get_checkpoint(
-        ngc_job_id="2717287",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
-        ckpt_key="iter8999",
+        ngc_job_id="2645989",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
+        ckpt_key="iter92999_",
         ckpt_root_dir=ckpt_dir
     )
+    # predictor_ckpt_path, predictor_config_path = get_checkpoint(
+    #     ngc_job_id="2717287",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
+    #     ckpt_key="iter8999",
+    #     ckpt_root_dir=ckpt_dir
+    # )
     predictor_cfg = get_experiment_config_from_file(predictor_config_path)
 
-    print(policy_ckpt_path)
-    print(policy_config_path)
+    # print(policy_ckpt_path)
+    # print(policy_config_path)
     print(planner_ckpt_path)
     print(planner_config_path)
     print(predictor_ckpt_path)
     print(predictor_config_path)
 
-    data_cfg = get_experiment_config_from_file(policy_config_path)
+    data_cfg = get_experiment_config_from_file(predictor_config_path)
     assert data_cfg.env.rasterizer.map_type == "py_semantic"
-    os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath(
-        "/home/chenyx/repos/l5kit/prediction-dataset")
+    # os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath("/home/chenyx/repos/l5kit/prediction-dataset")
+    os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath("/home/danfeix/workspace/lfs/lyft/lyft_prediction/")
     dm = LocalDataManager(None)
     l5_config = translate_l5kit_cfg(data_cfg)
     rasterizer = build_rasterizer(l5_config, dm)
@@ -104,47 +97,48 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
         modality_shapes=modality_shapes
     ).to(device).eval()
 
-    if False:
-        # Option 1: Deterministic planner -> goal-conditional VAE action sampler
-        controller = L5VAETrafficModel.load_from_checkpoint(
-            policy_ckpt_path,
-            algo_config=policy_cfg.algo,
-            modality_shapes=modality_shapes
-        ).to(device).eval()
-
-        sampler = PolicyWrapper.wrap_controller(
-            controller, sample=True, num_action_samples=10)
-        planner = PolicyWrapper.wrap_planner(
-            planner, mask_drivable=True, sample=False)
-
-        sampler = HierarchicalPolicy(planner, sampler)
-        policy = SamplingPolicy(
-            ego_action_sampler=sampler, agent_traj_predictor=predictor)
-
-    if False:
-        # Option 2: Stochastic planner -> goal-conditional controller
-        controller = L5TrafficModelGC.load_from_checkpoint(
-            policy_ckpt_path,
-            algo_config=policy_cfg.algo,
-            modality_shapes=modality_shapes
-        ).to(device).eval()
-        plan_sampler = PolicyWrapper.wrap_planner(
-            planner, mask_drivable=True, sample=True, num_plan_samples=10)
-        sampler = HierarchicalSampler(plan_sampler, controller)
-        policy = SamplingPolicy(
-            ego_action_sampler=sampler, agent_traj_predictor=predictor)
+    # if False:
+    #     # Option 1: Deterministic planner -> goal-conditional VAE action sampler
+    #     controller = L5VAETrafficModel.load_from_checkpoint(
+    #         policy_ckpt_path,
+    #         algo_config=policy_cfg.algo,
+    #         modality_shapes=modality_shapes
+    #     ).to(device).eval()
+    #
+    #     sampler = PolicyWrapper.wrap_controller(
+    #         controller, sample=True, num_action_samples=10)
+    #     planner = PolicyWrapper.wrap_planner(
+    #         planner, mask_drivable=True, sample=False)
+    #
+    #     sampler = HierarchicalPolicy(planner, sampler)
+    #     policy = SamplingPolicy(
+    #         ego_action_sampler=sampler, agent_traj_predictor=predictor)
+    #
+    # if False:
+    #     # Option 2: Stochastic planner -> goal-conditional controller
+    #     controller = L5TrafficModelGC.load_from_checkpoint(
+    #         policy_ckpt_path,
+    #         algo_config=policy_cfg.algo,
+    #         modality_shapes=modality_shapes
+    #     ).to(device).eval()
+    #     plan_sampler = PolicyWrapper.wrap_planner(
+    #         planner, mask_drivable=True, sample=True, num_plan_samples=10)
+    #     sampler = HierarchicalSampler(plan_sampler, controller)
+    #     policy = SamplingPolicy(
+    #         ego_action_sampler=sampler, agent_traj_predictor=predictor)
     if True:
         # Option 3: Stochastic planner -> agentaware controller
 
-        controller = MATrafficModel.load_from_checkpoint(
-            policy_ckpt_path,
-            algo_config=policy_cfg.algo,
-            modality_shapes=modality_shapes
-        ).to(device).eval()
+        # controller = MATrafficModel.load_from_checkpoint(
+        #     policy_ckpt_path,
+        #     algo_config=policy_cfg.algo,
+        #     modality_shapes=modality_shapes
+        # ).to(device).eval()
+        controller = predictor
         plan_sampler = PolicyWrapper.wrap_planner(
             planner, mask_drivable=True, sample=True, num_plan_samples=10)
-        sampler = HierarchicalSampler(plan_sampler, controller)
-        policy = SamplingPolicy(
+        sampler = HierarchicalSamplerWrapper(plan_sampler, controller)
+        policy = SamplingPolicyWrapper(
             ego_action_sampler=sampler, agent_traj_predictor=predictor)
 
     policy = RolloutWrapper(ego_policy=policy, agents_policy=policy)

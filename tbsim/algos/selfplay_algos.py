@@ -10,7 +10,8 @@ from tbsim.external.l5_ego_dataset import ExperienceIterableWrapper
 from tbsim.utils.config_utils import get_experiment_config_from_file
 from tbsim.configs.base import ExperimentConfig
 from tbsim.envs.env_l5kit import EnvL5KitSimulation
-from tbsim.utils.env_utils import rollout_episodes, PolicyWrapper, RolloutWrapper, HierarchicalPolicy
+from tbsim.utils.env_utils import rollout_episodes
+from tbsim.policies.wrappers import PolicyWrapper, RolloutWrapper, HierarchicalWrapper
 from tbsim.algos.l5kit_algos import SpatialPlanner, L5TrafficModelGC
 
 
@@ -159,6 +160,6 @@ class SelfPlayHierarchical(SelfPlay):
             sample=self.algo_cfg.policy.sample
         )
 
-        policy = HierarchicalPolicy(planner, controller)
+        policy = HierarchicalWrapper(planner, controller)
         self.policy = RolloutWrapper(ego_policy=policy, agents_policy=policy)
         self.train_algo = controller  # only finetune controller through self-play

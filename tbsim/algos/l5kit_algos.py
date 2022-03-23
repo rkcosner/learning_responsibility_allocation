@@ -22,7 +22,7 @@ from tbsim.models.transformer_model import TransformerModel
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.metrics as Metrics
 import tbsim.utils.l5_utils as L5Utils
-from tbsim.utils.env_utils import Plan, Action
+from tbsim.policies.common import Plan, Action
 import tbsim.algos.algo_utils as AlgoUtils
 from tbsim.utils.geometry_utils import transform_points_tensor
 

@@ -10,7 +10,7 @@ from tbsim.models.multiagent_models import (
     AgentAwareRasterizedModel
 )
 import tbsim.utils.tensor_utils as TensorUtils
-from tbsim.utils.env_utils import Action, Plan, Trajectory
+from tbsim.policies.common import Action, Plan, Trajectory
 from tbsim.utils.loss_utils import discriminator_loss
 
 

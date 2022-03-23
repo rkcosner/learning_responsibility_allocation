@@ -9,7 +9,7 @@ import torch.nn.functional as F
 import tbsim.models.base_models as base_models
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.metrics as Metrics
-import tbsim.utils.env_utils as EnvUtils
+from tbsim.policies.common import Plan
 
 import tbsim.models.vaes as vaes
 import tbsim.utils.l5_utils as L5Utils
@@ -207,7 +207,7 @@ class AgentAwareRasterizedModel(nn.Module):
             ).squeeze(2)  # -> [B, A, 3]
             return goal_state
         else:
-            assert isinstance(plan, EnvUtils.Plan)
+            assert isinstance(plan, Plan)
             goal_inds = L5Utils.get_last_available_index(
                 plan.availabilities)  # [B, A]
             goal_state = torch.gather(

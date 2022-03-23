@@ -20,16 +20,15 @@ from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.configs.eval_configs import EvaluationConfig
 from tbsim.envs.env_l5kit import EnvL5KitSimulation, BatchedEnv
 from tbsim.utils.config_utils import translate_l5kit_cfg, get_experiment_config_from_file
-from tbsim.utils.env_utils import (
-    rollout_episodes,
+from tbsim.utils.env_utils import rollout_episodes
+from tbsim.policies.wrappers import (
     PolicyWrapper,
-    OptimController,
-    HierarchicalPolicy,
-    GTPlanner,
+    HierarchicalWrapper,
+    HierarchicalSamplerWrapper,
     RolloutWrapper,
-    SamplingPolicy,
-    HierarchicalSampler
+    SamplingPolicyWrapper
 )
+
 from tbsim.utils.tensor_utils import to_torch, to_numpy, map_ndarray
 from tbsim.external.l5_ego_dataset import EgoDatasetMixed, EgoReplayBufferMixed, ExperienceIterableWrapper
 from tbsim.utils.experiment_utils import get_checkpoint
@@ -38,7 +37,7 @@ from imageio import get_writer
 from tbsim.utils.timer import Timers
 
 
-class Evaluation(object):
+class PolicyComposer(object):
     def __init__(self, modality_shapes, device, ckpt_dir="checkpoints/"):
         self.modality_shapes = modality_shapes
         self.device = device
@@ -50,7 +49,7 @@ class Evaluation(object):
         return self.policy
 
 
-class Hierarchical(Evaluation):
+class Hierarchical(PolicyComposer):
     def _get_planner(self):
         planner_ckpt_path, planner_config_path = get_checkpoint(
             ngc_job_id="2573128",  # spatial_archresnet50_bs64_pcl1.0_pbl0.0_rlFalse
@@ -86,7 +85,7 @@ class Hierarchical(Evaluation):
         planner = self._get_planner()
         controller = self._get_controller()
         planner = PolicyWrapper.wrap_planner(planner, mask_drivable=kwargs.get("mask_drivable"), sample=False)
-        self.policy = HierarchicalPolicy(planner, controller)
+        self.policy = HierarchicalWrapper(planner, controller)
         return self.policy
 
 
@@ -119,9 +118,9 @@ class HierAgentAware(Hierarchical):
             sample=True,
             num_plan_samples=kwargs.get("num_plan_samples")
         )
-        sampler = HierarchicalSampler(plan_sampler, controller)
+        sampler = HierarchicalSamplerWrapper(plan_sampler, controller)
 
-        self.policy = SamplingPolicy(ego_action_sampler=sampler, agent_traj_predictor=predictor)
+        self.policy = SamplingPolicyWrapper(ego_action_sampler=sampler, agent_traj_predictor=predictor)
         return self.policy
 
 
