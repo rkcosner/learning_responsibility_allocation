@@ -5,7 +5,6 @@ import os
 from tbsim.utils.experiment_utils import (
     read_configs,
     launch_experiments_ngc,
-    launch_experiments_local,
     upload_codebase_to_ngc_workspace
 )
 from tbsim.configs.registry import get_registered_experiment_config
@@ -36,12 +35,6 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--local",
-        action="store_true",
-        help="(optional) if launching experiment on ngc"
-    )
-
-    parser.add_argument(
         "--ngc_config",
         type=str,
         help="path to your ngc config file",
@@ -66,6 +59,12 @@ if __name__ == "__main__":
         default="dgx1v.16g.1.norm"
     )
 
+    parser.add_argument(
+        "--dry_run",
+        action="store_true",
+        default=False
+    )
+
     args = parser.parse_args()
     if args.config_name is not None:
         cfg = get_registered_experiment_config(args.config_name)
@@ -83,15 +82,25 @@ if __name__ == "__main__":
     else:
         cfgs, cfg_fns = read_configs(args.config_dir)
 
-    if args.local:
-        launch_experiments_local(args.script_path, cfgs, cfg_fns)
-    else:
-        ngc_cfg = json.load(open(args.ngc_config, "r"))
-        ngc_cfg["wandb_apikey"] = os.environ["WANDB_APIKEY"]
-        ngc_cfg["wandb_project_name"] = args.wandb_project_name
-        ngc_cfg["instance"] = args.ngc_instance
-        res = input("upload codebase to ngc workspace? (y/n)")
-        if res == "y":
-            print("uploading codebase ... (this may take a while)")
-            upload_codebase_to_ngc_workspace(ngc_cfg)
-        launch_experiments_ngc(args.script_path, cfgs, cfg_fns, ngc_config=ngc_cfg)
+    ngc_cfg = json.load(open(args.ngc_config, "r"))
+    ngc_cfg["wandb_apikey"] = os.environ["WANDB_APIKEY"]
+    ngc_cfg["wandb_project_name"] = args.wandb_project_name
+    ngc_cfg["instance"] = args.ngc_instance
+
+    script_command = [
+        "python",
+        args.script_path,
+        "--output_dir",
+        ngc_cfg["result_dir"],
+        "--dataset_path",
+        ngc_cfg["dataset_path"],
+        "--wandb_project_name",
+        ngc_cfg["wandb_project_name"],
+        "--remove_exp_dir",
+    ]
+
+    res = input("upload codebase to ngc workspace? (y/n)")
+    if res == "y":
+        print("uploading codebase ... (this may take a while)")
+        upload_codebase_to_ngc_workspace(ngc_cfg)
+    launch_experiments_ngc(script_command, cfgs, cfg_fns, ngc_config=ngc_cfg, dry_run=args.dry_run)
