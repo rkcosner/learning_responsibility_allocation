@@ -147,20 +147,18 @@ def render_state_l5kit_ego_view(
     ego_scene_index = dataset_scene_index == state_obs["ego"]["scene_index"]
     ego_obs = map_ndarray(state_obs["ego"], lambda x:  x[ego_scene_index][0])
 
+    pred_actions = None
+    pred_plan = None
+    pred_plan_info = None
+    ego_action_samples = None
+
     if action.ego is not None:
         pred_actions = map_ndarray(
             action.ego.to_dict(), lambda x:  x[ego_scene_index])
         pred_plan = action.ego_info.get("plan", None)
         pred_plan_info = action.ego_info.get("plan_info", None)
-        if action.ego_info is not None and "action_samples" in action.ego_info:
-            ego_action_samples = action.ego_info["action_samples"]
-        else:
-            ego_action_samples = None
-    else:
-        pred_actions = None
-        pred_plan = None
-        pred_plan_info = None
-        ego_action_samples = None
+        if action.ego_info is not None:
+            ego_action_samples = action.ego_info.get("action_samples")
 
     if pred_plan is not None:
         pred_plan = map_ndarray(pred_plan, lambda x:  x[ego_scene_index])
