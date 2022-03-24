@@ -15,6 +15,7 @@ from tbsim.utils.geometry_utils import (
     PED_VEH_collision,
     PED_PED_collision,
 )
+import torch.nn.functional as F
 
 
 def cosine_loss(preds, labels):
@@ -253,39 +254,6 @@ def goal_reaching_loss(predictions, targets, availabilities, weights_scaling=Non
     return goal_loss
 
 
-def collision_loss(pred_edges: Dict[str, torch.Tensor], col_funcs=None):
-    """
-    Calculate collision loss among predicted edges along a batch of trajectories
-    Args:
-        pred_edges (dict): A dict that maps collision types to box locations
-        col_funcs (dict): A dict of collision functions (implemented in tbsim.utils.geometric_utils)
-
-    Returns:
-        collision loss (torch.Tensor)
-    """
-    if col_funcs is None:
-        col_funcs = {
-            "VV": VEH_VEH_collision,
-            "VP": VEH_PED_collision,
-            "PV": PED_VEH_collision,
-            "PP": PED_PED_collision,
-        }
-
-    coll_loss = 0
-    for et, fun in col_funcs.items():
-        if et not in pred_edges:
-            continue
-        edges = pred_edges[et]
-        if edges.shape[0] == 0:
-            continue
-        dis = fun(
-            edges[..., 0:3],
-            edges[..., 3:6],
-            edges[..., 6:8],
-            edges[..., 8:],
-        ).min(dim=-1)[0]  # take min distance across time steps
-        coll_loss += torch.mean(torch.sigmoid(-dis - 4.0))  # smooth collision loss
-    return coll_loss
 
 def lane_regulation_loss(lane_flag,agent_mask):
     return (lane_flag.mean(-1)*agent_mask).sum()/agent_mask.sum()
@@ -473,3 +441,8 @@ def collision_loss(pred_edges: Dict[str, torch.Tensor], col_funcs=None):
         ]  # take min distance across time steps
         coll_loss += torch.mean(torch.sigmoid(-dis - 4.0))  # smooth collision loss
     return coll_loss
+
+
+def discriminator_loss(likelihood_pred,likelihood_GT):
+    label = torch.cat((torch.zeros_like(likelihood_pred),torch.ones_like(likelihood_GT)),0)
+    return F.binary_cross_entropy(torch.cat((likelihood_pred,likelihood_GT)),label)

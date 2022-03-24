@@ -9,7 +9,7 @@ class L5KitTrainConfig(TrainConfig):
     def __init__(self):
         super(L5KitTrainConfig, self).__init__()
 
-        self.dataset_path = "YOUR_DAFA_FOLDER"
+        self.dataset_path = "/home/chenyx/repos/l5kit/prediction-dataset"
         self.dataset_valid_key = "scenes/validate.zarr"
         self.dataset_train_key = "scenes/train.zarr"
         self.dataset_meta_key = "meta.json"
@@ -21,19 +21,19 @@ class L5KitTrainConfig(TrainConfig):
         self.rollout.num_scenes = 3
         self.rollout.n_step_action = 10
 
-        ## training config
+        # training config
         self.training.batch_size = 100
         self.training.num_steps = 200000
-        self.training.num_data_workers = 4
+        self.training.num_data_workers = 8
 
         self.save.every_n_steps = 1000
 
-        ## validation config
+        # validation config
         self.validation.enabled = True
         self.validation.batch_size = 32
-        self.validation.num_data_workers = 4
+        self.validation.num_data_workers = 6
         self.validation.every_n_steps = 500
-        self.validation.num_steps_per_epoch = 100
+        self.validation.num_steps_per_epoch = 50
 
 
 class L5KitMixedTrainConfig(L5KitTrainConfig):
@@ -78,55 +78,12 @@ class L5KitEnvConfig(EnvConfig):
         self.rasterizer.set_origin_to_bottom = True
 
         #  if a tracked agent is closed than this value to ego, it will be controlled
-        self.simulation.distance_th_close = 15
+        self.simulation.distance_th_close = 50
+
         self.simulation.distance_th_far = 50
 
         #  whether to disable agents that are not returned at start_frame_index
-        self.simulation.disable_new_agents = True
-
-        # maximum number of simulation steps to run (0.1sec / step)
-        self.simulation.num_simulation_steps = 50
-
-        # maximum number of simulation steps to run (0.1sec / step)
-        self.simulation.num_simulation_steps = 50
-
-        # which frame to start an simulation episode with
-        self.simulation.start_frame_index = 0
-
-
-class L5KitVectorizedEnvConfig(EnvConfig):
-    def __init__(self):
-        super(L5KitVectorizedEnvConfig, self).__init__()
-        self.name = "l5_vectorized"
-
-        # the keys are relative to the dataset environment variable
-        self.rasterizer.semantic_map_key = "semantic_map/semantic_map.pb"
-        self.rasterizer.dataset_meta_key = "meta.json"
-
-        # e.g. 0.0 include every obstacle, 0.5 show those obstacles with >0.5 probability of being
-        # one of the classes we care about (cars, bikes, peds, etc.), >=1.0 filter all other agents.
-        self.rasterizer.filter_agents_threshold = 0.5
-
-        # whether to completely disable traffic light faces in the semantic rasterizer
-        # this disable option is not supported in avsw_semantic
-        self.rasterizer.disable_traffic_light_faces = False
-
-        self.data_generation_params.other_agents_num = 20
-        self.data_generation_params.max_agents_distance = 50
-        self.data_generation_params.lane_params.max_num_lanes = 15
-        self.data_generation_params.lane_params.max_points_per_lane = MAX_POINTS_LANE
-        self.data_generation_params.lane_params.max_points_per_crosswalk = 5
-        self.data_generation_params.lane_params.max_retrieval_distance_m = 35
-        self.data_generation_params.lane_params.max_num_crosswalks = 20
-
-        #  if a tracked agent is closed than this value to ego, it will be controlled
-        self.simulation.distance_th_far = 30
-
-        #  if a new agent is closer than this value to ego, it will be controlled
-        self.simulation.distance_th_close = 15
-
-        #  whether to disable agents that are not returned at start_frame_index
-        self.simulation.disable_new_agents = True
+        self.simulation.disable_new_agents = False
 
         # maximum number of simulation steps to run (0.1sec / step)
         self.simulation.num_simulation_steps = 50
@@ -220,7 +177,7 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         super(L5RasterizedPlanningConfig, self).__init__()
 
         self.name = "l5_rasterized"
-        self.model_architecture = "resnet50"
+        self.model_architecture = "resnet18"
         self.map_feature_dim = 256
         self.history_num_frames = 5
         self.history_num_frames_ego = 5
@@ -232,7 +189,7 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.decoder.layer_dims = ()
         self.decoder.state_as_input = True
 
-        self.dynamics.type = None
+        self.dynamics.type = "Unicycle"
         self.dynamics.max_steer = 0.5
         self.dynamics.max_yawvel = math.pi * 2.0
         self.dynamics.acce_bound = (-10, 8)
@@ -245,10 +202,11 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.spatial_softmax.kwargs.learnable_temperature = False
 
         self.loss_weights.prediction_loss = 1.0
-        self.loss_weights.goal_loss = 0.0
+        self.loss_weights.goal_loss = 0.5
         self.loss_weights.collision_loss = 0.0
-        self.loss_weights.yaw_reg_loss = 1.0
+        self.loss_weights.yaw_reg_loss = 0.5
         self.loss_weights.lane_reg_loss = 0.5
+        self.loss_weights.GAN_loss = 0.5
 
         self.optim_params.policy.learning_rate.initial = 1e-3  # policy learning rate
         self.optim_params.policy.learning_rate.decay_factor = (
@@ -258,6 +216,15 @@ class L5RasterizedPlanningConfig(AlgoConfig):
             []
         )  # epochs where LR decay occurs
         self.optim_params.policy.regularization.L2 = 0.00  # L2 regularization strength
+
+        self.optim_params.GAN.learning_rate.initial = 3e-4  # policy learning rate
+        self.optim_params.GAN.learning_rate.decay_factor = (
+            0.1  # factor to decay LR by (if epoch schedule non-empty)
+        )
+        self.optim_params.GAN.learning_rate.epoch_schedule = (
+            []
+        )  # epochs where LR decay occurs
+        self.optim_params.GAN.regularization.L2 = 0.00  # L2 regularization strength
 
 
 class SpatialPlannerConfig(L5RasterizedPlanningConfig):
@@ -275,11 +242,16 @@ class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
         super(MARasterizedPlanningConfig, self).__init__()
         self.name = "ma_rasterized"
         self.agent_feature_dim = 128
-        self.ego_feature_dim = 128
+        self.global_feature_dim = 128
         self.context_size = (30, 30)
-        self.goal_conditional = False
+        self.goal_conditional = True
         self.goal_feature_dim = 32
         self.decoder.layer_dims = (128, 128)
+
+        self.use_rotated_roi = False
+        self.use_transformer = True
+        self.roi_layer_key = "layer4"
+        self.use_GAN = True
 
 
 class L5RasterizedGCConfig(L5RasterizedPlanningConfig):
@@ -295,7 +267,10 @@ class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
         super(L5RasterizedVAEConfig, self).__init__()
         self.name = "l5_rasterized_vae"
         self.map_feature_dim = 256
-        self.vae.latent_dim = 2
+        self.goal_conditional = True
+        self.goal_feature_dim = 32
+
+        self.vae.latent_dim = 4
         self.vae.condition_dim = 128
         self.vae.num_eval_samples = 10
         self.vae.encoder.rnn_hidden_size = 100
@@ -313,7 +288,8 @@ class L5TransformerPredConfig(AlgoConfig):
         self.name = "TransformerPred"
         self.model_architecture = "Factorized"
         self.history_num_frames = 5
-        self.history_num_frames_ego = 5  # this will also create raster history (we need to remove the raster from train/eval dataset - only visualization)
+        # this will also create raster history (we need to remove the raster from train/eval dataset - only visualization)
+        self.history_num_frames_ego = 5
         self.history_num_frames_agents = 5
         self.future_num_frames = 25
         self.step_time = 0.2
@@ -384,7 +360,7 @@ class L5TransformerPredConfig(AlgoConfig):
         # self.model_params.history_num_frames = 0
         # self.model_params.history_num_frames_agents = 0
 
-        self.optim_params.policy.learning_rate.initial = 1e-3  # policy learning rate
+        self.optim_params.policy.learning_rate.initial = 3e-4  # policy learning rate
         self.optim_params.policy.learning_rate.decay_factor = (
             0.1  # factor to decay LR by (if epoch schedule non-empty)
         )

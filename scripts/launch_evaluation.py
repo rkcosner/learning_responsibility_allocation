@@ -3,22 +3,15 @@ import json
 import os
 
 from tbsim.utils.experiment_utils import (
-    read_configs,
     launch_experiments_ngc,
-    upload_codebase_to_ngc_workspace
+    upload_codebase_to_ngc_workspace,
+    read_evaluation_configs
 )
-from tbsim.configs.registry import get_registered_experiment_config
+from tbsim.configs.eval_configs import EvaluationConfig
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "--config_name",
-        type=str,
-        default=None,
-        help="(optional) create experiment config from a preregistered name (see configs/registry.py)"
-    )
 
     parser.add_argument(
         "--config_file",
@@ -44,7 +37,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--script_path",
         type=str,
-        default="scripts/train_l5kit.py"
+        default="scripts/evaluate.py"
     )
 
     parser.add_argument(
@@ -66,21 +59,14 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    if args.config_name is not None:
-        cfg = get_registered_experiment_config(args.config_name)
-        cfg.name = args.config_name
-        cfgs = [cfg]
-        cfg_fn = os.path.join(args.config_dir, "{}.json".format(cfg.name))
-        cfg.dump(filename=cfg_fn)
-        cfg_fns = [cfg_fn]
-    elif args.config_file is not None:
+    if args.config_file is not None:
+        cfg = EvaluationConfig()
         ext_cfg = json.load(open(args.config_file, "r"))
-        cfg = get_registered_experiment_config(ext_cfg["registered_name"])
         cfg.update(**ext_cfg)
         cfgs = [cfg]
         cfg_fns = [args.config_file]
     else:
-        cfgs, cfg_fns = read_configs(args.config_dir)
+        cfgs, cfg_fns = read_evaluation_configs(args.config_dir)
 
     ngc_cfg = json.load(open(args.ngc_config, "r"))
     ngc_cfg["wandb_apikey"] = os.environ["WANDB_APIKEY"]
@@ -90,13 +76,10 @@ if __name__ == "__main__":
     script_command = [
         "python",
         args.script_path,
-        "--output_dir",
+        "--results_dir",
         ngc_cfg["result_dir"],
         "--dataset_path",
-        ngc_cfg["dataset_path"],
-        "--wandb_project_name",
-        ngc_cfg["wandb_project_name"],
-        "--remove_exp_dir",
+        ngc_cfg["dataset_path"]
     ]
 
     res = input("upload codebase to ngc workspace? (y/n)")

@@ -8,10 +8,12 @@ from glob import glob
 import subprocess
 import shutil
 from pathlib import Path
+import pdb
 
 import tbsim
 from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.configs.config import Dict
+from tbsim.configs.eval_configs import EvaluationConfig
 from tbsim.configs.base import ExperimentConfig
 
 
@@ -55,14 +57,15 @@ class ParamConfig(object):
 
         return "_".join(name)
 
-    def generate_config(self, base_cfg: ExperimentConfig):
+    def generate_config(self, base_cfg: Dict):
         cfg = base_cfg.clone()
         for p in self.params:
             var_list = p.config_var.split(".")
             c = cfg
             # traverse the indexing list
             for v in var_list[:-1]:
-                assert v in c, "{} is not a valid config variable".format(p.config_var)
+                assert v in c, "{} is not a valid config variable".format(
+                    p.config_var)
                 c = c[v]
             assert var_list[-1] in c, "{} is not a valid config variable".format(
                 p.config_var
@@ -112,7 +115,7 @@ class ParamSearchPlan(object):
         prs = [pr.linearize() for pr in param_ranges]
         return [ParamConfig(prz) for prz in zip(*prs)]
 
-    def generate_configs(self, base_cfg: ExperimentConfig):
+    def generate_configs(self, base_cfg: Dict):
         """
         Generate configs from the parameter search plan, also rename the experiment by generating the correct alias.
         """
@@ -170,16 +173,65 @@ def read_configs(config_dir):
     return configs, config_fns
 
 
+def create_evaluation_configs(
+        configs_to_search_fn,
+        config_file,
+        config_dir,
+        prefix,
+        delete_config_dir=True,
+):
+    if config_file is not None:
+        # Update default config with external json file
+        ext_cfg = json.load(open(config_file, "r"))
+        cfg = EvaluationConfig()
+        cfg.update(**ext_cfg)
+        print("Generating configs with {} as template".format(config_file))
+    else:
+        cfg = EvaluationConfig()
+
+    configs = configs_to_search_fn(base_cfg=cfg)
+    for c in configs:
+        pfx = "{}_".format(prefix) if prefix is not None else ""
+        c.name = pfx + c.name
+    config_fns = []
+
+    if delete_config_dir and os.path.exists(config_dir):
+        shutil.rmtree(config_dir)
+    os.makedirs(config_dir, exist_ok=True)
+    for c in configs:
+        fn = os.path.join(config_dir, "{}.json".format(c.name))
+        config_fns.append(fn)
+        print("Saving config to {}".format(fn))
+        c.dump(fn)
+
+    return configs, config_fns
+
+
+def read_evaluation_configs(config_dir):
+    configs = []
+    config_fns = []
+    for cfn in glob(config_dir + "/*.json"):
+        print(cfn)
+        config_fns.append(cfn)
+        c = EvaluationConfig()
+        ext_cfg = json.load(open(cfn, "r"))
+        c.update(**ext_cfg)
+        configs.append(c)
+    return configs, config_fns
+
+
 def launch_experiments_ngc(
-    script_path: str, cfgs: List[Dict], cfg_paths: List[str], ngc_config: dict
+    script_command: list, cfgs: List[Dict], cfg_paths: List[str], ngc_config: dict, dry_run=False
 ):
     """
     Launch one or more experiments on NGC
     Args:
-        script_path (str): local path to the training script (e.g., scripts/train.py)
+        script_command (list): the complete python command to run with arguments
+            (excluding --config_file, which will be filled by the function)
         cfgs (List[Dict]): list of configs to launch experiments with
         cfg_paths (List[str]): list of path to the config files (for copying to NGC workspace)
         ngc_config (dict): ngc experiment configuration
+        dry_run (bool): whether to only print the commands instead of running them
 
     Returns:
         None
@@ -198,21 +250,8 @@ def launch_experiments_ngc(
             "cd {}/tbsim;".format(ngc_config["workspace_mounting_point"]),
             "pip install -e .; pip install numpy==1.21.4;",
         ]
-        py_cmd.extend(
-            [
-                "python",
-                script_path,
-                "--config_file",
-                cpath,
-                "--output_dir",
-                ngc_config["result_dir"],
-                "--dataset_path",
-                ngc_config["dataset_path"],
-                "--wandb_project_name",
-                ngc_config["wandb_project_name"],
-                "--remove_exp_dir",
-            ]
-        )
+        py_cmd.extend(script_command)
+        py_cmd.extend(["--config_file", cpath])
         py_cmd = " ".join(py_cmd)
         cmd = [
             "ngc",
@@ -242,7 +281,8 @@ def launch_experiments_ngc(
             py_cmd,
         ]
         print(cmd)
-        subprocess.run(cmd)
+        if not dry_run:
+            subprocess.run(cmd)
 
 
 def upload_codebase_to_ngc_workspace(ngc_config):
@@ -252,7 +292,8 @@ def upload_codebase_to_ngc_workspace(ngc_config):
         ngc_config (dict): NGC config
 
     """
-    ngc_path = os.path.join(ngc_config["workspace_mounting_point_local"], "tbsim/")
+    ngc_path = os.path.join(
+        ngc_config["workspace_mounting_point_local"], "tbsim/")
     local_path = Path(tbsim.__path__[0]).parent
     assert os.path.exists(ngc_path), "please mount NGC path first"
     dir_list = ["scripts/", "tbsim/"]
@@ -275,7 +316,8 @@ def launch_experiments_local(script_path, cfgs, cfg_paths, extra_args=[]):
 
 def get_results_info_ngc(ngc_job_id):
     cmd = ["ngc", "result", "info", str(ngc_job_id), "--files"]
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     outs, errs = process.communicate()
     if len(errs) > 0:
         print(str(errs))
@@ -320,18 +362,20 @@ def download_checkpoints_from_ngc(
     ckpt_paths, cfg_path, job_name = get_results_info_ngc(ngc_job_id)
 
     if ckpt_path_func is None:
-        ckpt_path_func = lambda x: x
+        def ckpt_path_func(x): return x
     to_download = ckpt_path_func(ckpt_paths)
     to_download.append(cfg_path)
-    ckpt_target_dir = os.path.join(ckpt_root_dir, "{}_{}".format(job_name, ngc_job_id))
+    ckpt_target_dir = os.path.join(
+        ckpt_root_dir, "{}_{}".format(job_name, ngc_job_id))
 
-    _download_from_ngc(ngc_job_id, to_download, ckpt_target_dir, tmp_dir=tmp_dir)
+    _download_from_ngc(ngc_job_id, to_download,
+                       ckpt_target_dir, tmp_dir=tmp_dir)
     return ckpt_target_dir
 
 
 def get_local_checkpoint_dir(ngc_job_id, ckpt_root_dir):
     for p in glob(ckpt_root_dir + "/*"):
-        if str(ngc_job_id) == p.split("_")[-1]:
+        if str(ngc_job_id) == p.split("_")[-1] or str(ngc_job_id) == p.split("/")[-1]:
             return p
     return None
 
@@ -339,7 +383,7 @@ def get_local_checkpoint_dir(ngc_job_id, ckpt_root_dir):
 def get_checkpoint(
     ngc_job_id, ckpt_key, ckpt_root_dir="checkpoints/", download_tmp_dir="/tmp"
 ):
-    ckpt_path_func = lambda paths: [p for p in paths if ckpt_key in p]
+    def ckpt_path_func(paths): return [p for p in paths if ckpt_key in p]
     local_dir = get_local_checkpoint_dir(ngc_job_id, ckpt_root_dir)
     if local_dir is None:
         print("checkpoint does not exist, downloading ...")

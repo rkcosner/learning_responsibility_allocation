@@ -15,8 +15,8 @@ from l5kit.rasterization import Rasterizer, RenderContext
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.utils.vis_utils import render_state_l5kit_agents_view, render_state_l5kit_ego_view
 from tbsim.envs.base import BaseEnv, BatchedEnv, SimulationException
-from tbsim.external.simulation_dataset import SimulationDataset, SimulationConfig
-from tbsim.utils.env_utils import RolloutAction, Action
+from tbsim.l5kit.simulation_dataset import SimulationDataset, SimulationConfig
+from tbsim.policies.common import RolloutAction, Action
 import tbsim.envs.env_metrics as EnvMetrics
 from tbsim.utils.timer import Timers
 
@@ -63,9 +63,11 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self._num_total_scenes = len(dataset.dataset.scenes)
         self._num_scenes = num_scenes
 
-        self._current_scene_indices = None  # indices of the scenes (in dataset) that are being used for simulation
+        # indices of the scenes (in dataset) that are being used for simulation
+        self._current_scene_indices = None
         self._current_scene_dataset = None  # corresponding dataset of the scenes
-        self._current_agent_track_ids = None  # agent IDs of the current episode for each scene
+        # agent IDs of the current episode for each scene
+        self._current_agent_track_ids = None
 
         self._frame_index = 0
         self._cached_observation = None
@@ -80,8 +82,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self._metrics = dict()
         if compute_metrics:
             self._metrics = dict(
-                ego_off_road_rate=EnvMetrics.OffRoadRate(),
-                agents_off_road_rate=EnvMetrics.OffRoadRate(),
+                all_off_road_rate=EnvMetrics.OffRoadRate(),
+                # agents_off_road_rate=EnvMetrics.OffRoadRate(),
                 all_collision_rate=EnvMetrics.CollisionRate()
             )
         self._skimp = skimp_rollout
@@ -101,10 +103,11 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             )
         else:
             scene_indices = np.array(scene_indices)
-        assert len(scene_indices) == self.num_instances
+            self._num_scenes = len(scene_indices)
+
         assert (
-                np.max(scene_indices) < self._num_total_scenes
-                and np.min(scene_indices) >= 0
+            np.max(scene_indices) < self._num_total_scenes
+            and np.min(scene_indices) >= 0
         )
 
         self._current_scene_indices = scene_indices
@@ -145,6 +148,10 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
     @property
     def num_instances(self):
         return self._num_scenes
+
+    @property
+    def total_num_scenes(self):
+        return self._num_total_scenes
 
     def get_info(self):
         return {
@@ -221,7 +228,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self.timers.tic("get_obs")
         # Get agent observations
         if self.generate_agent_obs:
-            agent_obs = self._current_scene_dataset.rasterise_agents_frame_batch(self._frame_index)
+            agent_obs = self._current_scene_dataset.rasterise_agents_frame_batch(
+                self._frame_index)
             # if self._current_agent_track_ids is None:
             #     agent_obs = self._current_scene_dataset.rasterise_agents_frame_batch(self._frame_index)
             #     self._current_agent_track_ids = agent_obs.keys()  # [scene_index, track_id]
@@ -241,7 +249,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         else:
             agent_obs = None
         # Get ego observation
-        ego_obs = self._current_scene_dataset.rasterise_frame_batch(self._frame_index)
+        ego_obs = self._current_scene_dataset.rasterise_frame_batch(
+            self._frame_index)
         ego_obs = default_collate(ego_obs)
 
         # cache observations
@@ -256,7 +265,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         agents_dict = OrderedDict()
         dataset = self._current_scene_dataset.scene_dataset_batch[scene_index]
         frame = dataset.dataset.frames[frame_index]
-        frame_agents = filter_agents_by_frames(frame, dataset.dataset.agents)[0]
+        frame_agents = filter_agents_by_frames(
+            frame, dataset.dataset.agents)[0]
         for agent in frame_agents:
             track_id = int(agent["track_id"])
             if track_id in agent_track_ids:
@@ -280,7 +290,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         combined = dict(obs["ego"])
         if obs["agents"] is not None:
             for k in obs["ego"].keys():
-                combined[k] = np.concatenate((obs["ego"][k], obs["agents"][k]), axis=0)
+                combined[k] = np.concatenate(
+                    (obs["ego"][k], obs["agents"][k]), axis=0)
         return combined
 
     def is_done(self):
@@ -300,7 +311,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                 action=actions_to_take,
                 step_index=self._frame_index,
                 dataset_scene_index=si,
-                step_metrics=TensorUtils.map_ndarray(metrics_to_vis, lambda x: x[i]),
+                step_metrics=TensorUtils.map_ndarray(
+                    metrics_to_vis, lambda x: x[i]),
                 **kwargs
             )
             ims.append(im)
@@ -333,7 +345,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             elif k.startswith("agents"):
                 v.add_step(obs["agents"], self.current_scene_indices)
             elif k.startswith("all"):
-                v.add_step(self.combine_observations(obs), self.current_scene_indices)
+                v.add_step(self.combine_observations(
+                    obs), self.current_scene_indices)
             else:
                 raise KeyError("Invalid metrics name {}".format(k))
 
@@ -379,7 +392,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                 agent_obs, step_actions.agents.to_dict(), keys_to_exclude=set(("image",))
             )
             for i, scene_idx in enumerate(self.current_scene_indices):
-                self._agents_states[scene_idx].append(agents_in_out.get(scene_idx, []))
+                self._agents_states[scene_idx].append(
+                    agents_in_out.get(scene_idx, []))
         self.timers.toc("update")
 
         # TODO: accumulate sim trajectories
@@ -417,7 +431,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             ego_trans_mats=obs["ego"]["world_from_agent"],
             ego_rot_rads=obs["ego"]["yaw"][..., None, None],
             agents_trans_mats=obs["agents"]["world_from_agent"] if self.generate_agent_obs else None,
-            agents_rot_rads=obs["agents"]["yaw"][..., None, None] if self.generate_agent_obs else None
+            agents_rot_rads=obs["agents"]["yaw"][..., None,
+                                                 None] if self.generate_agent_obs else None
         )
         if actions.has_agents:
             agent_track_ids = obs["agents"]["track_id"]
@@ -431,11 +446,12 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             obs = self.get_observation()
             actions_world_d = actions_world.to_dict()
             if actions.has_agents:
-                # some agents might get dropped in the middle, filter agent actions by active agent track ids
-                active_agent_index = np.zeros(agent_track_ids.shape[0], dtype=np.bool)
-                for i, (tid, sid) in enumerate(zip(agent_track_ids, agent_scene_indices)):
-                    agent_exists = np.bitwise_and(tid == obs["agents"]["track_id"], sid == obs["agents"]["scene_index"])
-                    active_agent_index[i] = np.sum(agent_exists) > 0
+                # some agents might get dropped in the middle,
+                # index actions by the current agent track ids and scene index
+                active_agent_index = np.zeros(obs["agents"]["scene_index"].shape[0], dtype=np.int64)
+                for i, (tid, sid) in enumerate(zip(obs["agents"]["track_id"], obs["agents"]["scene_index"])):
+                    action_index = np.bitwise_and(tid == agent_track_ids, sid == agent_scene_indices)
+                    active_agent_index[i] = np.where(action_index)[0][0]
                 actions_world_d["agents"] = TensorUtils.map_ndarray(
                     actions_world_d["agents"], lambda x: x[active_agent_index]
                 )
@@ -444,16 +460,17 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                 )
 
             step_actions_world = RolloutAction.from_dict(
-                TensorUtils.map_ndarray(actions_world_d, lambda x: x[:, step_i:])
+                TensorUtils.map_ndarray(
+                    actions_world_d, lambda x: x[:, step_i:])
             )
 
             step_actions = step_actions_world.transform(
                 ego_trans_mats=obs["ego"]["agent_from_world"],
-                ego_rot_rads= - obs["ego"]["yaw"][..., None, None],
+                ego_rot_rads=- obs["ego"]["yaw"][..., None, None],
                 agents_trans_mats=obs["agents"]["agent_from_world"] if self.generate_agent_obs else None,
-                agents_rot_rads= - obs["agents"]["yaw"][..., None, None] if self.generate_agent_obs else None
+                agents_rot_rads=- obs["agents"]["yaw"][..., None,
+                                                       None] if self.generate_agent_obs else None
             )
-
             if render:
                 if step_actions.ego_info is not None and "plan_info" in step_actions.ego_info:
                     step_actions.ego_info["plan_info"] = actions.ego_info["plan_info"]
@@ -468,5 +485,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         """Get episodic experience in the form of datasets"""
         ds = []
         for si in self.current_scene_indices:
-            ds.append((si, self._current_scene_dataset.scene_dataset_batch[si].dataset))
+            ds.append(
+                (si, self._current_scene_dataset.scene_dataset_batch[si].dataset))
         return ds

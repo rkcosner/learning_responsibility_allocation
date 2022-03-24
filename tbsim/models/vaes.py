@@ -240,7 +240,7 @@ class CVAE(nn.Module):
         self.decoder = decoder
         self.prior = prior
 
-    def sample(self, condition_inputs, n: int, condition_feature=None):
+    def sample(self, condition_inputs, n: int, condition_feature=None, decoder_kwargs=None):
         """
         Draw data samples (x') given a batch of condition inputs (x_c) and the VAE prior.
 
@@ -248,6 +248,7 @@ class CVAE(nn.Module):
             condition_inputs (dict, torch.Tensor): condition inputs (x_c)
             n (int): number of samples to draw
             condition_feature (torch.Tensor): Optional - externally supply condition code (c)
+            decoder_kwargs (dict): Extra keyword args for decoder (e.g., dynamics model states)
 
         Returns:
             dictionary of batched samples (x') of size [B, n, ...]
@@ -259,17 +260,19 @@ class CVAE(nn.Module):
         z = self.prior.sample(n=n, inputs=c)  # z of shape [B (from c), N, ...]
         z_samples = TensorUtils.join_dimensions(z, begin_axis=0, end_axis=2)  # [B * N, ...]
         c_samples = TensorUtils.repeat_by_expand_at(c, repeats=n, dim=0)  # [B * N, ...]
-        x_out = self.decoder(latents=z_samples, condition_features=c_samples)
+        decoder_kwargs = dict() if decoder_kwargs is None else decoder_kwargs
+        x_out = self.decoder(latents=z_samples, condition_features=c_samples, **decoder_kwargs)
         x_out = TensorUtils.reshape_dimensions(x_out, begin_axis=0, end_axis=1, target_dims=(c.shape[0], n))
         return x_out
 
-    def predict(self, condition_inputs, condition_feature=None):
+    def predict(self, condition_inputs, condition_feature=None, decoder_kwargs=None):
         """
         Generate a prediction based on latent prior (instead of sample) and condition inputs
 
         Args:
             condition_inputs (dict, torch.Tensor): condition inputs (x_c)
             condition_feature (torch.Tensor): Optional - externally supply condition code (c)
+            decoder_kwargs (dict): Extra keyword args for decoder (e.g., dynamics model states)
 
         Returns:
             dictionary of batched predictions (x') of size [B, ...]
@@ -282,15 +285,17 @@ class CVAE(nn.Module):
 
         prior_params = self.prior(c)  # [B, ...]
         mu = self.prior.get_mean(prior_params)  # [B, ...]
-        x_out = self.decoder(latents=mu, condition_features=c)
+        decoder_kwargs = dict() if decoder_kwargs is None else decoder_kwargs
+        x_out = self.decoder(latents=mu, condition_features=c, **decoder_kwargs)
         return x_out
 
-    def forward(self, inputs, condition_inputs):
+    def forward(self, inputs, condition_inputs, decoder_kwargs=None):
         """
         Pass the input through encoder and decoder (using posterior parameters)
         Args:
             inputs (dict, torch.Tensor): encoder inputs (x)
             condition_inputs (dict, torch.Tensor): condition inputs - (x_c)
+            decoder_kwargs (dict): Extra keyword args for decoder (e.g., dynamics model states)
 
         Returns:
             dictionary of batched samples (x')
@@ -298,7 +303,8 @@ class CVAE(nn.Module):
         c = self.c_net(condition_inputs)  # [B, ...]
         q_params = self.q_net(inputs=inputs, condition_features=c)
         z = self.prior.sample_with_parameters(q_params, n=1).squeeze(dim=1)
-        x_out = self.decoder(latents=z, condition_features=c)
+        decoder_kwargs = dict() if decoder_kwargs is None else decoder_kwargs
+        x_out = self.decoder(latents=z, condition_features=c, **decoder_kwargs)
         return {"x_recons": x_out, "q_params": q_params, "z": z, "c": c}
 
     def compute_kl_loss(self, outputs: dict):

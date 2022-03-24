@@ -4,12 +4,11 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from tbsim.utils.tensor_utils import map_ndarray
 from tbsim.utils.l5_utils import get_last_available_index
-from tbsim.external.vis_rasterizer import VisualizationRasterizer, cv2_subpixel, CV2_SUB_VALUES
+from tbsim.l5kit.vis_rasterizer import VisualizationRasterizer, cv2_subpixel, CV2_SUB_VALUES
 from tbsim.utils.geometry_utils import get_box_world_coords_np
 from l5kit.rasterization.render_context import RenderContext
 from l5kit.configs.config import load_metadata
 from PIL import Image, ImageDraw
-
 
 COLORS = {
     "agent_contour": "#247BA0",
@@ -31,19 +30,29 @@ def draw_actions(
         text=None,
         pred_action=None,
         pred_plan=None,
-        pred_plan_info=None
+        pred_plan_info=None,
+        ego_action_samples=None
 ):
     im = Image.fromarray((state_image * 255).astype(np.uint8))
     draw = ImageDraw.Draw(im)
 
     if pred_action is not None:
-        raster_traj = agent_to_raster_np(pred_action["positions"].reshape(-1, 2), trans_mat)
+        raster_traj = agent_to_raster_np(
+            pred_action["positions"].reshape(-1, 2), trans_mat)
         for point in raster_traj:
             circle = np.hstack([point - 3, point + 3])
             draw.ellipse(circle.tolist(), fill="#FE5F55", outline="#911A12")
+    if ego_action_samples is not None:
+        raster_traj = agent_to_raster_np(
+            ego_action_samples["positions"].reshape(-1, 2), trans_mat)
+        for point in raster_traj:
+            circle = np.hstack([point - 3, point + 3])
+            draw.ellipse(circle.tolist(), fill="#808080",
+                         outline="#911A12")
 
     if pred_plan is not None:
-        pos_raster = agent_to_raster_np(pred_plan["positions"][:, -1], trans_mat)
+        pos_raster = agent_to_raster_np(
+            pred_plan["positions"][:, -1], trans_mat)
         for pos in pos_raster:
             circle = np.hstack([pos - 8, pos + 8])
             draw.ellipse(circle.tolist(), fill="#FF6B35")
@@ -65,7 +74,8 @@ def draw_actions(
         heatmap = np.asarray(heatmap)[..., :3]
         padding = np.ones((im.shape[0], 200, 3), dtype=np.uint8) * 255
 
-        composite = heatmap.astype(np.float32) * 0.3 + im.astype(np.float32) * 0.7
+        composite = heatmap.astype(np.float32) * \
+            0.3 + im.astype(np.float32) * 0.7
         composite = composite.astype(np.uint8)
         im = np.concatenate((im, padding, heatmap, padding, composite), axis=1)
 
@@ -80,7 +90,8 @@ def draw_agent_boxes(image, pos, yaw, extent, raster_from_agent, outline_color, 
     im = Image.fromarray((image * 255).astype(np.uint8))
     im_draw = ImageDraw.Draw(im)
     for b in boxes_raster:
-        im_draw.polygon(xy=b.reshape(-1).tolist(), outline=outline_color, fill=fill_color)
+        im_draw.polygon(xy=b.reshape(-1).tolist(),
+                        outline=outline_color, fill=fill_color)
 
     im = np.asarray(im).astype(np.float32) / 255.
     return im
@@ -126,35 +137,43 @@ def render_state_l5kit_ego_view(
         action,
         step_index,
         dataset_scene_index,
-        step_metrics=None
+        step_metrics=None,
+
 ):
     """Render ego-centric view, possibly with a location heatmap (if using SpatialPlanner)"""
     agent_scene_index = dataset_scene_index == state_obs["agents"]["scene_index"]
-    agents_obs = map_ndarray(state_obs["agents"], lambda x: x[agent_scene_index])
+    agents_obs = map_ndarray(
+        state_obs["agents"], lambda x: x[agent_scene_index])
     ego_scene_index = dataset_scene_index == state_obs["ego"]["scene_index"]
     ego_obs = map_ndarray(state_obs["ego"], lambda x:  x[ego_scene_index][0])
 
+    pred_actions = None
+    pred_plan = None
+    pred_plan_info = None
+    ego_action_samples = None
+
     if action.ego is not None:
-        pred_actions = map_ndarray(action.ego.to_dict(), lambda x:  x[ego_scene_index])
+        pred_actions = map_ndarray(
+            action.ego.to_dict(), lambda x:  x[ego_scene_index])
         pred_plan = action.ego_info.get("plan", None)
         pred_plan_info = action.ego_info.get("plan_info", None)
-    else:
-        pred_actions = None
-        pred_plan = None
-        pred_plan_info = None
+        if action.ego_info is not None:
+            ego_action_samples = action.ego_info.get("action_samples")
 
     if pred_plan is not None:
         pred_plan = map_ndarray(pred_plan, lambda x:  x[ego_scene_index])
-        pred_plan_info = map_ndarray(pred_plan_info, lambda x:  x[ego_scene_index])
+        pred_plan_info = map_ndarray(
+            pred_plan_info, lambda x:  x[ego_scene_index])
 
-    state_im, raster_from_agent, _ = get_state_image_with_boxes(ego_obs, agents_obs, rasterizer)
-
+    state_im, raster_from_agent, _ = get_state_image_with_boxes(
+        ego_obs, agents_obs, rasterizer)
     im = draw_actions(
         state_image=state_im,
         trans_mat=raster_from_agent,
         pred_action=pred_actions,
         pred_plan=pred_plan,
-        pred_plan_info=pred_plan_info
+        pred_plan_info=pred_plan_info,
+        ego_action_samples=ego_action_samples
     )
 
     return im
@@ -173,7 +192,8 @@ def render_state_l5kit_agents_view(
     """Render state centered at each agent (including agent). Concatenate each view to width-wise"""
     # get observation by scene
     agent_scene_index = dataset_scene_index == state_obs["agents"]["scene_index"]
-    agents_obs = map_ndarray(state_obs["agents"], lambda x: x[agent_scene_index])
+    agents_obs = map_ndarray(
+        state_obs["agents"], lambda x: x[agent_scene_index])
     ego_scene_index = dataset_scene_index == state_obs["ego"]["scene_index"]
     ego_obs = map_ndarray(state_obs["ego"], lambda x:  x[ego_scene_index])
 
@@ -184,22 +204,30 @@ def render_state_l5kit_agents_view(
             all_obs[k] = np.concatenate((ego_obs[k], agents_obs[k]), axis=0)
 
     # collate actions
-    ego_action = map_ndarray(action.ego.to_dict(), lambda x:  x[ego_scene_index])
-    agents_action = map_ndarray(action.agents.to_dict(), lambda x: x[agent_scene_index])
+    ego_action = map_ndarray(action.ego.to_dict(),
+                             lambda x:  x[ego_scene_index])
+    agents_action = map_ndarray(
+        action.agents.to_dict(), lambda x: x[agent_scene_index])
     all_action = dict()
     for k in ego_action:
-        all_action[k] = np.concatenate((ego_action[k][None], agents_action[k]), axis=0)
+        all_action[k] = np.concatenate(
+            (ego_action[k][None], agents_action[k]), axis=0)
 
-    all_action["positions"] = transform_points(all_action["positions"], all_obs["world_from_agent"])
+    all_action["positions"] = transform_points(
+        all_action["positions"], all_obs["world_from_agent"])
 
     # collate plans
-    ego_plan = map_ndarray(action.ego_info["plan"], lambda x:  x[ego_scene_index])
-    agents_plan = map_ndarray(action.agents_info["plan"], lambda x:  x[agent_scene_index])
+    ego_plan = map_ndarray(
+        action.ego_info["plan"], lambda x:  x[ego_scene_index])
+    agents_plan = map_ndarray(
+        action.agents_info["plan"], lambda x:  x[agent_scene_index])
     all_plan = dict()
     for k in ego_plan:
-        all_plan[k] = np.concatenate((ego_plan[k][None], agents_plan[k]), axis=0)
+        all_plan[k] = np.concatenate(
+            (ego_plan[k][None], agents_plan[k]), axis=0)
 
-    all_plan["position"] = transform_points(all_plan["positions"], all_obs["world_from_agent"])
+    all_plan["position"] = transform_points(
+        all_plan["positions"], all_obs["world_from_agent"])
 
     num_agents = min(all_obs["centroid"].shape[0], num_agent_to_render)
     all_ims = []
@@ -216,14 +244,16 @@ def render_state_l5kit_agents_view(
             pred_action=all_action,
             pred_plan=all_plan
         )
-        padding = np.ones((agent_im.shape[0], divider_padding_size, 3), dtype=np.uint8) * 255
+        padding = np.ones(
+            (agent_im.shape[0], divider_padding_size, 3), dtype=np.uint8) * 255
         all_ims.extend([agent_im, padding])
 
     # pad the rendering to num_agent_to_render in case there are fewer agents
     if num_agents < num_agent_to_render:
         for i in range(num_agent_to_render - num_agents):
             padding = np.ones(
-                (all_ims[0].shape[0], all_ims[0].shape[1] + divider_padding_size, 3),
+                (all_ims[0].shape[0], all_ims[0].shape[1] +
+                 divider_padding_size, 3),
                 dtype=np.uint8
             ) * 255
             all_ims.append(padding)

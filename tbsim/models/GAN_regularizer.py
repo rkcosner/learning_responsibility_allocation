@@ -65,26 +65,14 @@ def pred2obs(
         src_mask_new,
         torch.zeros_like(src_lanes) if src_lanes is not None else None,
     )
-    if yaw_new.ndim == 4:
-        new_world_yaw = yaw_new + (
-            data_batch["yaw"]
-                .view(-1, 1, 1, 1)
-                .repeat(1, yaw_new.size(1), yaw_new.size(2), 1)
-        ).type(torch.float)
-    elif yaw_new.ndim == 5:
-        new_world_yaw = yaw_new + (
-            data_batch["yaw"]
-                .view(-1, 1, 1, 1, 1)
-                .repeat(1, M, yaw_new.size(-3), yaw_new.size(-2), 1)
-        ).type(torch.float)
+
     if M == 1:
         map_emb_new = obtain_map_enc(
             data_batch["image"],
             CNNmodel,
             pos_new,
-            new_world_yaw,
-            data_batch["centroid"],
-            data_batch["raster_from_world"],
+            yaw_new,
+            data_batch["raster_from_agent"],
             src_mask_new,
             torch.tensor(algo_config.CNN.patch_size).to(src_pos.device),
             algo_config.CNN.output_size,
@@ -99,9 +87,8 @@ def pred2obs(
                 data_batch["image"],
                 CNNmodel,
                 pos_new[:, i],
-                new_world_yaw[:, i],
-                data_batch["centroid"],
-                data_batch["raster_from_world"],
+                yaw_new[:, i],
+                data_batch["raster_from_agent"],
                 src_mask_new,
                 torch.tensor(algo_config.CNN.patch_size).to(src_pos.device),
                 algo_config.CNN.output_size,
@@ -154,26 +141,14 @@ def pred2obs_static(
         torch.zeros_like(src_lanes) if src_lanes is not None else None,
         add_noise=True,
     )
-    if yaw_pred.ndim == 4:
-        new_world_yaw = yaw_pred + (
-            data_batch["yaw"]
-                .view(-1, 1, 1, 1)
-                .repeat(1, yaw_pred.size(1), yaw_pred.size(2), 1)
-        ).type(torch.float)
-    elif yaw_pred.ndim == 5:
-        new_world_yaw = yaw_pred + (
-            data_batch["yaw"]
-                .view(-1, 1, 1, 1, 1)
-                .repeat(1, M, yaw_pred.size(-3), yaw_pred.size(-2), 1)
-        ).type(torch.float)
+
     if M == 1:
         map_emb_new = obtain_map_enc(
             data_batch["image"],
             CNNmodel,
             pos_pred,
-            new_world_yaw,
-            data_batch["centroid"],
-            data_batch["raster_from_world"],
+            yaw_pred,
+            data_batch["raster_from_agent"],
             pred_mask,
             torch.tensor(algo_config.CNN.patch_size).to(pos_pred.device),
             algo_config.CNN.output_size,
@@ -186,9 +161,8 @@ def pred2obs_static(
                 data_batch["image"],
                 CNNmodel,
                 pos_pred[:, i],
-                new_world_yaw[:, i],
-                data_batch["centroid"],
-                data_batch["raster_from_world"],
+                yaw_pred[:, i],
+                data_batch["raster_from_agent"],
                 pred_mask,
                 torch.tensor(algo_config.CNN.patch_size).to(pos_pred.device),
                 algo_config.CNN.output_size,

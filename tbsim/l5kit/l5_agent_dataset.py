@@ -15,7 +15,7 @@ from l5kit.rasterization import Rasterizer, RenderContext
 from l5kit.dataset.select_agents import select_agents, TH_DISTANCE_AV, TH_EXTENT_RATIO, TH_YAW_DEGREE
 
 
-from tbsim.external.l5_ego_dataset import EgoDataset
+from tbsim.l5kit.l5_ego_dataset import EgoDataset
 
 # WARNING: changing these values impact the number of instances selected for both train and inference!
 MIN_FRAME_HISTORY = 10  # minimum number of frames an agents must have in the past to be picked

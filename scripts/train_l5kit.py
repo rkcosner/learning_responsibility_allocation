@@ -77,6 +77,7 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
             dataset=datamodule.ego_validset,
             seed=cfg.seed,
             num_scenes=cfg.train.rollout.num_scenes,
+            compute_metrics=True
         )
         # Run rollout at regular intervals
         rollout_callback = RolloutCallback(
@@ -180,6 +181,9 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         # device & distributed training setup
         gpus=cfg.devices.num_gpus,
         strategy=cfg.train.parallel_strategy,
+        # setting for overfit debugging
+        # limit_val_batches=0,
+        # overfit_batches=2
     )
 
     trainer.fit(model=model, datamodule=datamodule)

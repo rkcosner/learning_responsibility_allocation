@@ -1,11 +1,12 @@
 from logging import raiseExceptions
 import numpy as np
-import pdb
+
 
 from numpy.lib.function_base import flip
 from tbsim.configs.base import AlgoConfig
 import torch
-import math, copy
+import math
+import copy
 from typing import Dict
 from collections import OrderedDict
 
@@ -54,7 +55,8 @@ class TransformerModel(nn.Module):
         self.goal_conditioned = algo_config.goal_conditioned
 
         self.register_buffer(
-            "weights_scaling", torch.tensor(algo_config.weights.weights_scaling)
+            "weights_scaling", torch.tensor(
+                algo_config.weights.weights_scaling)
         )
 
         self.criterion = nn.MSELoss(reduction="none")
@@ -143,7 +145,7 @@ class TransformerModel(nn.Module):
         mask_hint = torch.ones_like(tgt_mask)
         sample = np.random.binomial(T, p, nbatches)
         for i in range(nbatches):
-            mask_hint[i, :, sample[i] :] = 0
+            mask_hint[i, :, sample[i]:] = 0
         return mask_hint
 
     def integrate_forward(self, x0, action, dyn_type):
@@ -165,14 +167,14 @@ class TransformerModel(nn.Module):
             ped_mask = ped_mask.unsqueeze(1)
         for t in range(T):
             x[t + 1] = (
-                    self.dyn_list[DynType.UNICYCLE].step(
-                        x[t], action[..., t, :], self.step_time
-                    )
-                    * veh_mask
-                    + self.dyn_list[DynType.DI].step(
-                x[t], action[..., t, :], self.step_time
-            )
-                    * ped_mask
+                self.dyn_list[DynType.UNICYCLE].step(
+                    x[t], action[..., t, :], self.step_time
+                )
+                * veh_mask
+                + self.dyn_list[DynType.DI].step(
+                    x[t], action[..., t, :], self.step_time
+                )
+                * ped_mask
             )
 
         x = torch.stack(x[1:], dim=-2)
@@ -185,7 +187,7 @@ class TransformerModel(nn.Module):
         return x, pos, yaw
 
     def forward(
-            self, data_batch: Dict[str, torch.Tensor], batch_idx: int = None, plan:Dict[str,torch.Tensor] = None
+            self, data_batch: Dict[str, torch.Tensor], batch_idx: int = None, plan: Dict[str, torch.Tensor] = None
     ) -> Dict[str, torch.Tensor]:
         (
             src,
@@ -206,15 +208,13 @@ class TransformerModel(nn.Module):
             data_batch, self.dyn_list, self.step_time, self.algo_config,
         )
 
-
         # Encode map
         map_emb = obtain_map_enc(
             data_batch["image"],
             self.CNNmodel,
             src_pos,
-            src_world_yaw,
-            data_batch["centroid"],
-            data_batch["raster_from_world"],
+            src_yaw,
+            data_batch["raster_from_agent"],
             src_mask,
             torch.tensor(self.algo_config.CNN.patch_size).to(src_pos.device),
             self.algo_config.CNN.output_size,
@@ -225,7 +225,8 @@ class TransformerModel(nn.Module):
         )
         # seq_mask = subsequent_mask(tgt_mask.size(-1)).to(tgt_pos_yaw.device)
         # tgt_mask_dec = tgt_mask_agent.unsqueeze(-1) * seq_mask.unsqueeze(0)
-        tgt_dec = torch.zeros([*tgt_pos_yaw.shape[:-1],4]).to(tgt_pos_yaw.device)
+        tgt_dec = torch.zeros([*tgt_pos_yaw.shape[:-1], 4]
+                              ).to(tgt_pos_yaw.device)
         if self.goal_conditioned:
             if plan is not None:
                 goal_pos = plan["positions"]
@@ -233,25 +234,34 @@ class TransformerModel(nn.Module):
                 goal_mask = plan['availabilities']
 
             else:
-                goal_pos,goal_yaw, goal_mask = L5Utils.obtain_goal_state(tgt_pos_yaw,tgt_mask)
-            goal_pos_rel = goal_pos-curr_state[...,0:2]*goal_mask.unsqueeze(-1)
-            goal_yaw_rel = goal_yaw-curr_state[...,3:]*goal_mask.unsqueeze(-1)
+                goal_pos, goal_yaw, goal_mask = L5Utils.obtain_goal_state(
+                    tgt_pos_yaw, tgt_mask)
+            goal_pos_rel = goal_pos - \
+                curr_state[..., 0:2]*goal_mask.unsqueeze(-1)
+            goal_yaw_rel = goal_yaw-curr_state[..., 3:]*goal_mask.unsqueeze(-1)
             T = tgt_pos_yaw.shape[-2]
 
-            if goal_mask.shape[-1]>=T:
-                tgt_dec = torch.cat([goal_pos_rel[:,:,:T],torch.cos(goal_yaw_rel[:,:,:T]),torch.sin(goal_yaw_rel[:,:,:T])],dim=-1)
-                goal_pos = goal_pos[:,:,:T]
-                goal_yaw = goal_yaw[:,:,:T]
-                goal_mask = goal_mask[:,:,:T]
+            if goal_mask.shape[-1] >= T:
+                tgt_dec = torch.cat([goal_pos_rel[:, :, :T], torch.cos(
+                    goal_yaw_rel[:, :, :T]), torch.sin(goal_yaw_rel[:, :, :T])], dim=-1)
+                goal_pos = goal_pos[:, :, :T]
+                goal_yaw = goal_yaw[:, :, :T]
+                goal_mask = goal_mask[:, :, :T]
             else:
-                tgt_dec[:,:,:goal_mask.size(2)] = torch.cat([goal_pos_rel,torch.cos(goal_yaw_rel),torch.sin(goal_yaw_rel)],dim=-1)
-                goal_pos = TensorUtils.pad_sequence_single(goal_pos, [0,T-goal_mask.shape[-1]], batched=True, pad_dim=1)
-                goal_yaw = TensorUtils.pad_sequence_single(goal_yaw, [0,T-goal_mask.shape[-1]], batched=True, pad_dim=1)
-                goal_mask = TensorUtils.pad_sequence_single(goal_mask, [0,T-goal_mask.shape[-1]], batched=True, pad_dim=1)
+                tgt_dec[:, :, :goal_mask.size(2)] = torch.cat(
+                    [goal_pos_rel, torch.cos(goal_yaw_rel), torch.sin(goal_yaw_rel)], dim=-1)
+                goal_pos = TensorUtils.pad_sequence_single(
+                    goal_pos, [0, T-goal_mask.shape[-1]], batched=True, pad_dim=1)
+                goal_yaw = TensorUtils.pad_sequence_single(
+                    goal_yaw, [0, T-goal_mask.shape[-1]], batched=True, pad_dim=1)
+                goal_mask = TensorUtils.pad_sequence_single(
+                    goal_mask, [0, T-goal_mask.shape[-1]], batched=True, pad_dim=1)
 
-            tgt_mask_dec = goal_mask.unsqueeze(-2).repeat(1,1,tgt_mask.size(-1),1)
+            tgt_mask_dec = goal_mask.unsqueeze(-2).repeat(1,
+                                                          1, tgt_mask.size(-1), 1)
         else:
-            tgt_mask_dec = torch.zeros_like(tgt_mask).unsqueeze(-2).repeat(1,1,tgt_mask.size(-1),1)
+            tgt_mask_dec = torch.zeros_like(
+                tgt_mask).unsqueeze(-2).repeat(1, 1, tgt_mask.size(-1), 1)
 
         out, prob = self.Transformermodel.forward(
             src,
@@ -271,30 +281,24 @@ class TransformerModel(nn.Module):
         x_pred, pos_pred, yaw_pred = self.integrate_forward(
             curr_state, u_pred, dyn_type
         )
-        lane_mask = (data_batch["image"][:, self.algo_config.CNN.lane_channel] < 1.0).type(torch.float)
-        if self.M == 1:
-            pred_world_yaw = yaw_pred + (data_batch["yaw"].view(-1, 1, 1, 1)).type(
-                torch.float
-            )
+        lane_mask = (data_batch["image"][:, self.algo_config.CNN.lane_channel] < 1.0).type(
+            torch.float)
 
-        else:
-            pred_world_yaw = yaw_pred + (data_batch["yaw"].view(-1, 1, 1, 1, 1)).type(
-                torch.float
-            )
         lane_flags = obtain_lane_flag(
             lane_mask,
             pos_pred,
-            pred_world_yaw,
-            data_batch["centroid"].type(torch.float),
-            data_batch["raster_from_world"],
+            yaw_pred,
+            data_batch["raster_from_agent"],
             tgt_mask_agent,
             extents.type(torch.float)*self.algo_config.CNN.veh_patch_scale,
             self.algo_config.CNN.veh_ROI_outdim,
-            )
+        )
         if self.M > 1:
             max_idx = torch.max(prob, dim=-1)[1]
-            ego_pred_positions = pos_pred[torch.arange(0, pos_pred.size(0)), max_idx, 0]
-            ego_pred_yaws = yaw_pred[torch.arange(0, pos_pred.size(0)), max_idx, 0]
+            ego_pred_positions = pos_pred[torch.arange(
+                0, pos_pred.size(0)), max_idx, 0]
+            ego_pred_yaws = yaw_pred[torch.arange(
+                0, pos_pred.size(0)), max_idx, 0]
         else:
             ego_pred_positions = pos_pred[:, 0]
             ego_pred_yaws = yaw_pred[:, 0]
@@ -326,12 +330,13 @@ class TransformerModel(nn.Module):
                     src_yaw,
                     raw_type,
                     src_mask,
-                    torch.zeros_like(src_lanes) if src_lanes is not None else None,
+                    torch.zeros_like(
+                        src_lanes) if src_lanes is not None else None,
                     add_noise=True,
                 )
                 src_rel = src_noisy[:, :, -1:].clone()
                 src_rel[..., 0:2] -= (
-                        src_noisy[:, 0:1, -1:, 0:2] * src_mask[:, :, -1:, None]
+                    src_noisy[:, 0:1, -1:, 0:2] * src_mask[:, :, -1:, None]
                 )
                 if map_emb.ndim == 4:
                     likelihood = self.Discriminator(
@@ -361,7 +366,8 @@ class TransformerModel(nn.Module):
                     yaw_pred,
                     tgt_mask_agent,
                     raw_type,
-                    torch.zeros_like(src_lanes) if src_lanes is not None else None,
+                    torch.zeros_like(
+                        src_lanes) if src_lanes is not None else None,
                     self.CNNmodel,
                     self.algo_config,
                     self.M,
@@ -375,7 +381,8 @@ class TransformerModel(nn.Module):
                     yaw_pred,
                     tgt_mask_agent,
                     raw_type,
-                    torch.zeros_like(src_lanes) if src_lanes is not None else None,
+                    torch.zeros_like(
+                        src_lanes) if src_lanes is not None else None,
                     self.CNNmodel,
                     self.algo_config,
                     self.algo_config.f_steps,
@@ -384,16 +391,16 @@ class TransformerModel(nn.Module):
             if self.M == 1:
                 src_new_rel = src_new.clone()
                 src_new_rel[..., 0:2] -= src_new[
-                                         :, 0:1, :, 0:2
-                                         ] * src_mask_new.unsqueeze(-1)
+                    :, 0:1, :, 0:2
+                ] * src_mask_new.unsqueeze(-1)
                 likelihood_new = self.Discriminator(
                     src_new_rel, src_mask_new, dyn_type, map_emb_new
                 ).view(src.shape[0], -1)
             else:
                 src_new_rel = src_new.clone()
                 src_new_rel[..., 0:2] -= src_new[
-                                         :, :, 0:1, :, 0:2
-                                         ] * src_mask_new.unsqueeze(-1)
+                    :, :, 0:1, :, 0:2
+                ] * src_mask_new.unsqueeze(-1)
                 likelihood_new = list()
                 for i in range(self.M):
                     likelihood_new.append(
@@ -415,19 +422,22 @@ class TransformerModel(nn.Module):
             out_dict["scene_predictions"]["goal_mask"] = goal_mask
         return out_dict
 
-
     def compute_losses(self, pred_batch, data_batch):
         if self.criterion is None:
             raise NotImplementedError("Loss function is undefined.")
-        yaw_crit = lambda pred, target: round_2pi(pred - target) ** 2
 
-        ego_weights = data_batch["target_availabilities"]*self.algo_config.weights.ego_weight
+        def yaw_crit(pred, target): return round_2pi(pred - target) ** 2
+
+        ego_weights = data_batch["target_availabilities"] * \
+            self.algo_config.weights.ego_weight
 
         all_other_types = data_batch["all_other_agents_types"]
         all_other_weights = (
-                data_batch["all_other_agents_future_availability"] * self.algo_config.weights.all_other_weight
+            data_batch["all_other_agents_future_availability"] *
+            self.algo_config.weights.all_other_weight
         )
-        type_mask = ((all_other_types >= 3) & (all_other_types <= 13)).unsqueeze(-1)
+        type_mask = ((all_other_types >= 3) & (
+            all_other_types <= 13)).unsqueeze(-1)
 
         weights = torch.cat(
             (ego_weights.unsqueeze(1), all_other_weights * type_mask),
@@ -437,8 +447,8 @@ class TransformerModel(nn.Module):
         T = pred_batch["predictions"]["yaws"].shape[-2]
         temporal_weight = (
             (1 - eta + torch.arange(T) / (T - 1) * 2 * eta)
-                .view(1, 1, T)
-                .to(weights.device)
+            .view(1, 1, T)
+            .to(weights.device)
         )
         weights = weights * temporal_weight
         mask = torch.cat(
@@ -448,7 +458,8 @@ class TransformerModel(nn.Module):
             ),
             dim=1,
         )
-        weights_scaling = torch.tensor(self.algo_config.weights.weights_scaling).to(mask.device)
+        weights_scaling = torch.tensor(
+            self.algo_config.weights.weights_scaling).to(mask.device)
         instance_count = torch.sum(mask)
 
         scene_target_pos = torch.cat(
@@ -483,7 +494,7 @@ class TransformerModel(nn.Module):
                 instance_count,
                 weights_scaling[2:],
                 crit=yaw_crit,
-                )
+            )
 
         else:
             loss += LossUtils.weighted_multimodal_trajectory_loss(
@@ -507,22 +518,22 @@ class TransformerModel(nn.Module):
 
         if self.M == 1:
             lane_reg_loss = (
-                    LossUtils.lane_regularization_loss(
-                        pred_batch["scene_predictions"]["lane_flags"],
-                        weights,
-                        instance_count,
-                    )
-                    * self.algo_config.weights.lane_regulation_weight
+                LossUtils.lane_regularization_loss(
+                    pred_batch["scene_predictions"]["lane_flags"],
+                    weights,
+                    instance_count,
+                )
+                * self.algo_config.weights.lane_regulation_weight
             )
         else:
             lane_reg_loss = (
-                    LossUtils.lane_regularization_loss(
-                        pred_batch["scene_predictions"]["lane_flags"],
-                        weights,
-                        instance_count,
-                        pred_batch["scene_predictions"]["prob"],
-                    )
-                    * self.algo_config.weights.lane_regulation_weight
+                LossUtils.lane_regularization_loss(
+                    pred_batch["scene_predictions"]["lane_flags"],
+                    weights,
+                    instance_count,
+                    pred_batch["scene_predictions"]["prob"],
+                )
+                * self.algo_config.weights.lane_regulation_weight
             )
 
         losses = OrderedDict(
@@ -546,13 +557,14 @@ class TransformerModel(nn.Module):
                 )
 
                 goal_reaching_loss += LossUtils.weighted_trajectory_loss(
-                    pred_batch["scene_predictions"]["yaws"] * mask.unsqueeze(-1),
+                    pred_batch["scene_predictions"]["yaws"] *
+                    mask.unsqueeze(-1),
                     goal_yaw,
                     goal_mask,
                     goal_isntance_count,
                     weights_scaling[2:],
                     crit=yaw_crit,
-                    )
+                )
             else:
                 goal_reaching_loss += LossUtils.weighted_multimodal_trajectory_loss(
                     pred_batch["scene_predictions"]["positions"],
@@ -572,15 +584,19 @@ class TransformerModel(nn.Module):
                     weights_scaling[2:],
                     crit=yaw_crit,
                 )
-            losses["goal_reaching_loss"] = goal_reaching_loss*self.algo_config.weights.goal_reaching_weight
+            losses["goal_reaching_loss"] = goal_reaching_loss * \
+                self.algo_config.weights.goal_reaching_weight
         if self.algo_config.calc_collision:
 
             coll_loss = LossUtils.collision_loss(
                 pred_batch["scene_predictions"]["edges"], col_funcs=self.col_funs
             )
-            losses["coll_loss"] = coll_loss * self.algo_config.weights.collision_weight
+            losses["coll_loss"] = coll_loss * \
+                self.algo_config.weights.collision_weight
         if self.algo_config.calc_likelihood:
-            likelihood_loss = self.algo_config.weights.GAN_weight * LossUtils.likelihood_loss(pred_batch["scene_predictions"]["likelihood_new"])
+            likelihood_loss = self.algo_config.weights.GAN_weight * \
+                LossUtils.likelihood_loss(
+                    pred_batch["scene_predictions"]["likelihood_new"])
             losses["likelihood_loss"] = likelihood_loss
 
         return losses

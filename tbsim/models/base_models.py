@@ -4,7 +4,7 @@ import textwrap
 from collections import OrderedDict
 from typing import Dict, Union, List, Tuple
 from copy import deepcopy
-import pdb
+
 
 import torch
 import torch.nn as nn
@@ -22,11 +22,12 @@ class MLP(nn.Module):
     """
     Base class for simple Multi-Layer Perceptrons.
     """
+
     def __init__(
             self,
             input_dim: int,
             output_dim: int,
-            layer_dims: tuple=(),
+            layer_dims: tuple = (),
             layer_func=nn.Linear,
             layer_func_kwargs=None,
             activation=nn.ReLU,
@@ -114,11 +115,12 @@ class SplitMLP(MLP):
     """
     A multi-output MLP network: The model split and reshapes the output layer to the desired output shapes
     """
+
     def __init__(
             self,
             input_dim: int,
             output_shapes: OrderedDict,
-            layer_dims: tuple=(),
+            layer_dims: tuple = (),
             layer_func=nn.Linear,
             layer_func_kwargs=None,
             activation=nn.ReLU,
@@ -167,7 +169,8 @@ class SplitMLP(MLP):
         ind = 0
         for k, v in self._output_shapes.items():
             v_dim = int(np.prod(v))
-            out_dict[k] = reshape_dimensions(outs[:, ind: ind + v_dim], begin_axis=1, end_axis=2, target_dims=v)
+            out_dict[k] = reshape_dimensions(
+                outs[:, ind: ind + v_dim], begin_axis=1, end_axis=2, target_dims=v)
             ind += v_dim
         return out_dict
 
@@ -176,11 +179,12 @@ class MIMOMLP(SplitMLP):
     """
     A multi-input, multi-output MLP: The model flattens and concatenate the input before feeding into an MLP
     """
+
     def __init__(
             self,
             input_shapes: OrderedDict,
             output_shapes: OrderedDict,
-            layer_dims: tuple=(),
+            layer_dims: tuple = (),
             layer_func=nn.Linear,
             layer_func_kwargs=None,
             activation=nn.ReLU,
@@ -236,10 +240,12 @@ class DoubleConv(nn.Module):
             mid_channels = out_channels
         self.double_conv = nn.Sequential(
             nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(mid_channels),                                     # (Mohit): argh... forgot to remove this batchnorm
+            # (Mohit): argh... forgot to remove this batchnorm
+            nn.BatchNorm2d(mid_channels),
             nn.ReLU(inplace=True),
             nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),                                     # (Mohit): argh... forgot to remove this batchnorm
+            # (Mohit): argh... forgot to remove this batchnorm
+            nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
 
@@ -255,12 +261,13 @@ class Up(nn.Module):
 
         # if bilinear, use the normal convolutions to reduce the number of channels
         if bilinear:
-            self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+            self.up = nn.Upsample(
+                scale_factor=2, mode='bilinear', align_corners=True)
             self.conv = DoubleConv(in_channels, out_channels, in_channels // 2)
         else:
-            self.up = nn.ConvTranspose2d(in_channels , in_channels // 2, kernel_size=2, stride=2)
+            self.up = nn.ConvTranspose2d(
+                in_channels, in_channels // 2, kernel_size=2, stride=2)
             self.conv = DoubleConv(in_channels, out_channels)
-
 
     def forward(self, x1, x2):
         """
@@ -294,12 +301,15 @@ class IdentityBlock(nn.Module):
 
         filters1, filters2, filters3 = filters
         self.conv1 = nn.Conv2d(in_planes, filters1, kernel_size=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(filters1) if self.batchnorm else nn.Identity()
+        self.bn1 = nn.BatchNorm2d(
+            filters1) if self.batchnorm else nn.Identity()
         self.conv2 = nn.Conv2d(filters1, filters2, kernel_size=kernel_size, dilation=1,
                                stride=stride, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(filters2) if self.batchnorm else nn.Identity()
+        self.bn2 = nn.BatchNorm2d(
+            filters2) if self.batchnorm else nn.Identity()
         self.conv3 = nn.Conv2d(filters2, filters3, kernel_size=1, bias=False)
-        self.bn3 = nn.BatchNorm2d(filters3) if self.batchnorm else nn.Identity()
+        self.bn3 = nn.BatchNorm2d(
+            filters3) if self.batchnorm else nn.Identity()
 
     def forward(self, x):
         out = F.relu(self.bn1(self.conv1(x)))
@@ -319,12 +329,15 @@ class ConvBlock(nn.Module):
 
         filters1, filters2, filters3 = filters
         self.conv1 = nn.Conv2d(in_planes, filters1, kernel_size=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(filters1) if self.batchnorm else nn.Identity()
+        self.bn1 = nn.BatchNorm2d(
+            filters1) if self.batchnorm else nn.Identity()
         self.conv2 = nn.Conv2d(filters1, filters2, kernel_size=kernel_size, dilation=1,
                                stride=stride, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(filters2) if self.batchnorm else nn.Identity()
+        self.bn2 = nn.BatchNorm2d(
+            filters2) if self.batchnorm else nn.Identity()
         self.conv3 = nn.Conv2d(filters2, filters3, kernel_size=1, bias=False)
-        self.bn3 = nn.BatchNorm2d(filters3) if self.batchnorm else nn.Identity()
+        self.bn3 = nn.BatchNorm2d(
+            filters3) if self.batchnorm else nn.Identity()
 
         self.shortcut = nn.Sequential(
             nn.Conv2d(in_planes, filters3,
@@ -344,10 +357,12 @@ class ConvBlock(nn.Module):
 
 class UNetDecoder(nn.Module):
     """UNet part based on https://github.com/milesial/Pytorch-UNet/tree/master/unet"""
+
     def __init__(self, input_channel, output_channel, encoder_channels, up_factor, bilinear=True, batchnorm=True):
         super(UNetDecoder, self).__init__()
         self.conv1 = nn.Sequential(
-            nn.Conv2d(input_channel, 1024, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.Conv2d(input_channel, 1024, kernel_size=3,
+                      stride=1, padding=1, bias=False),
             nn.ReLU(True)
         )
 
@@ -358,20 +373,26 @@ class UNetDecoder(nn.Module):
         self.up3 = Up(256 + encoder_channels[-3], 256 // up_factor, bilinear)
 
         self.layer1 = nn.Sequential(
-            ConvBlock(128, [64, 64, 64], kernel_size=3, stride=1, batchnorm=batchnorm),
-            IdentityBlock(64, [64, 64, 64], kernel_size=3, stride=1, batchnorm=batchnorm),
+            ConvBlock(128, [64, 64, 64], kernel_size=3,
+                      stride=1, batchnorm=batchnorm),
+            IdentityBlock(64, [64, 64, 64], kernel_size=3,
+                          stride=1, batchnorm=batchnorm),
             nn.UpsamplingBilinear2d(scale_factor=2),
         )
 
         self.layer2 = nn.Sequential(
-            ConvBlock(64, [32, 32, 32], kernel_size=3, stride=1, batchnorm=batchnorm),
-            IdentityBlock(32, [32, 32, 32], kernel_size=3, stride=1, batchnorm=batchnorm),
+            ConvBlock(64, [32, 32, 32], kernel_size=3,
+                      stride=1, batchnorm=batchnorm),
+            IdentityBlock(32, [32, 32, 32], kernel_size=3,
+                          stride=1, batchnorm=batchnorm),
             nn.UpsamplingBilinear2d(scale_factor=2),
         )
 
         self.layer3 = nn.Sequential(
-            ConvBlock(32, [16, 16, 16], kernel_size=3, stride=1, batchnorm=batchnorm),
-            IdentityBlock(16, [16, 16, 16], kernel_size=3, stride=1, batchnorm=batchnorm),
+            ConvBlock(32, [16, 16, 16], kernel_size=3,
+                      stride=1, batchnorm=batchnorm),
+            IdentityBlock(16, [16, 16, 16], kernel_size=3,
+                          stride=1, batchnorm=batchnorm),
             nn.UpsamplingBilinear2d(scale_factor=2),
         )
 
@@ -389,7 +410,8 @@ class UNetDecoder(nn.Module):
         for layer in [self.layer1, self.layer2, self.layer3, self.conv2]:
             x = layer(x)
 
-        x = F.interpolate(x, size=(target_hw[0], target_hw[1]), mode='bilinear')
+        x = F.interpolate(
+            x, size=(target_hw[0], target_hw[1]), mode='bilinear')
         return x
 
 
@@ -399,6 +421,7 @@ class SpatialSoftmax(nn.Module):
     Based on Deep Spatial Autoencoders for Visuomotor Learning by Finn et al.
     https://rll.berkeley.edu/dsae/dsae.pdf
     """
+
     def __init__(
             self,
             input_shape,
@@ -419,7 +442,7 @@ class SpatialSoftmax(nn.Module):
         """
         super(SpatialSoftmax, self).__init__()
         assert len(input_shape) == 3
-        self._in_c, self._in_h, self._in_w = input_shape # (C, H, W)
+        self._in_c, self._in_h, self._in_w = input_shape  # (C, H, W)
 
         if num_kp is not None:
             self.nets = torch.nn.Conv2d(self._in_c, num_kp, kernel_size=1)
@@ -433,19 +456,23 @@ class SpatialSoftmax(nn.Module):
 
         if self.learnable_temperature:
             # temperature will be learned
-            temperature = torch.nn.Parameter(torch.ones(1) * temperature, requires_grad=True)
+            temperature = torch.nn.Parameter(
+                torch.ones(1) * temperature, requires_grad=True)
             self.register_parameter('temperature', temperature)
         else:
             # temperature held constant after initialization
-            temperature = torch.nn.Parameter(torch.ones(1) * temperature, requires_grad=False)
+            temperature = torch.nn.Parameter(
+                torch.ones(1) * temperature, requires_grad=False)
             self.register_buffer('temperature', temperature)
 
         pos_x, pos_y = np.meshgrid(
             np.linspace(-1., 1., self._in_w),
             np.linspace(-1., 1., self._in_h)
         )
-        pos_x = torch.from_numpy(pos_x.reshape(1, self._in_h * self._in_w)).float()
-        pos_y = torch.from_numpy(pos_y.reshape(1, self._in_h * self._in_w)).float()
+        pos_x = torch.from_numpy(pos_x.reshape(
+            1, self._in_h * self._in_w)).float()
+        pos_y = torch.from_numpy(pos_y.reshape(
+            1, self._in_h * self._in_w)).float()
         self.register_buffer('pos_x', pos_x)
         self.register_buffer('pos_y', pos_y)
 
@@ -507,18 +534,23 @@ class SpatialSoftmax(nn.Module):
 
         if self.output_variance:
             # treat attention as a distribution, and compute second-order statistics to return
-            expected_xx = torch.sum(self.pos_x * self.pos_x * attention, dim=1, keepdim=True)
-            expected_yy = torch.sum(self.pos_y * self.pos_y * attention, dim=1, keepdim=True)
-            expected_xy = torch.sum(self.pos_x * self.pos_y * attention, dim=1, keepdim=True)
+            expected_xx = torch.sum(
+                self.pos_x * self.pos_x * attention, dim=1, keepdim=True)
+            expected_yy = torch.sum(
+                self.pos_y * self.pos_y * attention, dim=1, keepdim=True)
+            expected_xy = torch.sum(
+                self.pos_x * self.pos_y * attention, dim=1, keepdim=True)
             var_x = expected_xx - expected_x * expected_x
             var_y = expected_yy - expected_y * expected_y
             var_xy = expected_xy - expected_x * expected_y
             # stack to [B * K, 4] and then reshape to [B, K, 2, 2] where last 2 dims are covariance matrix
-            feature_covar = torch.cat([var_x, var_xy, var_xy, var_y], 1).reshape(-1, self._num_kp, 2, 2)
+            feature_covar = torch.cat(
+                [var_x, var_xy, var_xy, var_y], 1).reshape(-1, self._num_kp, 2, 2)
             feature_keypoints = (feature_keypoints, feature_covar)
 
         if isinstance(feature_keypoints, tuple):
-            self.kps = (feature_keypoints[0].detach(), feature_keypoints[1].detach())
+            self.kps = (feature_keypoints[0].detach(),
+                        feature_keypoints[1].detach())
         else:
             self.kps = feature_keypoints.detach()
         return feature_keypoints
@@ -526,6 +558,7 @@ class SpatialSoftmax(nn.Module):
 
 class RasterizedMapEncoder(nn.Module):
     """A basic image-based rasterized map encoder"""
+
     def __init__(
             self,
             model_arch: str,
@@ -560,8 +593,10 @@ class RasterizedMapEncoder(nn.Module):
 
         # configure spatial reduction pooling layer
         if use_spatial_softmax:
-            pooling = SpatialSoftmax(input_shape=self.conv_out_shape, **spatial_softmax_kwargs)
-            self.pool_out_dim = int(np.prod(pooling.output_shape(self.conv_out_shape)))
+            pooling = SpatialSoftmax(
+                input_shape=self.conv_out_shape, **spatial_softmax_kwargs)
+            self.pool_out_dim = int(
+                np.prod(pooling.output_shape(self.conv_out_shape)))
         else:
             pooling = nn.AdaptiveAvgPool2d((1, 1))
             self.pool_out_dim = self.conv_out_shape[0]
@@ -571,7 +606,8 @@ class RasterizedMapEncoder(nn.Module):
         )
         self.map_model.avgpool = pooling
         if feature_dim is not None:
-            self.map_model.fc = nn.Linear(in_features=self.pool_out_dim, out_features=feature_dim)
+            self.map_model.fc = nn.Linear(
+                in_features=self.pool_out_dim, out_features=feature_dim)
         else:
             self.map_model.fc = nn.Identity()
 
@@ -616,7 +652,8 @@ class RotatedROIAlign(nn.Module):
     def __init__(self, roi_feature_size, roi_scale):
         super(RotatedROIAlign, self).__init__()
         from tbsim.models.roi_align import ROI_align
-        self.roi_align = lambda feat, rois: ROI_align(feat, rois, roi_feature_size[0])
+        self.roi_align = lambda feat, rois: ROI_align(
+            feat, rois, roi_feature_size[0])
         self.roi_scale = roi_scale
 
     def forward(self, feats, list_of_rois):
@@ -631,6 +668,7 @@ class RotatedROIAlign(nn.Module):
 
 class RasterizeROIEncoder(nn.Module):
     """Use RoI Align to crop map feature for each agent"""
+
     def __init__(
             self,
             model_arch: str,
@@ -639,7 +677,7 @@ class RasterizeROIEncoder(nn.Module):
             global_feature_dim: int = None,
             roi_feature_size: tuple = (7, 7),
             roi_layer_key: str = "layer4",
-            output_activation = nn.ReLU,
+            output_activation=nn.ReLU,
             use_rotated_roi=True
     ) -> None:
         super(RasterizeROIEncoder, self).__init__()
@@ -661,7 +699,8 @@ class RasterizeROIEncoder(nn.Module):
         roi_scale = model.feature_scales()[roi_layer_key]
         roi_channel = model.feature_channels()[roi_layer_key]
         if use_rotated_roi:
-            self.roi_align = RotatedROIAlign(roi_feature_size, roi_scale=roi_scale)
+            self.roi_align = RotatedROIAlign(
+                roi_feature_size, roi_scale=roi_scale)
         else:
             self.roi_align = RoIAlign(
                 output_size=roi_feature_size,
@@ -704,6 +743,7 @@ class RasterizeROIEncoder(nn.Module):
 
 class RasterizedMapKeyPointNet(RasterizedMapEncoder):
     """Predict a list of keypoints [x, y] given a rasterized map"""
+
     def __init__(
             self,
             model_arch: str,
@@ -720,11 +760,13 @@ class RasterizedMapKeyPointNet(RasterizedMapEncoder):
 
     def forward(self, map_inputs) -> torch.Tensor:
         outputs = super(RasterizedMapKeyPointNet, self).forward(map_inputs)
-        return outputs.reshape(outputs.shape[0], -1, 2)  # reshape back to kp format
+        # reshape back to kp format
+        return outputs.reshape(outputs.shape[0], -1, 2)
 
 
 class RasterizedMapUNet(nn.Module):
     """Predict a spatial map same size as the input rasterized map"""
+
     def __init__(
             self,
             model_arch: str,
@@ -770,7 +812,8 @@ class RasterizedMapUNet(nn.Module):
 class RNNTrajectoryEncoder(nn.Module):
     def __init__(self, trajectory_dim, rnn_hidden_size, feature_dim=None, mlp_layer_dims: tuple = ()):
         super(RNNTrajectoryEncoder, self).__init__()
-        self.lstm = nn.LSTM(trajectory_dim, hidden_size=rnn_hidden_size, batch_first=True)
+        self.lstm = nn.LSTM(
+            trajectory_dim, hidden_size=rnn_hidden_size, batch_first=True)
         if feature_dim is not None:
             self.mlp = MLP(
                 input_dim=rnn_hidden_size,
@@ -796,6 +839,7 @@ class RNNTrajectoryEncoder(nn.Module):
 
 class PosteriorEncoder(nn.Module):
     """Posterior Encoder (x, x_c -> q) for CVAE"""
+
     def __init__(
             self,
             condition_dim: int,
@@ -827,17 +871,20 @@ class PosteriorEncoder(nn.Module):
 
 class ConditionEncoder(nn.Module):
     """Condition Encoder (x -> c) for CVAE"""
+
     def __init__(
             self,
             map_encoder: nn.Module,
             trajectory_shape: tuple,  # [T, D]
             condition_dim: int,
             mlp_layer_dims: tuple = (128, 128),
+            goal_encoder=None,
             rnn_hidden_size: int = 100
     ) -> None:
         super(ConditionEncoder, self).__init__()
         self.map_encoder = map_encoder
         self.trajectory_shape = trajectory_shape
+        self.goal_encoder = goal_encoder
 
         # TODO: history encoder
         # self.hist_lstm = nn.LSTM(trajectory_shape[-1], hidden_size=rnn_hidden_size, batch_first=True)
@@ -851,7 +898,11 @@ class ConditionEncoder(nn.Module):
 
     def forward(self, condition_inputs):
         map_feat = self.map_encoder(condition_inputs["image"])
-        return self.mlp(map_feat)
+        c_feat = self.mlp(map_feat)
+        if self.goal_encoder is not None:
+            goal_feat = self.goal_encoder(condition_inputs["goal"])
+            c_feat = torch.cat([c_feat, goal_feat], dim=-1)
+        return c_feat
 
 
 class PosteriorNet(nn.Module):
@@ -860,7 +911,7 @@ class PosteriorNet(nn.Module):
             input_shapes: OrderedDict,
             condition_dim: int,
             param_shapes: OrderedDict,
-            mlp_layer_dims: tuple=()
+            mlp_layer_dims: tuple = ()
     ):
         super(PosteriorNet, self).__init__()
         all_shapes = deepcopy(input_shapes)
@@ -883,7 +934,7 @@ class ConditionNet(nn.Module):
             self,
             condition_input_shapes: OrderedDict,
             condition_dim: int,
-            mlp_layer_dims: tuple=()
+            mlp_layer_dims: tuple = ()
     ):
         super(ConditionNet, self).__init__()
         self.mlp = MIMOMLP(
@@ -899,6 +950,7 @@ class ConditionNet(nn.Module):
 
 class ConditionDecoder(nn.Module):
     """Decoding (z, c) -> x' using a flat MLP"""
+
     def __init__(self, decoder_model: nn.Module):
         super(ConditionDecoder, self).__init__()
         self.decoder_model = decoder_model
@@ -980,7 +1032,8 @@ class TrajectoryDecoder(nn.Module):
         return traj
 
     def forward(self, inputs, current_states=None, num_steps=None):
-        preds = self._forward_networks(inputs, current_states=current_states, num_steps=num_steps)
+        preds = self._forward_networks(
+            inputs, current_states=current_states, num_steps=num_steps)
         if self.dyn is not None:
             preds["controls"] = preds["trajectories"]
             preds["trajectories"] = self._forward_dynamics(
@@ -997,9 +1050,11 @@ class MLPTrajectoryDecoder(TrajectoryDecoder):
             net_kwargs = dict()
         assert isinstance(self.num_steps, int)
         if self.dyn is None:
-            pred_shapes = OrderedDict(trajectories=(self.num_steps, self.state_dim))
+            pred_shapes = OrderedDict(
+                trajectories=(self.num_steps, self.state_dim))
         else:
-            pred_shapes = OrderedDict(trajectories=(self.num_steps, self.dyn.udim))
+            pred_shapes = OrderedDict(
+                trajectories=(self.num_steps, self.dyn.udim))
 
         state_as_input = net_kwargs.pop("state_as_input")
         if self.dyn is not None:
@@ -1028,7 +1083,8 @@ class MLPTrajectoryDecoder(TrajectoryDecoder):
             # [B, A, D]
             preds = TensorUtils.time_distributed(inputs, self.mlp)
         else:
-            raise ValueError("Expecting inputs to have ndim == 2 or 3, got {}".format(inputs.ndim))
+            raise ValueError(
+                "Expecting inputs to have ndim == 2 or 3, got {}".format(inputs.ndim))
         return preds
 
 
@@ -1042,13 +1098,14 @@ if __name__ == "__main__":
     boxes = get_box_world_coords(pos=centers, yaw=yaws, extent=extents)
     boxes_aligned = torch.flatten(boxes[:, [0, 2], :], start_dim=1)
     box_aligned = get_square_upright_box(centers, 2)
-    from IPython import embed; embed()
+    from IPython import embed
+    embed()
     boxes_indices = torch.zeros(10, 1)
     boxes_indices[5:] = 1
     boxes_indexed = torch.cat((boxes_indices, boxes_aligned), dim=1)
 
-
-    model = RasterizeROIEncoder(model_arch="resnet50", input_image_shape=(15, 224, 224))
+    model = RasterizeROIEncoder(
+        model_arch="resnet50", input_image_shape=(15, 224, 224))
     output = model(t, boxes_indexed)
     for f in output:
         print(f.shape)

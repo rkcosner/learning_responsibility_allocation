@@ -7,6 +7,7 @@ from tbsim.utils import l5_utils as L5Utils
 from tbsim.utils.geometry_utils import transform_points_tensor
 from tbsim.utils.l5_utils import get_last_available_index
 from tbsim.utils.loss_utils import goal_reaching_loss, trajectory_loss, collision_loss
+import pdb
 
 
 def decode_spatial_prediction(prob_map, residual_yaw_map, num_samples=None):
@@ -34,13 +35,15 @@ def decode_spatial_prediction(prob_map, residual_yaw_map, num_samples=None):
     else:
         # otherwise, use the probability map as a discrete distribution of location predictions
         dist = torch.distributions.Categorical(probs=flat_prob_map)
-        pixel_loc_flat = dist.sample((num_samples,)).permute(1, 0)  # [n_sample, batch] -> [batch, n_sample]
+        pixel_loc_flat = dist.sample((num_samples,)).permute(
+            1, 0)  # [n_sample, batch] -> [batch, n_sample]
         pixel_prob = torch.gather(flat_prob_map, dim=1, index=pixel_loc_flat)
 
     local_pred = torch.gather(
         input=torch.flatten(residual_yaw_map, 2),  # [B, C, H * W]
         dim=2,
-        index=TensorUtils.unsqueeze_expand_at(pixel_loc_flat, size=3, dim=1)  # [B, C, num_samples]
+        index=TensorUtils.unsqueeze_expand_at(
+            pixel_loc_flat, size=3, dim=1)  # [B, C, num_samples]
     ).permute(0, 2, 1)  # [B, C, N] -> [B, N, C]
 
     residual_pred = local_pred[:, :, 0:2]
@@ -57,13 +60,15 @@ def get_spatial_goal_supervision(data_batch):
     b, _, h, w = data_batch["image"].shape  # [B, C, H, W]
 
     # use last available step as goal location
-    goal_index = get_last_available_index(data_batch["target_availabilities"])[:, None, None]
+    goal_index = get_last_available_index(
+        data_batch["target_availabilities"])[:, None, None]
 
     # gather by goal index
     goal_pos_agent = torch.gather(
         data_batch["target_positions"],  # [B, T, 2]
         dim=1,
-        index=goal_index.expand(-1, 1, data_batch["target_positions"].shape[-1])
+        index=goal_index.expand(-1, 1,
+                                data_batch["target_positions"].shape[-1])
     )  # [B, 1, 2]
 
     goal_yaw_agent = torch.gather(
@@ -82,10 +87,12 @@ def get_spatial_goal_supervision(data_batch):
     goal_pos_raster[:, 1] = goal_pos_raster[:, 1].clip(0, h - 1e-5)
 
     goal_pos_pixel = torch.floor(goal_pos_raster).float()  # round down pixels
-    goal_pos_residual = goal_pos_raster - goal_pos_pixel  # compute rounding residuals (range 0-1)
+    # compute rounding residuals (range 0-1)
+    goal_pos_residual = goal_pos_raster - goal_pos_pixel
     # compute flattened pixel location
     goal_pos_pixel_flat = goal_pos_pixel[:, 1] * w + goal_pos_pixel[:, 0]
-    raster_sup_flat = TensorUtils.to_one_hot(goal_pos_pixel_flat.long(), num_class=h * w)
+    raster_sup_flat = TensorUtils.to_one_hot(
+        goal_pos_pixel_flat.long(), num_class=h * w)
     raster_sup = raster_sup_flat.reshape(b, h, w)
     return {
         "goal_position_residual": goal_pos_residual,  # [B, 2]
@@ -105,7 +112,7 @@ def optimize_trajectories(
         target_avails,
         dynamics_model,
         step_time: float,
-        data_batch = None,
+        data_batch=None,
         goal_loss_weight=1.0,
         traj_loss_weight=0.0,
         coll_loss_weight=0.0,
@@ -113,7 +120,8 @@ def optimize_trajectories(
 ):
     curr_u = init_u.detach().clone()
     curr_u.requires_grad = True
-    action_optim = optim.LBFGS([curr_u], max_iter=20, lr=1.0, line_search_fn='strong_wolfe')
+    action_optim = optim.LBFGS(
+        [curr_u], max_iter=20, lr=1.0, line_search_fn='strong_wolfe')
 
     for oidx in range(num_optim_iterations):
         def closure():
@@ -149,7 +157,8 @@ def optimize_trajectories(
                     coll_edges[c] = coll_edges[c][:, :target_trajs.shape[-2]]
                 vv_edges = dict(VV=coll_edges["VV"])
                 if vv_edges["VV"].shape[0] > 0:
-                    losses["coll_loss"] = collision_loss(vv_edges) * coll_loss_weight
+                    losses["coll_loss"] = collision_loss(
+                        vv_edges) * coll_loss_weight
 
             total_loss = torch.hstack(list(losses.values())).sum()
 
@@ -179,14 +188,17 @@ def optimize_trajectories(
 
     return dict(positions=final_pos, yaws=final_yaw), final_raw_trajs, curr_u, losses
 
-def combine_ego_agent_data(batch,ego_keys,agent_keys,mask=None):
-    assert len(ego_keys)==len(agent_keys)
+
+def combine_ego_agent_data(batch, ego_keys, agent_keys, mask=None):
+    assert len(ego_keys) == len(agent_keys)
     combined_batch = dict()
-    for ego_key,agent_key in zip(ego_keys,agent_keys):
+    for ego_key, agent_key in zip(ego_keys, agent_keys):
         if mask is None:
             size_dim0 = batch[agent_key].shape[0]*batch[agent_key].shape[1]
-            combined_batch[ego_key] = torch.cat((batch[ego_key],batch[agent_key].reshape(size_dim0,*batch[agent_key].shape[2:])),dim=0)
+            combined_batch[ego_key] = torch.cat((batch[ego_key], batch[agent_key].reshape(
+                size_dim0, *batch[agent_key].shape[2:])), dim=0)
         else:
             size_dim0 = mask.sum()
-            combined_batch[ego_key] = torch.cat((batch[ego_key],batch[agent_key][mask].reshape(size_dim0,*batch[agent_key].shape[2:])),dim=0)
+            combined_batch[ego_key] = torch.cat((batch[ego_key], batch[agent_key][mask].reshape(
+                size_dim0, *batch[agent_key].shape[2:])), dim=0)
     return combined_batch
