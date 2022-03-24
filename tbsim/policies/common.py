@@ -1,18 +1,10 @@
 import numpy as np
-import pytorch_lightning as pl
 import torch
-from typing import Tuple, Dict
 from copy import deepcopy
 
-from tbsim.envs.base import BatchedEnv, BaseEnv
 import tbsim.utils.tensor_utils as TensorUtils
-import tbsim.dynamics as dynamics
-from tbsim.utils.l5_utils import get_current_states, get_drivable_region_map
-from tbsim.algos.algo_utils import optimize_trajectories
-from tbsim.utils.geometry_utils import transform_points_tensor, calc_distance_map
+from tbsim.utils.geometry_utils import transform_points_tensor
 from l5kit.geometry import transform_points
-from tbsim.utils.timer import Timers
-from tbsim.utils.planning_utils import ego_sample_planning
 
 
 class Trajectory(object):
