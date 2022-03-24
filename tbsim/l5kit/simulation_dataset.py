@@ -6,9 +6,10 @@ import numpy as np
 
 from l5kit.data import filter_agents_by_frames, PERCEPTION_LABEL_TO_INDEX
 from l5kit.dataset import EgoDataset
-from l5kit.geometry.transform import yaw_as_rotation33
+from l5kit.geometry.transform import yaw_as_rotation33, transform_point
 from l5kit.simulation.utils import disable_agents, get_frames_subset, insert_agent
 
+from tbsim.utils.l5_utils import get_drivable_region_map
 
 @dataclass
 class SimulationConfig:
@@ -82,7 +83,10 @@ class SimulationDataset:
                 agents = dataset_zarr.agents
                 frame_agents = filter_agents_by_frames(frame, agents)[0]
                 frame_agents = self._filter_agents(scene_idx, frame_agents, ego_pos)
+                frame_agents = self._filter_drivable_region(scene_idx, 0, frame_agents=frame_agents)
                 disable_agents(dataset_zarr, allowlist=frame_agents["track_id"])
+        else:
+            raise Exception("TODO")
 
         # keep track of original dataset
         self.recorded_scene_dataset_batch = deepcopy(self.scene_dataset_batch)
@@ -204,12 +208,24 @@ class SimulationDataset:
         for agent in frame_agents:
             track_id = int(agent["track_id"])
             el = dataset.get_frame(scene_index=0, state_index=state_index, track_id=track_id)
+
             # we replace the scene_index here to match the real one (otherwise is 0)
             el["scene_index"] = scene_index
             agents_dict[scene_index, track_id] = el
-
         self._update_agent_infos(scene_index, frame_agents["track_id"])
         return agents_dict
+
+    def _filter_drivable_region(self, scene_index: int, state_index: int, frame_agents: np.ndarray):
+        dataset = self.scene_dataset_batch[scene_index]
+        drivable_agent_mask = np.zeros(len(frame_agents), dtype=np.bool)
+        for i, agent in enumerate(frame_agents):
+            track_id = int(agent["track_id"])
+            el = dataset.get_frame(scene_index=0, state_index=state_index, track_id=track_id)
+            raster_pos = transform_point(el["centroid"], el["raster_from_world"])
+            drivable_region = get_drivable_region_map(el["image"])
+            if drivable_region[int(raster_pos[1]), int(raster_pos[0])] > 0:
+                drivable_agent_mask[i] = True
+        return frame_agents[drivable_agent_mask]
 
     def _update_agent_infos(self, scene_index: int, agent_track_ids: np.ndarray) -> None:
         """Update tracked agents object such that:

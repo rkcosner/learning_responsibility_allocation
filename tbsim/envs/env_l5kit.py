@@ -230,19 +230,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         if self.generate_agent_obs:
             agent_obs = self._current_scene_dataset.rasterise_agents_frame_batch(
                 self._frame_index)
-            # if self._current_agent_track_ids is None:
-            #     agent_obs = self._current_scene_dataset.rasterise_agents_frame_batch(self._frame_index)
-            #     self._current_agent_track_ids = agent_obs.keys()  # [scene_index, track_id]
-            # else:
-            #     agent_obs = OrderedDict()
-            #     for scene_index, track_id in self._current_agent_track_ids:
-            #         ao = self._get_observation_by_index(
-            #             scene_index=scene_index,
-            #             frame_index=self._frame_index,
-            #             agent_track_ids=[track_id],
-            #             collate=False
-            #         )
-            #         agent_obs.update(ao)
 
             if len(agent_obs) > 0:
                 agent_obs = default_collate(list(agent_obs.values()))
