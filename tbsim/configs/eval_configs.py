@@ -10,6 +10,7 @@ class EvaluationConfig(Dict):
         self.seed = 0
         self.num_scenes_per_batch = 4
         self.num_scenes_to_evaluate = 100
+        self.num_simulation_steps = 200
         self.ego_only = False
         self.n_step_action = 5
         self.ckpt_dir = "checkpoints/"

@@ -176,6 +176,7 @@ def run_evaluation(eval_cfg):
     env, modality_shapes = create_env(
         sim_cfg,
         num_scenes_per_batch=eval_cfg.num_scenes_per_batch,
+        num_simulation_steps=eval_cfg.num_simulation_steps,
         seed=eval_cfg.seed
     )
 
