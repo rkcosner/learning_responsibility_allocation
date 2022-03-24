@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 import torch.nn as nn
 from copy import deepcopy
 
-from tbsim.external.l5_ego_dataset import ExperienceIterableWrapper
+from tbsim.l5kit.l5_ego_dataset import ExperienceIterableWrapper
 from tbsim.utils.config_utils import get_experiment_config_from_file
 from tbsim.configs.base import ExperimentConfig
 from tbsim.envs.env_l5kit import EnvL5KitSimulation

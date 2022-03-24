@@ -11,7 +11,7 @@ from l5kit.data import LocalDataManager, ChunkedDataset
 from l5kit.dataset import EgoDataset
 from l5kit.rasterization import build_rasterizer
 
-from tbsim.external.vectorizer import build_vectorizer
+from tbsim.l5kit.vectorizer import build_vectorizer
 import tbsim.utils.geometry_utils as GeoUtils
 from tbsim.algos.l5kit_algos import L5TrafficModel, L5VAETrafficModel, L5TrafficModelGC, SpatialPlanner
 from tbsim.algos.multiagent_algos import MATrafficModel
@@ -22,7 +22,7 @@ from tbsim.utils.env_utils import rollout_episodes
 from tbsim.policies.wrappers import PolicyWrapper, SamplingPolicyWrapper, HierarchicalSamplerWrapper, RolloutWrapper
 
 from tbsim.utils.tensor_utils import to_torch, to_numpy
-from tbsim.external.l5_ego_dataset import EgoDatasetMixed, EgoReplayBufferMixed, ExperienceIterableWrapper
+from tbsim.l5kit.l5_ego_dataset import EgoDatasetMixed, EgoReplayBufferMixed, ExperienceIterableWrapper
 from tbsim.utils.experiment_utils import get_checkpoint
 from tbsim.utils.vis_utils import build_visualization_rasterizer_l5kit
 from imageio import get_writer

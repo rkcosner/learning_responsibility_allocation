@@ -12,8 +12,8 @@ from l5kit.kinematic import Perturbation
 from l5kit.rasterization import Rasterizer, RenderContext
 from l5kit.sampling.agent_sampling import generate_agent_sample
 from l5kit.sampling.agent_sampling_vectorized import generate_agent_sample_vectorized
-from tbsim.external.agent_sampling_mixed import generate_agent_sample_mixed
-from tbsim.external.vectorizer import Vectorizer
+from tbsim.l5kit.agent_sampling_mixed import generate_agent_sample_mixed
+from tbsim.l5kit.vectorizer import Vectorizer
 from l5kit.dataset.ego import BaseEgoDataset
 from tbsim.utils.timer import Timers
 

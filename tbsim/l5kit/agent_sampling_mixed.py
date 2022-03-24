@@ -1,7 +1,7 @@
 from typing import Optional
 
 import numpy as np
-from tbsim.external.vectorizer import Vectorizer
+from tbsim.l5kit.vectorizer import Vectorizer
 
 from l5kit.data import filter_agents_by_labels, PERCEPTION_LABEL_TO_INDEX
 from l5kit.data.filter import filter_agents_by_track_id

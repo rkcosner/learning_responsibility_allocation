@@ -4,7 +4,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from tbsim.utils.tensor_utils import map_ndarray
 from tbsim.utils.l5_utils import get_last_available_index
-from tbsim.external.vis_rasterizer import VisualizationRasterizer, cv2_subpixel, CV2_SUB_VALUES
+from tbsim.l5kit.vis_rasterizer import VisualizationRasterizer, cv2_subpixel, CV2_SUB_VALUES
 from tbsim.utils.geometry_utils import get_box_world_coords_np
 from l5kit.rasterization.render_context import RenderContext
 from l5kit.configs.config import load_metadata

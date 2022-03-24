@@ -15,8 +15,8 @@ from l5kit.rasterization import Rasterizer, RenderContext
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.utils.vis_utils import render_state_l5kit_agents_view, render_state_l5kit_ego_view
 from tbsim.envs.base import BaseEnv, BatchedEnv, SimulationException
-from tbsim.external.simulation_dataset import SimulationDataset, SimulationConfig
-from tbsim.utils.env_utils import RolloutAction, Action
+from tbsim.l5kit.simulation_dataset import SimulationDataset, SimulationConfig
+from tbsim.policies.common import RolloutAction, Action
 import tbsim.envs.env_metrics as EnvMetrics
 from tbsim.utils.timer import Timers
 
