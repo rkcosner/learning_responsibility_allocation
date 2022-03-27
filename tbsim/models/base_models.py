@@ -823,17 +823,15 @@ class RNNTrajectoryEncoder(nn.Module):
             )
             self._feature_dim = feature_dim
         else:
-            self.mlp = None
+            self.mlp = nn.Identity()
             self._feature_dim = rnn_hidden_size
 
     def output_shape(self, input_shape=None):
-        num_frame = 1 if input_shape is None else input_shape[0]
-        return [num_frame, self._feature_dim]
+        return [self._feature_dim]
 
     def forward(self, input_trajectory):
         traj_feat = self.lstm(input_trajectory)[0][:, -1, :]
-        if self.mlp is not None:
-            traj_feat = TensorUtils.time_distributed(traj_feat, op=self.mlp)
+        traj_feat = self.mlp(traj_feat)
         return traj_feat
 
 

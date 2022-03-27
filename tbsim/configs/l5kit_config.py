@@ -262,6 +262,17 @@ class L5RasterizedGCConfig(L5RasterizedPlanningConfig):
         self.decoder.layer_dims = (128, 128)
 
 
+class EBMMetricConfig(L5RasterizedPlanningConfig):
+    def __init__(self):
+        super(EBMMetricConfig, self).__init__()
+        self.name = "l5_ebm"
+        self.map_feature_dim = 64
+        self.traj_feature_dim = 32
+        self.embedding_dim = 32
+        self.embed_layer_dims = (128, 64)
+        self.loss_weights.infoNCE = 1.0
+
+
 class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(L5RasterizedVAEConfig, self).__init__()

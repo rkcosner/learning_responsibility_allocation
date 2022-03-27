@@ -14,6 +14,7 @@ from tbsim.configs.l5kit_config import (
     L5KitMixedSemanticMapEnvConfig,
     MARasterizedPlanningConfig,
     L5RasterizedVAEConfig,
+    EBMMetricConfig
 )
 
 from tbsim.configs.l5kit_online_config import (
@@ -84,6 +85,13 @@ EXP_CONFIG_REGISTRY["l5_sp_hierarchical"] = ExperimentConfig(
     env_config=L5KitMixedSemanticMapEnvConfig(),
     algo_config=SelfPlayHierarchicalConfig(),
     registered_name="l5_sp_hierarchical",
+)
+
+EXP_CONFIG_REGISTRY["l5_ebm"] = ExperimentConfig(
+    train_config=L5KitMixedTrainConfig(),
+    env_config=L5KitMixedSemanticMapEnvConfig(),
+    algo_config=EBMMetricConfig(),
+    registered_name="l5_ebm",
 )
 
 
