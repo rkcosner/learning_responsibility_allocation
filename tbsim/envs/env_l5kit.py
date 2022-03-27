@@ -30,6 +30,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             seed=0,
             prediction_only=False,
             compute_metrics=False,
+            metrics=None,
             skimp_rollout=False,
             renderer=None
     ):
@@ -81,13 +82,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         self.timers = Timers()
 
-        self._metrics = None
-        if compute_metrics:
-            self._metrics = dict(
-                all_off_road_rate=EnvMetrics.OffRoadRate(),
-                # agents_off_road_rate=EnvMetrics.OffRoadRate(),
-                all_collision_rate=EnvMetrics.CollisionRate()
-            )
+        self._metrics = dict() if metrics is None or not compute_metrics else metrics
         self._skimp = skimp_rollout
 
     def reset(self, scene_indices: List = None):

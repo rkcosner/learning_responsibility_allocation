@@ -15,12 +15,15 @@ from l5kit.rasterization import build_rasterizer
 
 from tbsim.l5kit.vectorizer import build_vectorizer
 from tbsim.algos.l5kit_algos import L5TrafficModel, L5VAETrafficModel, L5TrafficModelGC, SpatialPlanner
+from tbsim.algos.metric_algos import EBMMetric
 from tbsim.algos.multiagent_algos import MATrafficModel
 from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.configs.eval_configs import EvaluationConfig
 from tbsim.envs.env_l5kit import EnvL5KitSimulation, BatchedEnv
 from tbsim.utils.config_utils import translate_l5kit_cfg, get_experiment_config_from_file
 from tbsim.utils.env_utils import rollout_episodes
+import tbsim.envs.env_metrics as EnvMetrics
+
 from tbsim.policies.wrappers import (
     PolicyWrapper,
     HierarchicalWrapper,
@@ -143,6 +146,21 @@ def create_env(sim_cfg, num_scenes_per_batch, num_simulation_steps=200, skimp_ro
     sim_cfg.env.simulation.disable_new_agents = True
     sim_cfg.env.generate_agent_obs = True
 
+    ckpt_path, cfg_path = get_checkpoint("2759937", "4999_")
+    metric_cfg = get_experiment_config_from_file(cfg_path, locked=True)
+    metric_algo = EBMMetric.load_from_checkpoint(
+        checkpoint_path=ckpt_path,
+        algo_config=metric_cfg.algo,
+        modality_shapes=modality_shapes
+    )
+
+
+    metrics = dict(
+        all_off_road_rate=EnvMetrics.OffRoadRate(),
+        all_collision_rate=EnvMetrics.CollisionRate(),
+        all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo)
+    )
+
     env = EnvL5KitSimulation(
         sim_cfg.env,
         dataset=env_dataset,
@@ -151,6 +169,7 @@ def create_env(sim_cfg, num_scenes_per_batch, num_simulation_steps=200, skimp_ro
         prediction_only=False,
         renderer=render_rasterizer,
         compute_metrics=True,
+        metrics=metrics,
         skimp_rollout=skimp_rollout
     )
     return env, modality_shapes
@@ -302,6 +321,13 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--num_simulation_steps",
+        default=None,
+        type=int,
+        help="Number of env steps to simulate"
+    )
+
+    parser.add_argument(
         "--render",
         action="store_true",
         default=None,
@@ -324,6 +350,9 @@ if __name__ == "__main__":
 
     if args.num_scenes_to_evaluate is not None:
         cfg.num_scenes_to_evaluate = args.num_scenes_to_evaluate
+
+    if args.num_simulation_steps is not None:
+        cfg.num_simulation_steps = args.num_simulation_steps
 
     if args.render is not None:
         cfg.render_to_video = args.render

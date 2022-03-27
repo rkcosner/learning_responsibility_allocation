@@ -251,7 +251,7 @@ class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
         self.use_rotated_roi = False
         self.use_transformer = True
         self.roi_layer_key = "layer4"
-        self.use_GAN = True
+        self.use_GAN = False
 
 
 class L5RasterizedGCConfig(L5RasterizedPlanningConfig):
@@ -266,11 +266,12 @@ class EBMMetricConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(EBMMetricConfig, self).__init__()
         self.name = "l5_ebm"
+        self.negative_source = "permute"
         self.map_feature_dim = 64
         self.traj_feature_dim = 32
         self.embedding_dim = 32
         self.embed_layer_dims = (128, 64)
-        self.loss_weights.infoNCE = 1.0
+        self.loss_weights.infoNCE_loss = 1.0
 
 
 class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):

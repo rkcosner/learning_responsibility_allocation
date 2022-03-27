@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 import pytorch_lightning as pl
 
-from tbsim.models.learned_metrics import EBM
+from tbsim.models.learned_metrics import PermuteEBM
 import tbsim.utils.tensor_utils as TensorUtils
 
 
@@ -22,7 +22,7 @@ class EBMMetric(pl.LightningModule):
         self._do_log = do_log
         assert modality_shapes["image"][0] == 15
 
-        self.nets["ebm"] = EBM(
+        self.nets["ebm"] = PermuteEBM(
             model_arch=algo_config.model_architecture,
             input_image_shape=modality_shapes["image"],  # [C, H, W]
             map_feature_dim=algo_config.map_feature_dim,
@@ -36,7 +36,7 @@ class EBMMetric(pl.LightningModule):
         return {"valLoss": "val/losses_infoNCE_loss"}
 
     def forward(self, obs_dict):
-        return self.nets["policy"](obs_dict)
+        return self.nets["ebm"](obs_dict)
 
     def _compute_metrics(self, pred_batch, data_batch):
         scores = pred_batch["scores"]
@@ -104,5 +104,8 @@ class EBMMetric(pl.LightningModule):
             weight_decay=optim_params["regularization"]["L2"],
         )
 
-    def get_score(self, obs_dict):
-        return torch.exp(self.forward(obs_dict)["scores"])
+    def get_metrics(self, obs_dict):
+        preds = self.forward(obs_dict)
+        return dict(
+            exp_score=torch.exp(preds["scores"])
+        )

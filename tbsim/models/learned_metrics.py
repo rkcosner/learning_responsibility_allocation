@@ -7,7 +7,7 @@ import tbsim.models.base_models as base_models
 import tbsim.utils.tensor_utils as TensorUtils
 
 
-class EBM(nn.Module):
+class PermuteEBM(nn.Module):
     """Raster-based model for planning.
     """
 
@@ -81,6 +81,6 @@ class EBM(nn.Module):
         labels = torch.arange(bs).to(scores.device)
         loss = nn.CrossEntropyLoss()(scores, labels)
 
-        losses = dict(infoNCE=loss)
+        losses = dict(infoNCE_loss=loss)
 
         return losses
