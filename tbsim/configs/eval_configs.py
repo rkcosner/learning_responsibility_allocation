@@ -16,6 +16,7 @@ class EvaluationConfig(Dict):
         self.ckpt_dir = "checkpoints/"
 
         self.render_to_video = False
+        self.data_to_disk = True
         self.results_dir = "results/"
 
         self.policy.mask_drivable = True

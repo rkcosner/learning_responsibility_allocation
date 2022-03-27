@@ -53,14 +53,14 @@ def rollout_episodes(
                 obs = env.get_observation()
             with timers.timed("to_torch"):
                 device = policy.device if device is None else device
-                obs = TensorUtils.to_torch(obs, device=device)
+                obs_torch = TensorUtils.to_torch(obs, device=device)
 
             if counter < skip_first_n:
                 # skip the first N steps to warm up environment state (velocity, etc.)
-                env.step(RolloutAction(), num_steps_to_take=1, render=False)
+                env.step(env.get_gt_action(obs), num_steps_to_take=1, render=False)
             else:
                 with timers.timed("network"):
-                    action = policy.get_action(obs)
+                    action = policy.get_action(obs_torch)
 
                 with timers.timed("env_step"):
                     ims = env.step(

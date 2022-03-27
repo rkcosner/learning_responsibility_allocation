@@ -223,8 +223,10 @@ class SimulationDataset:
             el = dataset.get_frame(scene_index=0, state_index=state_index, track_id=track_id)
             raster_pos = transform_point(el["centroid"], el["raster_from_world"])
             drivable_region = get_drivable_region_map(el["image"])
-            if drivable_region[int(raster_pos[1]), int(raster_pos[0])] > 0:
-                drivable_agent_mask[i] = True
+            h, w = drivable_region.shape[:2]
+            in_bound = 0 <= int(raster_pos[0]) < w and 0 <= int(raster_pos[1]) < h
+            drivable = drivable_region[int(raster_pos[1]), int(raster_pos[0])] > 0
+            drivable_agent_mask[i] = drivable and in_bound
         return frame_agents[drivable_agent_mask]
 
     def _update_agent_infos(self, scene_index: int, agent_track_ids: np.ndarray) -> None:

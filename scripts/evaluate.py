@@ -156,6 +156,19 @@ def create_env(sim_cfg, num_scenes_per_batch, num_simulation_steps=200, skimp_ro
     return env, modality_shapes
 
 
+def dump_episode_buffer(buffer, scene_index, h5_path):
+    import h5py
+    h5_file = h5py.File(h5_path, "a")
+
+    for si, scene_buffer in zip(scene_index, buffer):
+        for mk in scene_buffer:
+            for k in scene_buffer[mk]:
+                h5key = "/{}/{}/{}".format(si, mk, k)
+                h5_file.create_dataset(h5key, data=scene_buffer[mk][k])
+    h5_file.close()
+    print("scene {} written to {}".format(scene_index, h5_path))
+
+
 def run_evaluation(eval_cfg):
     print(eval_cfg)
 
@@ -233,6 +246,14 @@ def run_evaluation(eval_cfg):
                 for im in scene_images:
                     writer.append_data(im)
                 writer.close()
+
+        if eval_cfg.data_to_disk:
+            dump_episode_buffer(
+                info["buffer"],
+                info["scene_index"],
+                h5_path=os.path.join(eval_cfg.results_dir, "data.hdf5")
+            )
+
 
 
 if __name__ == "__main__":

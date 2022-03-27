@@ -77,9 +77,11 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self._ego_states = dict()
         self._agents_states = dict()
 
+        self.episode_buffer = []
+
         self.timers = Timers()
 
-        self._metrics = dict()
+        self._metrics = None
         if compute_metrics:
             self._metrics = dict(
                 all_off_road_rate=EnvMetrics.OffRoadRate(),
@@ -127,6 +129,10 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             self._ego_states[k] = []
             self._agents_states[k] = []
 
+        self.episode_buffer = []
+        for _ in range(self.num_instances):
+            self.episode_buffer.append(dict(ego_obs=dict(), ego_action=dict(), agents_obs=dict(), agents_action=dict()))
+
     def get_random_action(self):
         ac = self._npr.randn(self._num_scenes, 1, 3)
         ego = Action(
@@ -139,6 +145,17 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             yaws=ac[:, :, 2:3]
         )
 
+        return RolloutAction(ego=ego, agents=agents)
+
+    def get_gt_action(self, obs):
+        ego = Action(
+            positions=obs["ego"]["target_positions"],
+            yaws=obs["ego"]["target_yaws"]
+        )
+        agents = Action(
+            positions=obs["agents"]["target_positions"],
+            yaws=obs["agents"]["target_yaws"]
+        )
         return RolloutAction(ego=ego, agents=agents)
 
     @property
@@ -154,8 +171,14 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         return self._num_total_scenes
 
     def get_info(self):
+        for scene_buffer in self.episode_buffer:
+            for mk in scene_buffer:
+                for k in scene_buffer[mk]:
+                    scene_buffer[mk][k] = np.stack(scene_buffer[mk][k])
+
         return {
-            "l5_sim_states": self._get_l5_sim_states(),
+            # "l5_sim_states": self._get_l5_sim_states(),
+            "buffer": self.episode_buffer,
             "scene_index": self.current_scene_indices,
             "experience": self.get_episode_experience()
         }
@@ -337,17 +360,41 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             else:
                 raise KeyError("Invalid metrics name {}".format(k))
 
+    def _add_per_step_obs_action(self, obs, action):
+        action_dict = action.to_dict()
+        # only record the first action
+        ego_action = TensorUtils.map_ndarray(action_dict["ego"], lambda x: x[:, 0])
+        agents_action = TensorUtils.map_ndarray(action_dict["agents"], lambda x: x[:, 0])
+        for i, si in enumerate(self.current_scene_indices):
+            state = dict()
+            ego_mask = obs["ego"]["scene_index"] == si
+            # state["ego_obs"] = TensorUtils.map_ndarray(obs["ego"], lambda x: x[ego_mask])
+            state["ego_action"] = TensorUtils.map_ndarray(ego_action, lambda x: x[ego_mask])
+            agents_mask = obs["agents"]["scene_index"] == si
+            # state["agents_obs"] = TensorUtils.map_ndarray(obs["agents"], lambda x: x[agents_mask])
+            state["agents_action"] = TensorUtils.map_ndarray(agents_action, lambda x: x[agents_mask])
+            for mk in state:
+                for k in state[mk]:
+                    if k not in self.episode_buffer[i][mk]:
+                        self.episode_buffer[i][mk][k] = []
+                    if k == "image":
+                        state[mk][k] = (state[mk][k] * 255.).astype(np.uint8)
+                    self.episode_buffer[i][mk][k].append(state[mk][k])
+
+
     def _step(self, step_actions: RolloutAction):
         obs = self.get_observation()
-        self.timers.tic("metrics")
+
+        # record metrics
         self._add_per_step_metrics(obs)
-        self.timers.toc("metrics")
+
+        # record observations and actions
+        self._add_per_step_obs_action(obs, step_actions)
 
         should_update = self._frame_index + 1 < self.horizon and not self._prediction_only
         self.timers.tic("update")
         if step_actions.has_ego:
             ego_obs = dict(obs["ego"])
-            ego_obs.pop("image", None)  # reduce memory consumption
             if should_update:
                 # update the next frame's ego position and orientation using control input
                 ClosedLoopSimulator.update_ego(
@@ -366,7 +413,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         if step_actions.has_agents:
             agent_obs = dict(obs["agents"])
-            agent_obs.pop("image", None)  # reduce memory consumption
             if should_update:
                 # update the next frame's agent positions and orientations using control input
                 ClosedLoopSimulator.update_agents(
@@ -390,7 +436,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             self._done = True
         else:
             self._frame_index += 1
-        # print(self.timers)
 
     def set_dataset_skimp_mode(self, skimp):
         for scene_ds in self._current_scene_dataset.scene_dataset_batch.values():
