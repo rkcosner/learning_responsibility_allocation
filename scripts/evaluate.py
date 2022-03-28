@@ -173,7 +173,7 @@ def create_env(
             checkpoint_path=ckpt_path,
             algo_config=metric_cfg.algo,
             modality_shapes=modality_shapes
-        ).eval.to(device)
+        ).eval().to(device)
 
         metrics = dict(
             all_off_road_rate=EnvMetrics.OffRoadRate(),
@@ -252,10 +252,11 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
         replace=False
     )
 
-    iter_i = 0
+    scene_i = 0
+    obs_to_torch = eval_cfg.eval_class not in ["GroundTruth", "ReplayAction"]
 
     result_stats = None
-    while iter_i < eval_cfg.num_scenes_to_evaluate:
+    while scene_i < eval_cfg.num_scenes_to_evaluate:
         stats, info, renderings = rollout_episodes(
             env,
             rollout_policy,
@@ -263,9 +264,10 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
             n_step_action=eval_cfg.n_step_action,
             render=render_to_video,
             skip_first_n=1,
-            scene_indices=eval_scenes[iter_i: iter_i + eval_cfg.num_scenes_per_batch],
+            scene_indices=eval_scenes[scene_i: scene_i + eval_cfg.num_scenes_per_batch],
+            obs_to_torch=obs_to_torch
         )
-        iter_i += eval_cfg.num_scenes_per_batch
+        scene_i += eval_cfg.num_scenes_per_batch
 
         print(info["scene_index"])
         print(stats)
@@ -325,7 +327,7 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--results_dir",
+        "--results_root_dir",
         type=str,
         default=None,
         help="Directory to save results and videos"
@@ -377,16 +379,14 @@ if __name__ == "__main__":
     if args.num_scenes_per_batch is not None:
         cfg.num_scenes_per_batch = args.num_scenes_per_batch
 
-    if args.results_dir is not None:
-        cfg.results_dir = args.results_dir
-
     if args.dataset_path is not None:
         cfg.dataset_path = args.dataset_path
 
     if cfg.name is None:
         cfg.name = cfg.eval_class
 
-    cfg.results_dir = os.path.join(cfg.results_dir, cfg.name)
+    if args.results_root_dir is not None:
+        cfg.results_dir = os.path.join(args.results_root_dir, cfg.name)
     cfg.experience_hdf5_path = os.path.join(cfg.results_dir, "data.hdf5")
 
     data_to_disk = False

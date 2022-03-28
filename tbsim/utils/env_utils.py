@@ -18,6 +18,7 @@ def rollout_episodes(
     render=False,
     scene_indices=None,
     device=None,
+    obs_to_torch=True
 ):
     """
     Rollout an environment for a number of episodes
@@ -52,8 +53,11 @@ def rollout_episodes(
             with timers.timed("obs"):
                 obs = env.get_observation()
             with timers.timed("to_torch"):
-                device = policy.device if device is None else device
-                obs_torch = TensorUtils.to_torch(obs, device=device)
+                if obs_to_torch:
+                    device = policy.device if device is None else device
+                    obs_torch = TensorUtils.to_torch(obs, device=device)
+                else:
+                    obs_torch = obs
 
             if counter < skip_first_n:
                 # skip the first N steps to warm up environment state (velocity, etc.)

@@ -239,76 +239,78 @@ class LearnedMetric(EnvMetrics):
         self.metric_algo = metric_algo
         self.traj_len = metric_algo.algo_config.future_num_frames
         self.state_buffer = []
-        self._all_scene_index = None
+        self.total_steps = 0
 
     def reset(self):
         self.state_buffer = []
         self._per_step = []
         self._per_step_mask = []
-        self._all_scene_index = None
+        self.total_steps = 0
 
     def __len__(self):
-        return len(self.state_buffer)
+        return self.total_steps
 
     def add_step(self, state_info: dict, all_scene_index: np.ndarray):
+        state_info = dict(state_info)
+        state_info["image"] = (state_info["image"] * 255.).astype(np.uint8)
         self.state_buffer.append(state_info)
-        self._all_scene_index = all_scene_index
+        while len(self.state_buffer) > self.traj_len + 1:
+            self.state_buffer.pop(0)
+        if len(self.state_buffer) == self.traj_len + 1:
+            step_metrics = self.compute_per_step(self.state_buffer, all_scene_index)
+            self._per_step.append(step_metrics)
 
-    def get_episode_metrics(self, state_buffer=None, traj_len=None, all_scene_index=None):
-        if traj_len is None:
-            traj_len = self.metric_algo.algo_config.future_num_frames
+        self.total_steps += 1
 
-        if state_buffer is None:
-            state_buffer = self.state_buffer
+    def compute_per_step(self, state_buffer, all_scene_index):
+        assert len(state_buffer) == self.traj_len + 1
 
-        if all_scene_index is None:
-            all_scene_index = self._all_scene_index
+        # assemble score function input
+        state = dict(state_buffer[0])  # avoid changing the original state_dict
+        state["image"] = (state["image"] / 255.).astype(np.float32)
+        agent_from_world = state["agent_from_world"]
+        yaw_world = state["yaw"]
 
-        num_steps = len(state_buffer) - traj_len
+        # transform traversed trajectories into the ego frame of a given state
+        traj_inds = range(1, self.traj_len + 1)
+        traj_pos = [state_buffer[traj_i]["centroid"] for traj_i in traj_inds]
+        traj_yaw = [state_buffer[traj_i]["yaw"] for traj_i in traj_inds]
+        traj_pos = np.stack(traj_pos, axis=1)  # [B, T, 2]
+        traj_yaw = np.stack(traj_yaw, axis=1)  # [B, T]
+        assert traj_pos.shape[0] == traj_yaw.shape[0]
 
-        if num_steps <= 0:
-            print("WARNING: LearnedScore metric needs trajectories longer than {} to compute".format(traj_len))
-            return None
+        agent_traj_pos = transform_points(points=traj_pos, transf_matrix=agent_from_world)
+        agent_traj_yaw = angular_distance(traj_yaw, yaw_world[:, None])
 
+        state["target_positions"] = agent_traj_pos
+        state["target_yaws"] = agent_traj_yaw[:, :, None]
+
+        state_torch = TensorUtils.to_torch(state, self.metric_algo.device)
+        with torch.no_grad():
+            metrics = self.metric_algo.get_metrics(state_torch)
+        metrics= TensorUtils.to_numpy(metrics)
+
+        step_metrics = dict()
+        for k in metrics:
+            met, met_mask = step_aggregate_per_scene(metrics[k], state["scene_index"], all_scene_index)
+            assert np.all(met_mask > 0)  # since we will always use it for all agents
+            step_metrics[k] = met
+        return step_metrics
+
+    def get_episode_metrics(self):
         ep_metrics = dict()
 
-        for state_i in range(num_steps):
-            # assemble score function input
-            state = dict(state_buffer[state_i])  # avoid changing the original state_dict
-            agent_from_world = state["agent_from_world"]
-            yaw_world = state["yaw"]
-
-            # transform traversed trajectories into the ego frame of a given state
-            traj_inds = range(state_i + 1, state_i + traj_len + 1)
-            traj_pos = [state_buffer[traj_i]["centroid"] for traj_i in traj_inds]
-            traj_yaw = [state_buffer[traj_i]["yaw"] for traj_i in traj_inds]
-            traj_pos = np.stack(traj_pos, axis=1)  # [B, T, 2]
-            traj_yaw = np.stack(traj_yaw, axis=1)  # [B, T]
-            assert traj_pos.shape[0] == traj_yaw.shape[0]
-
-            agent_traj_pos = transform_points(points=traj_pos, transf_matrix=agent_from_world)
-            agent_traj_yaw = angular_distance(traj_yaw, yaw_world[:, None])
-
-            state["target_positions"] = agent_traj_pos
-            state["target_yaws"] = agent_traj_yaw[:, :, None]
-
-            state_torch = TensorUtils.to_torch(state, self.metric_algo.device)
-            with torch.no_grad():
-                metrics = self.metric_algo.get_metrics(state_torch)
-            metrics= TensorUtils.to_numpy(metrics)
-
-            for k in metrics:
+        for step_metrics in self._per_step:
+            for k in step_metrics:
                 if k not in ep_metrics:
                     ep_metrics[k] = []
-                met, met_mask = step_aggregate_per_scene(metrics[k], state["scene_index"], all_scene_index)
-                assert np.all(met_mask > 0)  # since we will always use it for all agents
-                ep_metrics[k].append(met)
+                ep_metrics[k].append(step_metrics[k])
 
         ep_metrics_agg = dict()
         for k in ep_metrics:
             met = np.stack(ep_metrics[k], axis=1)  # [num_scene, T, ...]
             ep_metrics_agg[k] = np.mean(met, axis=1)
             for met_horizon in [10, 50, 100, 150]:
-                if num_steps >= met_horizon:
+                if met.shape[1] >= met_horizon:
                     ep_metrics_agg[k + "_@{}".format(met_horizon)] = np.mean(met[:, :met_horizon], axis=1)
         return ep_metrics_agg
