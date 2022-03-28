@@ -107,5 +107,5 @@ class EBMMetric(pl.LightningModule):
     def get_metrics(self, obs_dict):
         preds = self.forward(obs_dict)
         return dict(
-            exp_score=torch.exp(preds["scores"])
+            scores=preds["scores"]
         )
