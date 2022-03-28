@@ -20,6 +20,10 @@ from tbsim.algos.selfplay_algos import (
     SelfPlayHierarchical
 )
 
+from tbsim.algos.metric_algos import (
+    EBMMetric
+)
+
 def algo_factory(config: ExperimentConfig, modality_shapes: dict, data_module: LightningDataModule, **kwargs):
     """
     A factory for creating training algos
@@ -59,6 +63,8 @@ def algo_factory(config: ExperimentConfig, modality_shapes: dict, data_module: L
         algo = L5TransformerGANTrafficModel(algo_config=algo_config)
     elif algo_name == "sp_hierarchical":
         algo = SelfPlayHierarchical(cfg=config, data_module=data_module)
+    elif algo_name == "l5_ebm":
+        algo = EBMMetric(algo_config=algo_config, modality_shapes=modality_shapes)
     else:
         raise NotImplementedError("{} is not a valid algorithm" % algo_name)
     return algo

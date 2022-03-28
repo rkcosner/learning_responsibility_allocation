@@ -531,7 +531,7 @@ class L5VAETrafficModel(pl.LightningModule):
 
     def get_action(self, obs_dict, sample=True, num_action_samples=1, plan=None, **kwargs):
         obs_dict = dict(obs_dict)
-        if "plan" is not None and self.algo_config.goal_conditional:
+        if plan is not None and self.algo_config.goal_conditional:
             assert isinstance(plan, Plan)
             obs_dict["target_positions"] = plan.positions
             obs_dict["target_yaws"] = plan.yaws

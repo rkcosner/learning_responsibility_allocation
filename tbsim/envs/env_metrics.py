@@ -2,6 +2,9 @@ import abc
 import numpy as np
 from typing import List, Dict
 
+import torch
+from l5kit.geometry import transform_points, angular_distance
+
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.l5_utils as L5Utils
 from tbsim.utils.geometry_utils import transform_points_tensor, detect_collision, CollisionType
@@ -83,6 +86,7 @@ def masked_average_per_episode(met, met_mask):
     Returns:
         avg_met (np.ndarray): [num_scene]
     """
+    assert met.shape == met_mask.shape
     return (met * met_mask).sum(axis=1) / (met_mask.sum(axis=1) + 1e-8)
 
 
@@ -96,6 +100,7 @@ def masked_max_per_episode(met, met_mask):
     Returns:
         avg_max (np.ndarray): [num_scene]
     """
+    assert met.shape == met_mask.shape
     return (met * met_mask).max(axis=1)
 
 
@@ -226,3 +231,86 @@ class CollisionRate(EnvMetrics):
             )
             met_all[str(coll_type)] = met * met_mask
         return met_all
+
+
+class LearnedMetric(EnvMetrics):
+    def __init__(self, metric_algo):
+        super(LearnedMetric, self).__init__()
+        self.metric_algo = metric_algo
+        self.traj_len = metric_algo.algo_config.future_num_frames
+        self.state_buffer = []
+        self.total_steps = 0
+
+    def reset(self):
+        self.state_buffer = []
+        self._per_step = []
+        self._per_step_mask = []
+        self.total_steps = 0
+
+    def __len__(self):
+        return self.total_steps
+
+    def add_step(self, state_info: dict, all_scene_index: np.ndarray):
+        state_info = dict(state_info)
+        state_info["image"] = (state_info["image"] * 255.).astype(np.uint8)
+        self.state_buffer.append(state_info)
+        while len(self.state_buffer) > self.traj_len + 1:
+            self.state_buffer.pop(0)
+        if len(self.state_buffer) == self.traj_len + 1:
+            step_metrics = self.compute_per_step(self.state_buffer, all_scene_index)
+            self._per_step.append(step_metrics)
+
+        self.total_steps += 1
+
+    def compute_per_step(self, state_buffer, all_scene_index):
+        assert len(state_buffer) == self.traj_len + 1
+
+        # assemble score function input
+        state = dict(state_buffer[0])  # avoid changing the original state_dict
+        state["image"] = (state["image"] / 255.).astype(np.float32)
+        agent_from_world = state["agent_from_world"]
+        yaw_world = state["yaw"]
+
+        # transform traversed trajectories into the ego frame of a given state
+        traj_inds = range(1, self.traj_len + 1)
+        traj_pos = [state_buffer[traj_i]["centroid"] for traj_i in traj_inds]
+        traj_yaw = [state_buffer[traj_i]["yaw"] for traj_i in traj_inds]
+        traj_pos = np.stack(traj_pos, axis=1)  # [B, T, 2]
+        traj_yaw = np.stack(traj_yaw, axis=1)  # [B, T]
+        assert traj_pos.shape[0] == traj_yaw.shape[0]
+
+        agent_traj_pos = transform_points(points=traj_pos, transf_matrix=agent_from_world)
+        agent_traj_yaw = angular_distance(traj_yaw, yaw_world[:, None])
+
+        state["target_positions"] = agent_traj_pos
+        state["target_yaws"] = agent_traj_yaw[:, :, None]
+
+        state_torch = TensorUtils.to_torch(state, self.metric_algo.device)
+        with torch.no_grad():
+            metrics = self.metric_algo.get_metrics(state_torch)
+        metrics= TensorUtils.to_numpy(metrics)
+
+        step_metrics = dict()
+        for k in metrics:
+            met, met_mask = step_aggregate_per_scene(metrics[k], state["scene_index"], all_scene_index)
+            assert np.all(met_mask > 0)  # since we will always use it for all agents
+            step_metrics[k] = met
+        return step_metrics
+
+    def get_episode_metrics(self):
+        ep_metrics = dict()
+
+        for step_metrics in self._per_step:
+            for k in step_metrics:
+                if k not in ep_metrics:
+                    ep_metrics[k] = []
+                ep_metrics[k].append(step_metrics[k])
+
+        ep_metrics_agg = dict()
+        for k in ep_metrics:
+            met = np.stack(ep_metrics[k], axis=1)  # [num_scene, T, ...]
+            ep_metrics_agg[k] = np.mean(met, axis=1)
+            for met_horizon in [10, 50, 100, 150]:
+                if met.shape[1] >= met_horizon:
+                    ep_metrics_agg[k + "_@{}".format(met_horizon)] = np.mean(met[:, :met_horizon], axis=1)
+        return ep_metrics_agg
