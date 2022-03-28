@@ -97,3 +97,57 @@ class GTPlanner(Policy):
             availabilities=obs["target_availabilities"],
         )
         return plan, {}
+
+
+class GTPolicy(Policy):
+    def __init__(self, device):
+        self.device = device
+
+    def eval(self):
+        pass
+
+    @staticmethod
+    def get_action(obs, **kwargs) -> Tuple[Action, Dict]:
+        action = Action(
+            positions=obs["target_positions"],
+            yaws=obs["target_yaws"]
+        )
+        return action, {}
+
+
+class ReplayPolicy(Policy):
+    def __init__(self, action_log, device):
+        self.device = device
+        self.action_log = action_log
+
+    def eval(self):
+        pass
+
+    def get_action(self, obs, step_index=None, **kwargs) -> Tuple[Action, Dict]:
+        assert step_index is not None
+        scene_index = TensorUtils.to_numpy(obs["scene_index"]).astype(np.int64).tolist()
+        track_id = TensorUtils.to_numpy(obs["track_id"]).astype(np.int64).tolist()
+        pos = []
+        yaw = []
+        for si, ti in zip(scene_index, track_id):
+            scene_log = self.action_log[str(si)]
+            if ti == -1:  # ego
+                pos.append(scene_log["ego_action"]["positions"][step_index, 0])
+                yaw.append(scene_log["ego_action"]["yaws"][step_index, 0])
+            else:
+                scene_track_id = scene_log["agents_obs"]["track_id"][0]
+                agent_ind = np.where(ti == scene_track_id)[0][0]
+                pos.append(scene_log["agents_action"]["positions"][step_index, agent_ind])
+                yaw.append(scene_log["agents_action"]["yaws"][step_index, agent_ind])
+
+        # stack and create the temporal dimension
+        pos = np.stack(pos, axis=0)[:, None, :]
+        yaw = np.stack(yaw, axis=0)[:, None, :]
+
+        action = Action(
+            positions=pos,
+            yaws=yaw
+        )
+        return action, {}
+
+

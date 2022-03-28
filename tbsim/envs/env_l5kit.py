@@ -29,7 +29,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             dataset,
             seed=0,
             prediction_only=False,
-            compute_metrics=False,
             metrics=None,
             skimp_rollout=False,
             renderer=None
@@ -82,7 +81,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         self.timers = Timers()
 
-        self._metrics = dict() if metrics is None or not compute_metrics else metrics
+        self._metrics = dict() if metrics is None else metrics
         self._skimp = skimp_rollout
 
     def reset(self, scene_indices: List = None):
@@ -355,7 +354,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             else:
                 raise KeyError("Invalid metrics name {}".format(k))
 
-    def _add_per_step_obs_action(self, obs, action):
+    def _add_per_step_obs_action(self, obs, action, obs_keys=("track_id", "scene_index")):
         action_dict = action.to_dict()
         # only record the first action
         ego_action = TensorUtils.map_ndarray(action_dict["ego"], lambda x: x[:, 0])
@@ -363,10 +362,12 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         for i, si in enumerate(self.current_scene_indices):
             state = dict()
             ego_mask = obs["ego"]["scene_index"] == si
-            # state["ego_obs"] = TensorUtils.map_ndarray(obs["ego"], lambda x: x[ego_mask])
+            ego_obs = dict([(k, obs["ego"][k]) for k in obs_keys])
+            state["ego_obs"] = TensorUtils.map_ndarray(ego_obs, lambda x: x[ego_mask])
             state["ego_action"] = TensorUtils.map_ndarray(ego_action, lambda x: x[ego_mask])
             agents_mask = obs["agents"]["scene_index"] == si
-            # state["agents_obs"] = TensorUtils.map_ndarray(obs["agents"], lambda x: x[agents_mask])
+            agents_obs = dict([(k, obs["agents"][k]) for k in obs_keys])
+            state["agents_obs"] = TensorUtils.map_ndarray(agents_obs, lambda x: x[agents_mask])
             state["agents_action"] = TensorUtils.map_ndarray(agents_action, lambda x: x[agents_mask])
             for mk in state:
                 for k in state[mk]:
@@ -375,7 +376,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                     if k == "image":
                         state[mk][k] = (state[mk][k] * 255.).astype(np.uint8)
                     self.episode_buffer[i][mk][k].append(state[mk][k])
-
 
     def _step(self, step_actions: RolloutAction):
         obs = self.get_observation()

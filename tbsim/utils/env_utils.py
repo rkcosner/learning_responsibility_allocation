@@ -60,7 +60,7 @@ def rollout_episodes(
                 env.step(env.get_gt_action(obs), num_steps_to_take=1, render=False)
             else:
                 with timers.timed("network"):
-                    action = policy.get_action(obs_torch)
+                    action = policy.get_action(obs_torch, step_index = counter)
 
                 with timers.timed("env_step"):
                     ims = env.step(

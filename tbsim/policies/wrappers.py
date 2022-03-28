@@ -20,7 +20,7 @@ class HierarchicalWrapper(object):
         self.planner.eval()
         self.controller.eval()
 
-    def get_action(self, obs) -> Tuple[Action, Dict]:
+    def get_action(self, obs, **kwargs) -> Tuple[Action, Dict]:
         plan, plan_info = self.planner.get_plan(obs)
         actions, action_info = self.controller.get_action(
             obs,
@@ -36,7 +36,7 @@ class HierarchicalWrapper(object):
 class HierarchicalSamplerWrapper(HierarchicalWrapper):
     """A wrapper policy that feeds plan samples from a stochastic planner to a controller"""
 
-    def get_action(self, obs) -> Tuple[None, Dict]:
+    def get_action(self, obs, **kwargs) -> Tuple[None, Dict]:
         _, plan_info = self.planner.get_plan(obs)
         plan_samples = plan_info.pop("plan_samples")
         b, n = plan_samples.positions.shape[:2]
@@ -75,7 +75,7 @@ class SamplingPolicyWrapper(object):
         self.sampler.eval()
         self.predictor.eval()
 
-    def get_action(self, obs) -> Tuple[Action, Dict]:
+    def get_action(self, obs, **kwargs) -> Tuple[Action, Dict]:
         # actions of shape [B, num_samples, ...]
         _, action_info = self.sampler.get_action(obs)
         action_samples = action_info["action_samples"]
@@ -155,7 +155,7 @@ class RolloutWrapper(object):
         self.ego_policy.eval()
         self.agents_policy.eval()
 
-    def get_action(self, obs) -> RolloutAction:
+    def get_action(self, obs, step_index) -> RolloutAction:
         ego_action = None
         ego_action_info = None
         agents_action = None
@@ -164,10 +164,10 @@ class RolloutWrapper(object):
             assert obs["ego"] is not None
             with torch.no_grad():
                 ego_action, ego_action_info = self.ego_policy.get_action(
-                    obs["ego"])
+                    obs["ego"], step_index = step_index)
         if self.agents_policy is not None:
             assert obs["agents"] is not None
             with torch.no_grad():
                 agents_action, agents_action_info = self.agents_policy.get_action(
-                    obs["agents"])
+                    obs["agents"], step_index = step_index)
         return RolloutAction(ego_action, ego_action_info, agents_action, agents_action_info)

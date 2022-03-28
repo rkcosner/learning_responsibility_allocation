@@ -1,8 +1,10 @@
 """A script for evaluating closed-loop simulation"""
 import argparse
+import shutil
 from copy import deepcopy
 import numpy as np
 import json
+import h5py
 
 from collections import OrderedDict
 import os
@@ -23,6 +25,7 @@ from tbsim.envs.env_l5kit import EnvL5KitSimulation, BatchedEnv
 from tbsim.utils.config_utils import translate_l5kit_cfg, get_experiment_config_from_file
 from tbsim.utils.env_utils import rollout_episodes
 import tbsim.envs.env_metrics as EnvMetrics
+from tbsim.policies.hardcoded import ReplayPolicy, GTPolicy
 
 from tbsim.policies.wrappers import (
     PolicyWrapper,
@@ -41,15 +44,27 @@ from tbsim.utils.timer import Timers
 
 
 class PolicyComposer(object):
-    def __init__(self, modality_shapes, device, ckpt_dir="checkpoints/"):
+    def __init__(self, eval_config, modality_shapes, device, ckpt_dir="checkpoints/"):
         self.modality_shapes = modality_shapes
         self.device = device
         self.ckpt_dir = ckpt_dir
-        self.eval_config = None
+        self.eval_config = eval_config
         self.policy = None
 
     def get_policy(self):
         return self.policy
+
+
+class ReplayAction(PolicyComposer):
+    def get_policy(self, **kwargs):
+        print("Loading action log from {}".format(self.eval_config.experience_hdf5_path))
+        h5 = h5py.File(self.eval_config.experience_hdf5_path, "r")
+        return ReplayPolicy(h5, self.device)
+
+
+class GroundTruth(PolicyComposer):
+    def get_policy(self, **kwargs):
+        return GTPolicy(device=self.device)
 
 
 class Hierarchical(PolicyComposer):
@@ -93,9 +108,6 @@ class Hierarchical(PolicyComposer):
 
 
 class HierAgentAware(Hierarchical):
-    def __init__(self, modality_shapes, device, ckpt_dir="checkpoints/"):
-        super(HierAgentAware, self).__init__(modality_shapes, device, ckpt_dir)
-
     def _get_predictor(self):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
             ngc_job_id="2645989",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
@@ -127,8 +139,15 @@ class HierAgentAware(Hierarchical):
         return self.policy
 
 
-def create_env(sim_cfg, num_scenes_per_batch, num_simulation_steps=200, skimp_rollout=False, seed=1):
-
+def create_env(
+        sim_cfg,
+        num_scenes_per_batch,
+        device,
+        num_simulation_steps=200,
+        skimp_rollout=False,
+        compute_metrics=True,
+        seed=1
+):
     dm = LocalDataManager(None)
     l5_config = translate_l5kit_cfg(sim_cfg)
     rasterizer = build_rasterizer(l5_config, dm)
@@ -146,20 +165,21 @@ def create_env(sim_cfg, num_scenes_per_batch, num_simulation_steps=200, skimp_ro
     sim_cfg.env.simulation.disable_new_agents = True
     sim_cfg.env.generate_agent_obs = True
 
-    ckpt_path, cfg_path = get_checkpoint("2759937", "4999_")
-    metric_cfg = get_experiment_config_from_file(cfg_path, locked=True)
-    metric_algo = EBMMetric.load_from_checkpoint(
-        checkpoint_path=ckpt_path,
-        algo_config=metric_cfg.algo,
-        modality_shapes=modality_shapes
-    )
+    metrics = dict()
+    if compute_metrics:
+        ckpt_path, cfg_path = get_checkpoint("2759937", "4999_")
+        metric_cfg = get_experiment_config_from_file(cfg_path, locked=True)
+        metric_algo = EBMMetric.load_from_checkpoint(
+            checkpoint_path=ckpt_path,
+            algo_config=metric_cfg.algo,
+            modality_shapes=modality_shapes
+        ).eval.to(device)
 
-
-    metrics = dict(
-        all_off_road_rate=EnvMetrics.OffRoadRate(),
-        all_collision_rate=EnvMetrics.CollisionRate(),
-        all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo)
-    )
+        metrics = dict(
+            all_off_road_rate=EnvMetrics.OffRoadRate(),
+            all_collision_rate=EnvMetrics.CollisionRate(),
+            all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo)
+        )
 
     env = EnvL5KitSimulation(
         sim_cfg.env,
@@ -168,7 +188,6 @@ def create_env(sim_cfg, num_scenes_per_batch, num_simulation_steps=200, skimp_ro
         num_scenes=num_scenes_per_batch,
         prediction_only=False,
         renderer=render_rasterizer,
-        compute_metrics=True,
         metrics=metrics,
         skimp_rollout=skimp_rollout
     )
@@ -176,7 +195,6 @@ def create_env(sim_cfg, num_scenes_per_batch, num_simulation_steps=200, skimp_ro
 
 
 def dump_episode_buffer(buffer, scene_index, h5_path):
-    import h5py
     h5_file = h5py.File(h5_path, "a")
 
     for si, scene_buffer in zip(scene_index, buffer):
@@ -188,17 +206,21 @@ def dump_episode_buffer(buffer, scene_index, h5_path):
     print("scene {} written to {}".format(scene_index, h5_path))
 
 
-def run_evaluation(eval_cfg):
+def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_disk, render_to_video):
     print(eval_cfg)
 
     # for reproducibility
     torch.manual_seed(eval_cfg.seed)
     np.random.seed(eval_cfg.seed)
 
-    print('save results to {}'.format(eval_cfg.results_dir))
+    print('saving results to {}'.format(eval_cfg.results_dir))
     os.makedirs(eval_cfg.results_dir, exist_ok=True)
     os.makedirs(os.path.join(eval_cfg.results_dir, "videos/"), exist_ok=True)
     os.makedirs(eval_cfg.ckpt_dir, exist_ok=True)
+    if save_cfg:
+        json.dump(eval_cfg, open(os.path.join(eval_cfg.results_dir, "config.json"), "w+"))
+    if data_to_disk and os.path.exists(eval_cfg.experience_hdf5_path):
+        os.remove(eval_cfg.experience_hdf5_path)
 
     os.environ["L5KIT_DATA_FOLDER"] = eval_cfg.dataset_path
 
@@ -207,12 +229,15 @@ def run_evaluation(eval_cfg):
 
     env, modality_shapes = create_env(
         sim_cfg,
+        device=device,
         num_scenes_per_batch=eval_cfg.num_scenes_per_batch,
         num_simulation_steps=eval_cfg.num_simulation_steps,
+        skimp_rollout=skimp_rollout,
+        compute_metrics=compute_metrics,
         seed=eval_cfg.seed
     )
 
-    evaluation = eval(eval_cfg.eval_class)(modality_shapes, device, ckpt_dir=eval_cfg.ckpt_dir)
+    evaluation = eval(eval_cfg.eval_class)(eval_cfg, modality_shapes, device, ckpt_dir=eval_cfg.ckpt_dir)
     policy = evaluation.get_policy(**eval_cfg.policy)
 
     if eval_cfg.ego_only:
@@ -236,7 +261,7 @@ def run_evaluation(eval_cfg):
             rollout_policy,
             num_episodes=1,
             n_step_action=eval_cfg.n_step_action,
-            render=eval_cfg.render_to_video,
+            render=render_to_video,
             skip_first_n=1,
             scene_indices=eval_scenes[iter_i: iter_i + eval_cfg.num_scenes_per_batch],
         )
@@ -257,7 +282,7 @@ def run_evaluation(eval_cfg):
             stats_to_write = map_ndarray(result_stats, lambda x: x.tolist())
             json.dump(stats_to_write, fp)
 
-        if eval_cfg.render_to_video:
+        if render_to_video:
             for i, scene_images in enumerate(renderings[0]):
                 video_dir = os.path.join(eval_cfg.results_dir, "videos/")
                 writer = get_writer(os.path.join(
@@ -266,11 +291,11 @@ def run_evaluation(eval_cfg):
                     writer.append_data(im)
                 writer.close()
 
-        if eval_cfg.data_to_disk:
+        if data_to_disk:
             dump_episode_buffer(
                 info["buffer"],
                 info["scene_index"],
-                h5_path=os.path.join(eval_cfg.results_dir, "data.hdf5")
+                h5_path=eval_cfg.experience_hdf5_path
             )
 
 
@@ -283,6 +308,13 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="A json file containing evaluation configs"
+    )
+
+    parser.add_argument(
+        "--eval_class",
+        type=str,
+        default=None,
+        help="Optionally specify the evaluation class through argparse"
     )
 
     parser.add_argument(
@@ -314,24 +346,18 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--num_scenes_to_evaluate",
-        type=int,
-        default=None,
-        help="Number of scenes to run in total"
-    )
-
-    parser.add_argument(
-        "--num_simulation_steps",
-        default=None,
-        type=int,
-        help="Number of env steps to simulate"
-    )
-
-    parser.add_argument(
         "--render",
         action="store_true",
-        default=None,
+        default=False,
         help="whether to render videos"
+    )
+
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="evaluate_rollout",
+        choices=["record_rollout", "evaluate_replay", "evaluate_rollout"],
+        required=True
     )
 
     args = parser.parse_args()
@@ -342,20 +368,14 @@ if __name__ == "__main__":
         external_cfg = json.load(open(args.config_file, "r"))
         cfg.update(**external_cfg)
 
+    if args.eval_class is not None:
+        cfg.eval_class = args.eval_class
+
     if args.ckpt_dir is not None:
         cfg.ckpt_dir = args.ckpt_dir
 
     if args.num_scenes_per_batch is not None:
         cfg.num_scenes_per_batch = args.num_scenes_per_batch
-
-    if args.num_scenes_to_evaluate is not None:
-        cfg.num_scenes_to_evaluate = args.num_scenes_to_evaluate
-
-    if args.num_simulation_steps is not None:
-        cfg.num_simulation_steps = args.num_simulation_steps
-
-    if args.render is not None:
-        cfg.render_to_video = args.render
 
     if args.results_dir is not None:
         cfg.results_dir = args.results_dir
@@ -363,8 +383,37 @@ if __name__ == "__main__":
     if args.dataset_path is not None:
         cfg.dataset_path = args.dataset_path
 
+    if cfg.name is None:
+        cfg.name = cfg.eval_class
+
     cfg.results_dir = os.path.join(cfg.results_dir, cfg.name)
+    cfg.experience_hdf5_path = os.path.join(cfg.results_dir, "data.hdf5")
+
+    data_to_disk = False
+    skimp_rollout = False
+    compute_metrics = False
+
+    if args.mode == "record_rollout":
+        data_to_disk = True
+        skimp_rollout = True
+        compute_metrics = False
+    elif args.mode == "evaluate_replay":
+        cfg.eval_class = "ReplayAction"
+        cfg.n_step_action = 1
+        data_to_disk = False
+        skimp_rollout = False
+        compute_metrics = True
+    elif args.mode == "evaluate_rollout":
+        data_to_disk = False
+        skimp_rollout = False
+        compute_metrics = True
 
     cfg.lock()
-    run_evaluation(cfg)
-
+    run_evaluation(
+        cfg,
+        save_cfg=args.mode == "record_rollout",
+        data_to_disk=data_to_disk,
+        skimp_rollout=skimp_rollout,
+        compute_metrics=compute_metrics,
+        render_to_video=args.render
+    )
