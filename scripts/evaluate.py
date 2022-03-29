@@ -220,10 +220,10 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
     print(eval_cfg)
 
     # for reproducibility
+    np.random.seed(0)
+    random.seed(0)
     torch.manual_seed(eval_cfg.seed)
     torch.cuda.manual_seed(eval_cfg.seed)
-    np.random.seed(eval_cfg.seed)
-    random.seed(eval_cfg.seed)
 
     print('saving results to {}'.format(eval_cfg.results_dir))
     os.makedirs(eval_cfg.results_dir, exist_ok=True)
@@ -367,6 +367,12 @@ if __name__ == "__main__":
         required=True
     )
 
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None
+    )
+
     args = parser.parse_args()
 
     cfg = EvaluationConfig()
@@ -389,6 +395,9 @@ if __name__ == "__main__":
 
     if cfg.name is None:
         cfg.name = cfg.eval_class
+
+    if args.seed is not None:
+        cfg.seed = args.seed
 
     if args.results_root_dir is not None:
         cfg.results_dir = os.path.join(args.results_root_dir, cfg.name)

@@ -355,7 +355,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                 raise KeyError("Invalid metrics name {}".format(k))
 
     def _add_per_step_obs_action(self, obs, action, obs_keys=("track_id", "scene_index")):
-        action_dict = action.to_dict()
+        action_dict = deepcopy(action.to_dict())
+        obs = deepcopy(obs)
         # only record the first action
         ego_action = TensorUtils.map_ndarray(action_dict["ego"], lambda x: x[:, 0])
         agents_action = TensorUtils.map_ndarray(action_dict["agents"], lambda x: x[:, 0])
@@ -384,12 +385,13 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self._add_per_step_metrics(obs)
 
         # record observations and actions
-        self._add_per_step_obs_action(obs, step_actions)
+        # self._add_per_step_obs_action(obs, step_actions)
 
         should_update = self._frame_index + 1 < self.horizon and not self._prediction_only
         self.timers.tic("update")
         if step_actions.has_ego:
             ego_obs = dict(obs["ego"])
+            ego_obs.pop("image", None)  # reduce memory consumption
             if should_update:
                 # update the next frame's ego position and orientation using control input
                 ClosedLoopSimulator.update_ego(
@@ -408,6 +410,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         if step_actions.has_agents:
             agent_obs = dict(obs["agents"])
+            agent_obs.pop("image", None)  # reduce memory consumption
             if should_update:
                 # update the next frame's agent positions and orientations using control input
                 ClosedLoopSimulator.update_agents(
