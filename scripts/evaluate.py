@@ -162,9 +162,11 @@ def create_env(
     l5_config["raster_params"]["pixel_size"] = (0.1, 0.1)
     render_rasterizer = build_visualization_rasterizer_l5kit(l5_config, LocalDataManager(None))
     sim_cfg.env.simulation.num_simulation_steps = num_simulation_steps
-    sim_cfg.env.simulation.distance_th_far = 1e+5
+    sim_cfg.env.simulation.distance_th_far = 1e+5  # keep controlling everything
     sim_cfg.env.simulation.disable_new_agents = True
     sim_cfg.env.generate_agent_obs = True
+    sim_cfg.env.simulation.distance_th_close = 30  # control everything within this bound
+    sim_cfg.env.rasterizer.filter_agents_threshold = 0.8  # control everything that's above this confidence threshold
 
     metrics = dict()
     if compute_metrics:
