@@ -63,7 +63,15 @@ def KLD_gaussian_loss(mu_1, logvar_1, mu_2, logvar_2):
                    - (logvar_1.exp() / logvar_2.exp()) \
                    ).sum(dim=1).mean()
 
+def KLD_discrete(logp,logq):
+    """KL divergence loss between two discrete distributions. This function
+    computes the average loss across the batch.
 
+    Args:
+        logp (torch.Tensor): log probability of first discrete distribution (B,D)
+        logq (torch.Tensor): log probability of second discrete distribution (B,D)
+    """
+    return (torch.exp(logp)*(logp-logq)).sum(dim=1)
 def log_normal(x, m, v):
     """
     Log probability of tensor x under diagonal multivariate normal with

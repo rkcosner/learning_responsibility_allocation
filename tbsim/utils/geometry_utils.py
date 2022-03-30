@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from tbsim.utils.tensor_utils import round_2pi
 from enum import IntEnum
-
+import pdb
 
 def get_box_agent_coords(pos, yaw, extent):
     corners = (torch.tensor([[-1, -1], [-1, 1], [1, 1], [1, -1]]) * 0.5).to(pos.device) * (
@@ -334,11 +334,13 @@ def detect_collision(
     """
     from l5kit.planning import utils
     ego_bbox = utils._get_bounding_box(centroid=ego_pos, yaw=ego_yaw, extent=ego_extent)
+    
     # within_range_mask = utils.within_range(ego_pos, ego_extent, other_pos, other_extent)
     for i in range(other_pos.shape[0]):
         agent_bbox = utils._get_bounding_box(other_pos[i], other_yaw[i], other_extent[i])
-
-        if ego_bbox.intersects(agent_bbox):
+        if ego_bbox.intersects(agent_bbox) and other_extent[i][0]>3 and ego_extent[0]>3:
+            # if other_extent[i][0]>3 and ego_extent[0]>3:
+            #     pdb.set_trace()
             front_side, rear_side, left_side, right_side = utils._get_sides(ego_bbox)
 
             intersection_length_per_side = np.asarray(

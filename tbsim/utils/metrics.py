@@ -14,7 +14,7 @@ from tbsim.utils.geometry_utils import (
     PED_PED_collision,
     get_box_world_coords,
 )
-
+import pdb
 
 metric_signature = Callable[
     [np.ndarray, np.ndarray, np.ndarray, np.ndarray], np.ndarray
@@ -402,6 +402,7 @@ def batch_pairwise_collision_rate(agent_edges, collision_funcs=None):
             edges[..., 8:],
         )
         dis = dis.min(-1)[0]  # reduction over time
+        pdb.set_trace()
         if isinstance(dis, np.ndarray):
             coll_rates[et] = np.sum(dis <= 0) / float(dis.shape[0])
         else:

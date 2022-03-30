@@ -3,11 +3,11 @@ from collections import OrderedDict
 
 import torch
 import torch.nn as nn
-from tbsim.utils.loss_utils import KLD_0_1_loss, KLD_gaussian_loss
+import torch.nn.functional as F
+from tbsim.utils.loss_utils import KLD_0_1_loss, KLD_gaussian_loss, KLD_discrete
 from tbsim.utils.torch_utils import reparameterize
 import tbsim.utils.tensor_utils as TensorUtils
-
-
+from torch.distributions import Categorical
 class Prior(nn.Module):
     def __init__(self, latent_dim, input_dim=None, device=None):
         """
@@ -319,9 +319,162 @@ class CVAE(nn.Module):
         """
         return self.prior.kl_loss(outputs["q_params"], inputs=outputs["c"])
 
+class DiscreteCVAE(nn.Module):
+    def __init__(
+            self,
+            q_net: nn.Module,
+            p_net: nn.Module,
+            c_net: nn.Module,
+            decoder: nn.Module,
+            K: int,
+            recon_loss_fun=None,
+    ):
+        """
+        A basic Conditional Variational Autoencoder Network (C-VAE)
+
+        Args:
+            q_net (nn.Module): a model that encodes data (x) and condition inputs (x_c) to posterior (q) parameters
+            p_net (nn.Module): a model that encodes condition feature (c) to latent (p) parameters
+            c_net (nn.Module): a model that encodes condition inputs (x_c) into condition feature (c)
+            decoder (nn.Module): a model that decodes latent (z) and condition feature (c) to data (x')
+            K (int): cardinality of the discrete latent
+            recon_loss: loss function handle for reconstruction loss
+        """
+        super(DiscreteCVAE, self).__init__()
+        self.q_net = q_net
+        self.p_net = p_net
+        self.c_net = c_net
+        self.decoder = decoder
+        self.K = K
+        if recon_loss_fun is None:
+            self.recon_loss_fun = nn.MSELoss(reduction="none")
+        else:
+            self.recon_loss_fun = recon_loss_fun
+
+    def sample(self, condition_inputs, n: int, condition_feature=None, decoder_kwargs=None):
+        """
+        Draw data samples (x') given a batch of condition inputs (x_c) and the VAE prior.
+
+        Args:
+            condition_inputs (dict, torch.Tensor): condition inputs (x_c)
+            n (int): number of samples to draw
+            condition_feature (torch.Tensor): Optional - externally supply condition code (c)
+            decoder_kwargs (dict): Extra keyword args for decoder (e.g., dynamics model states)
+
+        Returns:
+            dictionary of batched samples (x') of size [B, n, ...]
+        """
+        assert n<=self.K
+        if condition_feature is not None:
+            c = condition_feature
+        else:
+            c = self.c_net(condition_inputs)  # [B, ...]
+        logp = self.p_net(c)["logp"]
+        # p = torch.exp(logp)
+        # p = p/p.sum(dim=-1,keepdim=True)
+        z = (-logp).argsort()[...,:n]
+        z = F.one_hot(z,self.K)
+
+        z_samples = TensorUtils.join_dimensions(z, begin_axis=0, end_axis=2)  # [B * N, ...]
+        c_samples = TensorUtils.repeat_by_expand_at(c, repeats=n, dim=0)  # [B * N, ...]
+        decoder_kwargs = dict() if decoder_kwargs is None else decoder_kwargs
+        x_out = self.decoder(latents=z_samples, condition_features=c_samples, **decoder_kwargs)
+        x_out = TensorUtils.reshape_dimensions(x_out, begin_axis=0, end_axis=1, target_dims=(c.shape[0], n))
+        return x_out
+
+    def predict(self, condition_inputs, condition_feature=None, decoder_kwargs=None):
+        """
+        Generate a prediction based on latent prior (instead of sample) and condition inputs
+
+        Args:
+            condition_inputs (dict, torch.Tensor): condition inputs (x_c)
+            condition_feature (torch.Tensor): Optional - externally supply condition code (c)
+            decoder_kwargs (dict): Extra keyword args for decoder (e.g., dynamics model states)
+
+        Returns:
+            dictionary of batched predictions (x') of size [B, ...]
+
+        """
+        if condition_feature is not None:
+            c = condition_feature
+        else:
+            c = self.c_net(condition_inputs)  # [B, ...]
+
+        logp = self.p_net(c)["logp"]
+        z = logp.argmax(dim=-1)
+        
+        decoder_kwargs = dict() if decoder_kwargs is None else decoder_kwargs
+        x_out = self.decoder(latents=F.one_hot(z,self.K), condition_features=c, **decoder_kwargs)
+        return x_out
+
+    def forward(self, inputs, condition_inputs, n=None, decoder_kwargs=None):
+        """
+        Pass the input through encoder and decoder (using posterior parameters)
+        Args:
+            inputs (dict, torch.Tensor): encoder inputs (x)
+            condition_inputs (dict, torch.Tensor): condition inputs - (x_c)
+            n (int): number of samples, if not given, then n=self.K
+            decoder_kwargs (dict): Extra keyword args for decoder (e.g., dynamics model states)
+
+        Returns:
+            dictionary of batched samples (x')
+        """
+        if n is None:
+            n = self.K
+        c = self.c_net(condition_inputs)  # [B, ...]
+        logq = self.q_net(inputs=inputs, condition_features=c)["logq"]
+        q = torch.exp(logq)
+        q = q/q.sum(dim=-1,keepdim=True)
+        logp = self.p_net(c)["logp"]
+        p = torch.exp(logp)
+        p = p/p.sum(dim=-1,keepdim=True)
+        z = (-logq).argsort()[...,:n]
+        z = F.one_hot(z,self.K)
+        decoder_kwargs = dict() if decoder_kwargs is None else decoder_kwargs
+        c_tiled = c.unsqueeze(1).repeat(1,n,1)
+        x_out = self.decoder(latents=z.reshape(-1,self.K), condition_features=c_tiled.reshape(-1,c.shape[-1]), **decoder_kwargs)
+        x_out = TensorUtils.reshape_dimensions(x_out,0,1,(z.shape[0],n))
+        return {"x_recons": x_out, "q": q, "p": p, "z": z, "c": c}
+
+    def compute_kl_loss(self, outputs: dict):
+        """
+        Compute KL Divergence loss
+
+        Args:
+            outputs (dict): outputs of the self.forward() call
+
+        Returns:
+            a dictionary of loss values
+        """
+        p = outputs["p"]
+        q = outputs["q"]
+        return (p*(torch.log(p)-torch.log(q))).sum(dim=-1)
+    def compute_losses(self,outputs,targets,gamma=1):
+        recon_loss = 0
+        for k,v in outputs['x_recons'].items():
+            if k in targets:
+                if isinstance(self.recon_loss_fun,dict):
+                    loss_v = self.recon_loss_fun[k](v,targets[k].unsqueeze(1))
+                else:
+                    loss_v = self.recon_loss_fun(v,targets[k].unsqueeze(1))
+                sum_dim=tuple(range(2,loss_v.ndim))
+                loss_v = loss_v.sum(dim=sum_dim)
+                loss_v_detached = loss_v.detach()
+                min_flag = (loss_v==loss_v.min(dim=1,keepdim=True)[0])
+                nonmin_flag = torch.logical_not(min_flag)
+                recon_loss +=(loss_v*min_flag*outputs["q"]).sum(dim=1)+(loss_v_detached*nonmin_flag*outputs["q"]).sum(dim=1)
+
+        KL_loss = self.compute_kl_loss(outputs)
+        return recon_loss + gamma*KL_loss
+
+
+
+
+
+
 
 def main():
-    import tbsim.models.rasterized_models as l5m
+    import tbsim.models.base_models as l5m
 
     inputs = OrderedDict(trajectories=torch.randn(10, 50, 3))
     condition_inputs = OrderedDict(image=torch.randn(10, 3, 224, 224))
@@ -405,5 +558,95 @@ def main():
     samples = lean_model.sample(condition_inputs=condition_feats, n=10)
     print()
 
+def main_discrete():
+    import tbsim.models.base_models as l5m
+
+    inputs = OrderedDict(trajectories=torch.randn(10, 50, 3))
+    condition_inputs = OrderedDict(image=torch.randn(10, 3, 224, 224))
+
+    condition_dim = 16
+    latent_dim = 20
+
+    map_encoder = l5m.RasterizedMapEncoder(
+        model_arch="resnet18",
+        feature_dim=128
+    )
+
+    q_encoder = l5m.PosteriorEncoder(
+        condition_dim=condition_dim,
+        trajectory_shape=(50, 3),
+        output_shapes=OrderedDict(logq=(latent_dim,))
+    )
+    p_encoder = l5m.SplitMLP(
+                input_dim=condition_dim,
+                layer_dims=(128,128),
+                output_shapes=OrderedDict(logp=(latent_dim,))
+            )
+    c_encoder = l5m.ConditionEncoder(
+        map_encoder=map_encoder,
+        trajectory_shape=(50, 3),
+        condition_dim=condition_dim
+    )
+    decoder_MLP = l5m.SplitMLP(
+        input_dim=condition_dim+latent_dim,
+        output_shapes=OrderedDict(trajectories=(50, 3)),
+        layer_dims=(128,128),
+        output_activation=nn.ReLU,
+    )
+    decoder = l5m.ConditionDecoder(decoder_model=decoder_MLP)
+
+    model = DiscreteCVAE(
+        q_net=q_encoder,
+        p_net=p_encoder,
+        c_net=c_encoder,
+        decoder=decoder,
+        K=latent_dim,
+    )
+
+
+    outputs = model(inputs=inputs, condition_inputs=condition_inputs)
+    losses = model.compute_losses(outputs=outputs, targets = inputs)
+    samples = model.sample(condition_inputs=condition_inputs, n=10)
+    KL_loss = model.compute_kl_loss(outputs)
+
+
+    # traj_encoder = l5m.RNNTrajectoryEncoder(
+    #     trajectory_dim=3,
+    #     rnn_hidden_size=100
+    # )
+
+    # c_net = l5m.ConditionNet(
+    #     condition_input_shapes=OrderedDict(
+    #         map_feature=(map_encoder.output_shape()[-1],)
+    #     ),
+    #     condition_dim=condition_dim,
+    # )
+
+    # q_net = l5m.PosteriorNet(
+    #     input_shapes=OrderedDict(
+    #         traj_feature=(traj_encoder.output_shape()[-1],)
+    #     ),
+    #     condition_dim=condition_dim,
+    #     param_shapes=prior.posterior_param_shapes,
+    # )
+
+    # lean_model = CVAE(
+    #     q_net=q_net,
+    #     c_net=c_net,
+    #     decoder=decoder,
+    #     prior=prior,
+    #     target_criterion=nn.MSELoss(reduction="none")
+    # )
+
+    # map_feats = map_encoder(condition_inputs["image"])
+    # traj_feats = traj_encoder(inputs["trajectories"])
+    # input_feats = dict(traj_feature=traj_feats)
+    # condition_feats = dict(map_feature=map_feats)
+
+    # outputs = lean_model(inputs=input_feats, condition_inputs=condition_feats)
+    # losses = lean_model.compute_losses(outputs=outputs, targets=inputs)
+    # samples = lean_model.sample(condition_inputs=condition_feats, n=10)
+    # print()
+
 if __name__ == "__main__":
-    main()
+    main_discrete()
