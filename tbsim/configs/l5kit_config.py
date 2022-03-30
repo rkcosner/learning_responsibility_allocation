@@ -15,7 +15,7 @@ class L5KitTrainConfig(TrainConfig):
         self.dataset_meta_key = "meta.json"
         self.datamodule_class = "L5RasterizedDataModule"
 
-        self.rollout.enabled = True
+        self.rollout.enabled = False
         self.rollout.every_n_steps = 500
         self.rollout.num_episodes = 10
         self.rollout.num_scenes = 3
@@ -65,7 +65,7 @@ class L5KitEnvConfig(EnvConfig):
 
         # e.g. 0.0 include every obstacle, 0.5 show those obstacles with >0.5 probability of being
         # one of the classes we care about (cars, bikes, peds, etc.), >=1.0 filter all other agents.
-        self.rasterizer.filter_agents_threshold = 0.5
+        self.rasterizer.filter_agents_threshold = 0.8
 
         # whether to completely disable traffic light faces in the semantic rasterizer
         self.rasterizer.disable_traffic_light_faces = False

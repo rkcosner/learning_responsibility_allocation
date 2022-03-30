@@ -5,6 +5,7 @@ from copy import deepcopy
 import numpy as np
 import json
 import h5py
+import random
 
 from collections import OrderedDict
 import os
@@ -161,13 +162,19 @@ def create_env(
     l5_config["raster_params"]["pixel_size"] = (0.1, 0.1)
     render_rasterizer = build_visualization_rasterizer_l5kit(l5_config, LocalDataManager(None))
     sim_cfg.env.simulation.num_simulation_steps = num_simulation_steps
-    sim_cfg.env.simulation.distance_th_far = 1e+5
+    sim_cfg.env.simulation.distance_th_far = 1e+5  # keep controlling everything
     sim_cfg.env.simulation.disable_new_agents = True
     sim_cfg.env.generate_agent_obs = True
+    sim_cfg.env.simulation.distance_th_close = 30  # control everything within this bound
+    sim_cfg.env.rasterizer.filter_agents_threshold = 0.8  # control everything that's above this confidence threshold
 
     metrics = dict()
     if compute_metrics:
+<<<<<<< HEAD
         ckpt_path, cfg_path = get_checkpoint("2761440", "999_")
+=======
+        ckpt_path, cfg_path = get_checkpoint("2759937", "47999_")
+>>>>>>> 737d6d0ac6e29b79f3cbf15fd6fd2991bb1d77c2
         metric_cfg = get_experiment_config_from_file(cfg_path, locked=True)
         metric_algo = EBMMetric.load_from_checkpoint(
             checkpoint_path=ckpt_path,
@@ -196,7 +203,16 @@ def create_env(
         metrics=metrics,
         skimp_rollout=skimp_rollout
     )
-    return env, modality_shapes
+
+    # npr = np.random.RandomState(seed=0)  # TODO: maybe put indices into a file?
+    # eval_scenes = npr.choice(
+    #     np.arange(env.total_num_scenes),
+    #     size=eval_cfg.num_scenes_to_evaluate,
+    #     replace=False
+    # )
+
+    eval_scenes = [9058, 5232, 14153, 8173, 10314, 7027, 9812, 1090, 9453, 978, 10263, 874, 5563, 9613, 261, 2826, 2175, 9977, 6423, 1069, 1836, 8198, 5034, 6016, 2525, 927, 3634, 11806, 4911, 6192, 11641, 461, 142, 15493, 4919, 8494, 14572, 2402, 308, 1952, 13287, 15614, 6529, 12, 11543, 4558, 489, 6876, 15279, 6095, 5877, 8928, 10599, 16150, 11296, 9382, 13352, 1794, 16122, 12429, 15321, 8614, 12447, 4502, 13235, 2919, 15893, 12960, 7043, 9278, 952, 4699, 768, 13146, 8827, 16212, 10777, 15885, 11319, 9417, 14092, 14873, 6740, 11847, 15331, 15639, 11361, 14784, 13448, 10124, 4872, 3567, 5543, 2214, 7624, 10193, 7297, 1308, 3951, 14001]
+    return env, modality_shapes, eval_scenes
 
 
 def dump_episode_buffer(buffer, scene_index, h5_path):
@@ -215,8 +231,10 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
     print(eval_cfg)
 
     # for reproducibility
+    np.random.seed(0)
+    random.seed(0)
     torch.manual_seed(eval_cfg.seed)
-    np.random.seed(eval_cfg.seed)
+    torch.cuda.manual_seed(eval_cfg.seed)
 
     print('saving results to {}'.format(eval_cfg.results_dir))
     os.makedirs(eval_cfg.results_dir, exist_ok=True)
@@ -231,7 +249,12 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     sim_cfg = get_registered_experiment_config("l5_mixed_plan")
+<<<<<<< HEAD
     env, modality_shapes = create_env(
+=======
+
+    env, modality_shapes, eval_scenes = create_env(
+>>>>>>> 737d6d0ac6e29b79f3cbf15fd6fd2991bb1d77c2
         sim_cfg,
         device=device,
         num_scenes_per_batch=eval_cfg.num_scenes_per_batch,
@@ -248,13 +271,6 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
         rollout_policy = RolloutWrapper(ego_policy=policy)
     else:
         rollout_policy = RolloutWrapper(ego_policy=policy, agents_policy=policy)
-
-    npr = np.random.RandomState(seed=0)  # TODO: maybe put indices into a file?
-    eval_scenes = npr.choice(
-        np.arange(env.total_num_scenes),
-        size=eval_cfg.num_scenes_to_evaluate,
-        replace=False
-    )
 
     scene_i = 0
     obs_to_torch = eval_cfg.eval_class not in ["GroundTruth", "ReplayAction"]
@@ -366,6 +382,12 @@ if __name__ == "__main__":
         required=True
     )
 
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None
+    )
+
     args = parser.parse_args()
 
     cfg = EvaluationConfig()
@@ -388,6 +410,9 @@ if __name__ == "__main__":
 
     if cfg.name is None:
         cfg.name = cfg.eval_class
+
+    if args.seed is not None:
+        cfg.seed = args.seed
 
     if args.results_root_dir is not None:
         cfg.results_dir = os.path.join(args.results_root_dir, cfg.name)

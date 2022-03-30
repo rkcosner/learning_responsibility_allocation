@@ -61,7 +61,9 @@ def rollout_episodes(
 
             if counter < skip_first_n:
                 # skip the first N steps to warm up environment state (velocity, etc.)
-                env.step(env.get_gt_action(obs), num_steps_to_take=1, render=False)
+                # DIFF
+                env.step(RolloutAction(), num_steps_to_take=1, render=False)
+                # env.step(env.get_gt_action(obs), num_steps_to_take=1, render=False)
             else:
                 with timers.timed("network"):
                     action = policy.get_action(obs_torch, step_index = counter)

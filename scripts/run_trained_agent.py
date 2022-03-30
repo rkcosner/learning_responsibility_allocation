@@ -62,7 +62,7 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
     print(planner_config_path)
 
     assert data_cfg.env.rasterizer.map_type == "py_semantic"
-    os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath("/home/danfeix/workspace/lfs/lyft/lyft_prediction/")
+    os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath("/home/chenyx/repos/l5kit/prediction-dataset")
     dm = LocalDataManager(None)
     l5_config = translate_l5kit_cfg(data_cfg)
     rasterizer = build_rasterizer(l5_config, dm)
