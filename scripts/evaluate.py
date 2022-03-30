@@ -170,11 +170,7 @@ def create_env(
 
     metrics = dict()
     if compute_metrics:
-<<<<<<< HEAD
-        ckpt_path, cfg_path = get_checkpoint("2761440", "999_")
-=======
         ckpt_path, cfg_path = get_checkpoint("2759937", "47999_")
->>>>>>> 737d6d0ac6e29b79f3cbf15fd6fd2991bb1d77c2
         metric_cfg = get_experiment_config_from_file(cfg_path, locked=True)
         metric_algo = EBMMetric.load_from_checkpoint(
             checkpoint_path=ckpt_path,
@@ -249,12 +245,8 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     sim_cfg = get_registered_experiment_config("l5_mixed_plan")
-<<<<<<< HEAD
-    env, modality_shapes = create_env(
-=======
 
     env, modality_shapes, eval_scenes = create_env(
->>>>>>> 737d6d0ac6e29b79f3cbf15fd6fd2991bb1d77c2
         sim_cfg,
         device=device,
         num_scenes_per_batch=eval_cfg.num_scenes_per_batch,
