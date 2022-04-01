@@ -355,11 +355,10 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                 raise KeyError("Invalid metrics name {}".format(k))
 
     def _add_per_step_obs_action(self, obs, action, obs_keys=("track_id", "scene_index")):
-        action_dict = deepcopy(action.to_dict())
         obs = deepcopy(obs)
         # only record the first action
-        ego_action = TensorUtils.map_ndarray(action_dict["ego"], lambda x: x[:, 0])
-        agents_action = TensorUtils.map_ndarray(action_dict["agents"], lambda x: x[:, 0])
+        ego_action = TensorUtils.map_ndarray(action.ego.to_dict(), lambda x: x[:, 0])
+        agents_action = TensorUtils.map_ndarray(action.agents.to_dict(), lambda x: x[:, 0])
         for i, si in enumerate(self.current_scene_indices):
             state = dict()
             ego_mask = obs["ego"]["scene_index"] == si

@@ -234,11 +234,12 @@ class CollisionRate(EnvMetrics):
 
 
 class LearnedMetric(EnvMetrics):
-    def __init__(self, metric_algo):
+    def __init__(self, metric_algo, perturbations=None):
         super(LearnedMetric, self).__init__()
         self.metric_algo = metric_algo
         self.traj_len = metric_algo.algo_config.future_num_frames
         self.state_buffer = []
+        self.perturbations = dict() if perturbations is None else perturbations
         self.total_steps = 0
 
     def reset(self):
@@ -285,9 +286,18 @@ class LearnedMetric(EnvMetrics):
         state["target_positions"] = agent_traj_pos
         state["target_yaws"] = agent_traj_yaw[:, :, None]
 
-        state_torch = TensorUtils.to_torch(state, self.metric_algo.device)
-        with torch.no_grad():
-            metrics = self.metric_algo.get_metrics(state_torch)
+        metrics = dict()
+        if self.perturbations is None:
+            state_torch = TensorUtils.to_torch(state, self.metric_algo.device)
+            with torch.no_grad():
+                metrics = self.metric_algo.get_metrics(state_torch)
+        else:
+            for k, v in self.perturbations.items():
+                state = v.perturb(state)
+                state_torch = TensorUtils.to_torch(state, self.metric_algo.device)
+                m = self.metric_algo.get_metrics(state_torch)
+                for mk in m:
+                    metrics["{}_{}".format(k, mk)] = m[mk]
         metrics= TensorUtils.to_numpy(metrics)
 
         step_metrics = dict()
@@ -312,5 +322,5 @@ class LearnedMetric(EnvMetrics):
             ep_metrics_agg[k] = np.mean(met, axis=1)
             for met_horizon in [10, 50, 100, 150]:
                 if met.shape[1] >= met_horizon:
-                    ep_metrics_agg[k + "_@{}".format(met_horizon)] = np.mean(met[:, :met_horizon], axis=1)
+                    ep_metrics_agg[k + "@{}".format(met_horizon)] = np.mean(met[:, :met_horizon], axis=1)
         return ep_metrics_agg
