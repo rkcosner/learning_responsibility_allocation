@@ -270,7 +270,7 @@ class LearnedMetric(EnvMetrics):
         state = dict(state_buffer[0])  # avoid changing the original state_dict
         state["image"] = (state["image"] / 255.).astype(np.float32)
         agent_from_world = state["agent_from_world"]
-        yaw_world = state["yaw"]
+        yaw_current = state["yaw"]
 
         # transform traversed trajectories into the ego frame of a given state
         traj_inds = range(1, self.traj_len + 1)
@@ -281,7 +281,7 @@ class LearnedMetric(EnvMetrics):
         assert traj_pos.shape[0] == traj_yaw.shape[0]
 
         agent_traj_pos = transform_points(points=traj_pos, transf_matrix=agent_from_world)
-        agent_traj_yaw = angular_distance(traj_yaw, yaw_world[:, None])
+        agent_traj_yaw = angular_distance(traj_yaw, yaw_current[:, None])
 
         state["target_positions"] = agent_traj_pos
         state["target_yaws"] = agent_traj_yaw[:, :, None]
@@ -293,8 +293,8 @@ class LearnedMetric(EnvMetrics):
                 metrics = self.metric_algo.get_metrics(state_torch)
         else:
             for k, v in self.perturbations.items():
-                state = v.perturb(state)
-                state_torch = TensorUtils.to_torch(state, self.metric_algo.device)
+                state_perturbed = v.perturb(state)
+                state_torch = TensorUtils.to_torch(state_perturbed, self.metric_algo.device)
                 m = self.metric_algo.get_metrics(state_torch)
                 for mk in m:
                     metrics["{}_{}".format(k, mk)] = m[mk]
