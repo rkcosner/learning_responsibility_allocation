@@ -4,6 +4,12 @@ from functools import partial
 from typing import Callable, Optional
 from pathlib import Path
 from zarr import convenience
+from functools import partial
+from multiprocessing import cpu_count, Pool
+import zarr
+from tqdm import tqdm
+from collections import Counter
+import pprint
 
 import numpy as np
 from torch.utils.data import Dataset
@@ -12,42 +18,137 @@ from l5kit.data import ChunkedDataset, get_frames_slice_from_scenes, get_agents_
 from l5kit.dataset.utils import convert_str_to_fixed_length_tensor
 from l5kit.kinematic import Perturbation
 from l5kit.rasterization import Rasterizer, RenderContext
-from l5kit.dataset.select_agents import select_agents, TH_DISTANCE_AV, TH_EXTENT_RATIO, TH_YAW_DEGREE
+from l5kit.dataset.select_agents import select_agents, get_valid_agents, TH_DISTANCE_AV, TH_YAW_DEGREE, TH_EXTENT_RATIO
+from tbsim.l5kit.vectorizer import Vectorizer
 
-
-from tbsim.l5kit.l5_ego_dataset import EgoDataset
+from tbsim.l5kit.l5_ego_dataset import EgoDatasetMixed
 
 # WARNING: changing these values impact the number of instances selected for both train and inference!
 MIN_FRAME_HISTORY = 10  # minimum number of frames an agents must have in the past to be picked
 MIN_FRAME_FUTURE = 1  # minimum number of frames an agents must have in the future to be picked
 
 
-class AgentDataset(EgoDataset):
+def select_agents_np(
+        zarr_dataset: ChunkedDataset,
+        th_agent_prob: float,
+        th_yaw_degree: float,
+        th_extent_ratio: float,
+        th_distance_av: float,
+) -> np.ndarray:
+    """
+    Filter agents from zarr INPUT_FOLDER according to multiple thresholds and store a boolean array of the same shape.
+    """
+    frame_index_intervals = zarr_dataset.scenes["frame_index_interval"]
+
+    # build a partial with all args except the first one (will be passed by threads)
+    get_valid_agents_partial = partial(
+        get_valid_agents,
+        dataset=zarr_dataset,
+        th_agent_filter_probability_threshold=th_agent_prob,
+        th_yaw_degree=th_yaw_degree,
+        th_extent_ratio=th_extent_ratio,
+        th_distance_av=th_distance_av,
+    )
+
+    report: Counter = Counter()
+
+    agents_mask = np.zeros((len(zarr_dataset.agents), 2), dtype=np.uint32)
+
+    print("starting pool...")
+    with Pool(cpu_count()) as pool:
+        tasks = tqdm(enumerate(pool.imap_unordered(get_valid_agents_partial, frame_index_intervals)))
+        for idx, (mask, count, agents_range) in tasks:
+            report += count
+            agents_mask[agents_range[0]: agents_range[1]] = mask
+            tasks.set_description(f"{idx + 1}/{len(frame_index_intervals)}")
+        print("collecting results..")
+
+    agents_cfg = {
+        "th_agent_filter_probability_threshold": th_agent_prob,
+        "th_yaw_degree": th_yaw_degree,
+        "th_extent_ratio": th_extent_ratio,
+        "th_distance_av": th_distance_av,
+    }
+    # print report
+    pp = pprint.PrettyPrinter(indent=4)
+    print(f"start report for {zarr_dataset.path}")
+    pp.pprint({**agents_cfg, **report})
+
+    return agents_mask
+
+
+class AgentDatasetMixed(EgoDatasetMixed):
     def __init__(
             self,
             cfg: dict,
             zarr_dataset: ChunkedDataset,
+            vectorizer: Vectorizer,
             rasterizer: Rasterizer,
             perturbation: Optional[Perturbation] = None,
+            read_cached_mask: bool = True,
             agents_mask: Optional[np.ndarray] = None,
             min_frame_history: int = MIN_FRAME_HISTORY,
             min_frame_future: int = MIN_FRAME_FUTURE,
     ):
         assert perturbation is None, "AgentDataset does not support perturbation (yet)"
 
-        super(AgentDataset, self).__init__(cfg, zarr_dataset, rasterizer, perturbation)
+        super(AgentDatasetMixed, self).__init__(cfg, zarr_dataset, vectorizer, rasterizer, perturbation)
 
         # store the valid agents indices (N_valid_agents,)
+        if agents_mask is None:
+            if read_cached_mask:
+                agents_mask = self.load_agents_mask()
+            else:
+                agents_mask = select_agents_np(
+                    zarr_dataset,
+                    th_agent_prob=cfg["raster_params"]["filter_agents_threshold"],
+                    th_yaw_degree=TH_YAW_DEGREE,
+                    th_extent_ratio=TH_EXTENT_RATIO,
+                    th_distance_av=TH_DISTANCE_AV,
+                )
+            past_mask = agents_mask[:, 0] >= min_frame_history
+            future_mask = agents_mask[:, 1] >= min_frame_future
+            agents_mask = past_mask * future_mask
+
         self.agents_indices = np.nonzero(agents_mask)[0]
 
         # store an array where valid indices have increasing numbers and the rest is -1 (N_total_agents,)
         self.mask_indices = agents_mask.copy().astype(np.int)
         self.mask_indices[self.mask_indices == 0] = -1
         self.mask_indices[self.mask_indices == 1] = np.arange(0, np.sum(agents_mask))
-
         # this will be used to get the frame idx from the agent idx
         self.cumulative_sizes_agents = self.dataset.frames["agent_index_interval"][:, 1]
         self.agents_mask = agents_mask
+
+    def load_agents_mask(self) -> np.ndarray:
+        """
+        Loads a boolean mask of the agent availability stored into the zarr. Performs some sanity check against cfg.
+        Returns: a boolean mask of the same length of the dataset agents
+        """
+        agent_prob = self.cfg["raster_params"]["filter_agents_threshold"]
+
+        agents_mask_path = Path(self.dataset.path) / f"agents_mask/{agent_prob}"
+        if not agents_mask_path.exists():  # don't check in root but check for the path
+            warnings.warn(
+                f"cannot find the right config in {self.dataset.path},\n"
+                f"your cfg has loaded filter_agents_threshold={agent_prob};\n"
+                "but that value doesn't have a match among the agents_mask in the zarr\n"
+                "Mask will now be generated for that parameter.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
+            select_agents(
+                self.dataset,
+                agent_prob,
+                th_yaw_degree=TH_YAW_DEGREE,
+                th_extent_ratio=TH_EXTENT_RATIO,
+                th_distance_av=TH_DISTANCE_AV,
+            )
+
+        agents_mask = convenience.load(str(agents_mask_path))  # note (lberg): this doesn't update root
+        return agents_mask
+
 
     def __len__(self) -> int:
         """
@@ -77,13 +178,13 @@ class AgentDataset(EgoDataset):
             state_index = frame_index - self.cumulative_sizes[scene_index - 1]
         return self.get_frame(scene_index, state_index, track_id=track_id)
 
-    def get_scene_dataset(self, scene_index: int) -> "AgentDataset":
+    def get_scene_dataset(self, scene_index: int) -> "AgentDatasetMixed":
         """
         Differs from parent only in the return type.
         Instead of doing everything from scratch, we rely on super call and fix the agents_mask
         """
 
-        new_dataset = super(AgentDataset, self).get_scene_dataset(scene_index).dataset
+        new_dataset = super(AgentDatasetMixed, self).get_scene_dataset(scene_index).dataset
 
         # filter agents_bool values
         frame_interval = self.dataset.scenes[scene_index]["frame_index_interval"]
@@ -92,8 +193,8 @@ class AgentDataset(EgoDataset):
         end_index = self.dataset.frames[frame_interval[1] - 1]["agent_index_interval"][1]
         agents_mask = self.agents_mask[start_index:end_index].copy()
 
-        return AgentDataset(
-            self.cfg, new_dataset, self.rasterizer, self.perturbation, agents_mask  # overwrite the loaded one
+        return AgentDatasetMixed(
+            self.cfg, new_dataset, self.vectorizer, self.rasterizer, self.perturbation, agents_mask  # overwrite the loaded one
         )
 
     def get_scene_indices(self, scene_idx: int) -> np.ndarray:

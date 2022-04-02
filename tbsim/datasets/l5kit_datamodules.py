@@ -21,6 +21,8 @@ from tbsim.l5kit.l5_ego_dataset import (
     EgoDatasetMixed, EgoReplayBufferMixed
 )
 
+from tbsim.l5kit.l5_agent_dataset import AgentDatasetMixed
+
 
 class LazyRasterizer(Rasterizer):
     """
@@ -62,18 +64,18 @@ class L5RasterizedDataModule(pl.LightningDataModule, L5BaseDatasetModule):
             self,
             l5_config: dict,
             train_config: TrainConfig,
-            mode: str,
     ):
         super().__init__()
         self.train_dataset = None
         self.valid_dataset = None
+        self.env_dataset = None
         self.experience_dataset = None  # replay buffer
         self.rasterizer = None
         self._train_config = train_config
         self._l5_config = l5_config
+        self._mode = train_config.dataset_mode
 
-        assert mode in ["ego", "agents"]
-        self._mode = mode
+        assert self._mode in ["ego", "agents"]
 
     @property
     def modality_shapes(self):
@@ -88,23 +90,15 @@ class L5RasterizedDataModule(pl.LightningDataModule, L5BaseDatasetModule):
 
         train_zarr = ChunkedDataset(dm.require(self._train_config.dataset_train_key)).open()
         valid_zarr = ChunkedDataset(dm.require(self._train_config.dataset_valid_key)).open()
-        self.ego_trainset = EgoDataset(self._l5_config, train_zarr, self.rasterizer)
-        self.ego_validset = EgoDataset(self._l5_config, valid_zarr, self.rasterizer)
-        # TODO: Fix NGC issue (see gitlab issue page)
-        # agents_mask = np.zeros(len(train_zarr.agents), dtype=np.bool)
-        # agents_mask[np.arange(0, len(agents_mask), 100)] = True
-        # self.agents_trainset = AgentDataset(self._l5_config, train_zarr, self.rasterizer, agents_mask=agents_mask)
-        # agents_mask = np.zeros(len(valid_zarr.agents), dtype=np.bool)
-        # agents_mask[np.arange(0, len(agents_mask), 100)] = True
-        # self.agents_validset = AgentDataset(self._l5_config, valid_zarr, self.rasterizer, agents_mask=agents_mask)
+
+        self.env_dataset = EgoDataset(self._l5_config, valid_zarr, self.rasterizer)
 
         if self._mode == "ego":
-            self.train_dataset = self.ego_trainset
-            self.valid_dataset = self.ego_validset
+            self.train_dataset = EgoDataset(self._l5_config, train_zarr, self.rasterizer)
+            self.valid_dataset = EgoDataset(self._l5_config, valid_zarr, self.rasterizer)
         else:
             raise NotImplementedError
-            self.train_dataset = self.agents_trainset
-            self.valid_dataset = self.agents_validset
+
 
     def train_dataloader(self):
         return DataLoader(
@@ -135,10 +129,9 @@ class L5MixedDataModule(L5RasterizedDataModule):
             self,
             l5_config,
             train_config: TrainConfig,
-            mode: str
     ):
         super(L5MixedDataModule, self).__init__(
-            l5_config=l5_config, train_config=train_config, mode=mode)
+            l5_config=l5_config, train_config=train_config)
         self.vectorizer = None
 
     def setup(self, stage: Optional[str] = None):
@@ -150,9 +143,6 @@ class L5MixedDataModule(L5RasterizedDataModule):
         train_zarr = ChunkedDataset(dm.require(self._train_config.dataset_train_key)).open()
         valid_zarr = ChunkedDataset(dm.require(self._train_config.dataset_valid_key)).open()
 
-        self.ego_trainset = EgoDatasetMixed(self._l5_config, train_zarr, self.vectorizer, self.rasterizer)
-        self.ego_validset = EgoDatasetMixed(self._l5_config, valid_zarr, self.vectorizer, self.rasterizer)
-
         if self._mode == "ego":
             if isinstance(self._train_config, L5KitOnlineTrainConfig):
                 self.experience_dataset = EgoReplayBufferMixed(
@@ -161,7 +151,8 @@ class L5MixedDataModule(L5RasterizedDataModule):
                     rasterizer=self.rasterizer,
                     capacity=self._train_config.training.buffer_size
                 )
-            self.train_dataset = self.ego_trainset
-            self.valid_dataset = self.ego_validset
+            self.train_dataset = EgoDatasetMixed(self._l5_config, train_zarr, self.vectorizer, self.rasterizer)
+            self.valid_dataset = EgoDatasetMixed(self._l5_config, valid_zarr, self.vectorizer, self.rasterizer)
         else:
-            raise NotImplementedError("Agent mixed dataset is not supported yet!")
+            self.train_dataset = AgentDatasetMixed(self._l5_config, train_zarr, self.vectorizer, self.rasterizer)
+            self.valid_dataset = AgentDatasetMixed(self._l5_config, valid_zarr, self.vectorizer, self.rasterizer)

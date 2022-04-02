@@ -66,7 +66,7 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
 
     # Dataset
     datamodule = datamodule_factory(
-        cls_name=cfg.train.datamodule_class, config=cfg, mode="ego"
+        cls_name=cfg.train.datamodule_class, config=cfg
     )
     datamodule.setup()
 
@@ -74,10 +74,9 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
     if cfg.train.rollout.enabled:
         env = EnvL5KitSimulation(
             cfg.env,
-            dataset=datamodule.ego_validset,
+            dataset=datamodule.env_dataset,
             seed=cfg.seed,
-            num_scenes=cfg.train.rollout.num_scenes,
-            compute_metrics=True
+            num_scenes=cfg.train.rollout.num_scenes
         )
         # Run rollout at regular intervals
         rollout_callback = RolloutCallback(
