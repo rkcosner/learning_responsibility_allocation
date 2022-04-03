@@ -13,7 +13,8 @@ from tbsim.utils.loss_utils import (
     MultiModal_trajectory_loss,
     goal_reaching_loss,
     collision_loss,
-    log_normal_mixture
+    log_normal_mixture,
+    NLL_GMM_loss
 )
 
 
@@ -423,7 +424,7 @@ class RasterizedDiscreteVAEModel(nn.Module):
             assert "logvar" in pred_batch["x_recons"]
             bs,M,T,D = pred_batch["trajectories"].shape
             var = torch.exp(pred_batch["x_recons"]["logvar"]).reshape(bs,M,-1)
-            pred_loss = -log_normal_mixture(target_traj.reshape(bs,-1), pred_batch["trajectories"].reshape(bs,M,-1), var).clip(-1e3,1e3).mean()
+            pred_loss = NLL_GMM_loss(target_traj.reshape(bs,-1), pred_batch["trajectories"].reshape(bs,M,-1), var, pred_batch["q"].log()).clip(-1e5,1e5).mean()
         elif self.recon_loss_type=="MSE":
             pred_loss = MultiModal_trajectory_loss(
                 predictions=pred_batch["trajectories"],

@@ -72,7 +72,7 @@ def KLD_discrete(logp,logq):
         logq (torch.Tensor): log probability of second discrete distribution (B,D)
     """
     return (torch.exp(logp)*(logp-logq)).sum(dim=1)
-def log_normal(x, m, v):
+def log_normal(x, m, v, avai=None):
     """
     Log probability of tensor x under diagonal multivariate normal with
     mean m and variance v. The last dimension of the tensors is treated
@@ -82,10 +82,14 @@ def log_normal(x, m, v):
         x (torch.Tensor): tensor with shape (B, ..., D)
         m (torch.Tensor): means tensor with shape (B, ..., D) or (1, ..., D)
         v (torch.Tensor): variances tensor with shape (B, ..., D) or (1, ..., D)
+        avai (torch.Tensor): availability of  x and m
     Returns:
         log_prob (torch.Tensor): log probabilities of shape (B, ...)
     """
-    element_wise = -0.5 * (torch.log(v) + (x - m).pow(2) / v + np.log(2 * np.pi))
+    if avai is None:
+        element_wise = -0.5 * (torch.log(v) + (x - m).pow(2) / v + np.log(2 * np.pi))
+    else:
+        element_wise = -0.5 * (torch.log(v) + ((x - m)*avai).pow(2) / v + np.log(2 * np.pi))
     log_prob = element_wise.sum(-1)
     return log_prob
 
@@ -126,8 +130,38 @@ def log_normal_mixture(x, m, v, w=None, log_w=None):
         log_prob = log_mean_exp(log_prob , dim=1) # mean accounts for uniform weights
     return log_prob
 
+def NLL_GMM_loss(x, m, v, logpi, detach=True):
+    """
+    Log probability of tensor x under a uniform mixture of Gaussians.
+    Adapted from CS 236 at Stanford.
+    Args:
+        x (torch.Tensor): tensor with shape (B, D)
+        m (torch.Tensor): means tensor with shape (B, M, D) or (1, M, D), where
+            M is number of mixture components
+        v (torch.Tensor): variances tensor with shape (B, M, D) or (1, M, D) where
+            M is number of mixture components
+        logpi (torch.Tensor): log probability of the modes (B,M)
+        detach (bool): option whether to detach all modes but the best one
 
-def log_mean_exp(x, dim):
+    Returns:
+        -log_prob (torch.Tensor): log probabilities of shape (B,)
+    """
+
+    # (B , D) -> (B , 1, D)
+    x = x.unsqueeze(1)
+    # (B, 1, D) -> (B, M, D) -> (B, M)
+    log_prob = log_normal(x, m, v)
+    if detach:
+        max_flag = (log_prob==log_prob.max(dim=1,keepdim=True)[0])
+        nonmax_flag = torch.logical_not(max_flag)
+        log_prob_detach = log_prob.detach()
+        log_prob_mean = log_mean_exp(log_prob*max_flag+log_prob_detach*nonmax_flag, dim=1, logpi=logpi)
+    else:
+        log_prob_mean = log_mean_exp(log_prob, dim=1, logpi=logpi)
+
+    return -log_prob_mean
+
+def log_mean_exp(x, dim,logpi=None):
     """
     Compute the log(mean(exp(x), dim)) in a numerically stable manner.
     Adapted from CS 236 at Stanford.
@@ -137,10 +171,10 @@ def log_mean_exp(x, dim):
     Returns:
         y (torch.Tensor): log(mean(exp(x), dim))
     """
-    return log_sum_exp(x, dim) - np.log(x.size(dim))
+    return log_sum_exp(x, dim, logpi) - np.log(x.size(dim))
 
 
-def log_sum_exp(x, dim=0):
+def log_sum_exp(x, dim=0,logpi=None):
     """
     Compute the log(sum(exp(x), dim)) in a numerically stable manner.
     Adapted from CS 236 at Stanford.
@@ -150,8 +184,11 @@ def log_sum_exp(x, dim=0):
     Returns:
         y (torch.Tensor): log(sum(exp(x), dim))
     """
+    if logpi is not None:
+        x+=logpi
     max_x = torch.max(x, dim)[0]
     new_x = x - max_x.unsqueeze(dim).expand_as(x)
+
     return max_x + (new_x.exp().sum(dim)).log()
 
 
