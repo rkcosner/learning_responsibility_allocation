@@ -4,13 +4,19 @@ from torch import optim as optim
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim import dynamics as dynamics
 from tbsim.utils import l5_utils as L5Utils
-from tbsim.utils.geometry_utils import transform_points_tensor
+from tbsim.utils.geometry_utils import transform_points_tensor, calc_distance_map
 from tbsim.utils.l5_utils import get_last_available_index
 from tbsim.utils.loss_utils import goal_reaching_loss, trajectory_loss, collision_loss
 import pdb
 
 
-def decode_spatial_prediction(prob_map, residual_yaw_map, num_samples=None):
+def generate_proxy_mask(orig_loc, radius,mode="L1"):
+    dis_map = calc_distance_map(orig_loc,max_dis = radius+1,mode=mode)
+    return dis_map<=radius
+
+
+
+def decode_spatial_prediction(prob_map, residual_yaw_map, num_samples=None,clearance=None):
     """
     Decode spatial predictions (e.g., UNet output) to a list of locations
     Args:
@@ -35,8 +41,22 @@ def decode_spatial_prediction(prob_map, residual_yaw_map, num_samples=None):
     else:
         # otherwise, use the probability map as a discrete distribution of location predictions
         dist = torch.distributions.Categorical(probs=flat_prob_map)
-        pixel_loc_flat = dist.sample((num_samples,)).permute(
-            1, 0)  # [n_sample, batch] -> [batch, n_sample]
+        if clearance is None:
+            pixel_loc_flat = dist.sample((num_samples,)).permute(
+                1, 0)  # [n_sample, batch] -> [batch, n_sample]
+        else:
+            proximity_map = torch.ones_like(prob_map,requires_grad=False)
+            pixel_loc_flat = list()
+            for i in range(num_samples):
+                dist = torch.distributions.Categorical(probs=flat_prob_map*proximity_map.flatten(start_dim=1))
+                sample_i = dist.sample()
+                sample_mask = torch.zeros_like(flat_prob_map,dtype=torch.bool)
+                sample_mask[torch.arange(b),sample_i]=True
+                proxy_mask = generate_proxy_mask(sample_mask.reshape(-1,h,w),clearance)
+                proximity_map = torch.logical_or(proximity_map,torch.logical_not(proxy_mask))
+                pixel_loc_flat.append(sample_i)
+            
+            pixel_loc_flat = torch.stack(pixel_loc_flat,dim=1)
         pixel_prob = torch.gather(flat_prob_map, dim=1, index=pixel_loc_flat)
 
     local_pred = torch.gather(

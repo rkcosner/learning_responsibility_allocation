@@ -448,7 +448,7 @@ class DiscreteCVAE(nn.Module):
         """
         p = outputs["p"]
         q = outputs["q"]
-        return (p*(torch.log(p)-torch.log(q))).sum(dim=-1)
+        return (p*(torch.log(p)-torch.log(q))).sum(dim=-1).mean()
     def compute_losses(self,outputs,targets,gamma=1):
         recon_loss = 0
         for k,v in outputs['x_recons'].items():

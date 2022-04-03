@@ -9,7 +9,7 @@ class L5KitTrainConfig(TrainConfig):
     def __init__(self):
         super(L5KitTrainConfig, self).__init__()
 
-        self.dataset_path = "/home/chenyx/repos/l5kit/prediction-dataset"
+        self.dataset_path = "/home/yuxiaoc/repos/l5kit/prediction-dataset"
         self.dataset_valid_key = "scenes/validate.zarr"
         self.dataset_train_key = "scenes/train.zarr"
         self.dataset_meta_key = "meta.json"
@@ -292,6 +292,25 @@ class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
 
         self.loss_weights.kl_loss = 1e-4
 
+class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
+    def __init__(self):
+        super(L5RasterizedDiscreteVAEConfig, self).__init__()
+        self.name = "l5_rasterized_discrete_vae"
+        self.map_feature_dim = 256
+        self.goal_conditional = True
+        self.goal_feature_dim = 32
+
+        self.vae.latent_dim = 10
+        self.vae.condition_dim = 128
+        self.vae.num_eval_samples = 10
+        self.vae.encoder.rnn_hidden_size = 100
+        self.vae.encoder.mlp_layer_dims = (128, 128)
+        self.vae.decoder.rnn_hidden_size = 100
+        self.vae.decoder.mlp_layer_dims = (128, 128)
+        self.vae.decoder.Gaussian_var = True
+        self.vae.recon_loss_type = "NLL"
+
+        self.loss_weights.kl_loss = 1e-4
 
 class L5TransformerPredConfig(AlgoConfig):
     def __init__(self):

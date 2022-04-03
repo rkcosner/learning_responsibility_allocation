@@ -362,7 +362,7 @@ def detect_collision(
     return None
 
 
-def calc_distance_map(road_flag,max_dis = 10):
+def calc_distance_map(road_flag,max_dis = 10,mode="L1"):
     """mark the image with manhattan distance to the drivable area
 
     Args:
@@ -372,10 +372,21 @@ def calc_distance_map(road_flag,max_dis = 10):
     out = torch.zeros_like(road_flag,dtype=torch.float)
     out[road_flag==0] = max_dis 
     out[road_flag==1] = 0
-    for i in range(max_dis-1):
-        out[...,1:,:] = torch.min(out[...,1:,:],out[...,:-1,:]+1)
-        out[...,:-1,:] = torch.min(out[...,:-1,:],out[...,1:,:]+1)
-        out[...,:,1:] = torch.min(out[...,:,1:],out[...,:,:-1]+1)
-        out[...,:,:-1] = torch.min(out[...,:,:-1],out[...,:,1:]+1)
+    if mode=="L1":
+        for i in range(max_dis-1):
+            out[...,1:,:] = torch.min(out[...,1:,:],out[...,:-1,:]+1)
+            out[...,:-1,:] = torch.min(out[...,:-1,:],out[...,1:,:]+1)
+            out[...,:,1:] = torch.min(out[...,:,1:],out[...,:,:-1]+1)
+            out[...,:,:-1] = torch.min(out[...,:,:-1],out[...,:,1:]+1)
+    elif mode=="Linf":
+        for i in range(max_dis-1):
+            out[...,1:,:] = torch.min(out[...,1:,:],out[...,:-1,:]+1)
+            out[...,:-1,:] = torch.min(out[...,:-1,:],out[...,1:,:]+1)
+            out[...,:,1:] = torch.min(out[...,:,1:],out[...,:,:-1]+1)
+            out[...,:,:-1] = torch.min(out[...,:,:-1],out[...,:,1:]+1)
+            out[...,1:,1:] = torch.min(out[...,1:,1:],out[...,:-1,:-1]+1)
+            out[...,1:,:-1] = torch.min(out[...,1:,:-1],out[...,:-1,1:]+1)
+            out[...,:-1,:-1] = torch.min(out[...,:-1,:-1],out[...,1:,1:]+1)
+            out[...,:-1,1:] = torch.min(out[...,:-1,1:],out[...,1:,:-1]+1)
 
     return out

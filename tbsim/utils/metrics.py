@@ -50,6 +50,7 @@ def _assert_shapes(
         batch_size,
         num_modes,
     ), f"expected 2D (Batch x Modes) array for confidences, got {confidences.shape}"
+
     assert np.allclose(np.sum(confidences, axis=1), 1), "confidences should sum to 1"
     assert avails.shape == (
         batch_size,
@@ -232,7 +233,7 @@ def batch_average_displacement_error(
     if mode == "oracle":
         error = np.min(error, axis=1)  # use best hypothesis
     elif mode == "mean":
-        error = np.mean(error, axis=1)  # average over hypotheses
+        error = np.sum(error*confidences, axis=1).mean()  # average over hypotheses
     else:
         raise ValueError(f"mode: {mode} not valid")
 

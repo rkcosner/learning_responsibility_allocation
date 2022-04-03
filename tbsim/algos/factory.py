@@ -7,6 +7,7 @@ from tbsim.algos.l5kit_algos import (
     L5TransformerTrafficModel,
     L5TransformerGANTrafficModel,
     L5VAETrafficModel,
+    L5DiscreteVAETrafficModel,
     L5TrafficModelGC,
     SpatialPlanner,
 )
@@ -48,6 +49,10 @@ def algo_factory(config: ExperimentConfig, modality_shapes: dict, data_module: L
         )
     elif algo_name == "l5_rasterized_vae":
         algo = L5VAETrafficModel(
+            algo_config=algo_config, modality_shapes=modality_shapes
+        )
+    elif algo_name == "l5_rasterized_discrete_vae":
+        algo = L5DiscreteVAETrafficModel(
             algo_config=algo_config, modality_shapes=modality_shapes
         )
     elif algo_name == "spatial_planner":

@@ -231,6 +231,37 @@ def trajectory_loss(predictions, targets, availabilities, weights_scaling=None, 
     loss = torch.mean(crit(predictions, targets) * target_weights)
     return loss
 
+def MultiModal_trajectory_loss(predictions, targets, availabilities, prob, weights_scaling=None, crit=nn.MSELoss(reduction="none")):
+    """
+    Aggregated per-step loss between gt and predicted trajectories
+    Args:
+        predictions (torch.Tensor): predicted trajectory [B, M, (A), T, D]
+        targets (torch.Tensor): target trajectory [B, (A), T, D]
+        availabilities (torch.Tensor): [B, (A), T]
+        prob (torch.Tensor): [B, M]
+        weights_scaling (torch.Tensor): [D]
+        crit (nn.Module): loss function
+
+    Returns:
+        loss (torch.Tensor)
+    """
+
+    if weights_scaling is None:
+        weights_scaling = torch.ones(targets.shape[-1]).to(targets.device)
+    assert weights_scaling.shape[-1] == targets.shape[-1]
+    target_weights = (availabilities.unsqueeze(-1) * weights_scaling).unsqueeze(1)
+    loss_v = crit(predictions,targets.unsqueeze(1))*target_weights
+    loss_v_aggregated = loss_v.sum(dim=[2,3])
+    loss_v_detached = loss_v.detach()
+    min_flag = (loss_v_aggregated==loss_v_aggregated.min(dim=1,keepdim=True)[0])
+    nonmin_flag = torch.logical_not(min_flag)
+    min_weight = (min_flag*prob)[...,None,None]*target_weights
+    nonmin_weight = (nonmin_flag*prob)[...,None,None]*target_weights
+    loss = ((loss_v*min_weight)+(loss_v_detached*nonmin_weight)).sum()/availabilities.sum()
+    
+    return loss
+
+        
 
 def goal_reaching_loss(predictions, targets, availabilities, weights_scaling=None, crit=nn.MSELoss(reduction="none")):
     """
@@ -338,6 +369,8 @@ def weighted_multimodal_trajectory_loss(
     max_mask = torch.zeros([*err.shape[:2], 1, 1, 1], dtype=torch.bool).to(err.device)
     max_mask[torch.arange(0, err.size(0)), max_idx] = True
     nonmax_mask = ~max_mask
+    import pdb
+    pdb.set_trace()
     loss = (
         torch.sum((err * max_mask)) + torch.sum((err * nonmax_mask).detach())
     ) / total_count

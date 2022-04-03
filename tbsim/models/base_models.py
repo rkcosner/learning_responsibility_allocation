@@ -967,7 +967,8 @@ class TrajectoryDecoder(nn.Module):
             dynamics_type: Union[str, dynamics.DynType] = None,
             dynamics_kwargs: dict = None,
             step_time: float = None,
-            network_kwargs: dict = None
+            network_kwargs: dict = None,
+            Gaussian_var = False
     ):
         """
         A class that predict future trajectories based on input features
@@ -980,6 +981,7 @@ class TrajectoryDecoder(nn.Module):
                 the future trajectories.
             step_time (float): time between steps. required for using dynamics models
             network_kwargs (dict): keyword args for the decoder networks
+            Gaussian_var (bool): whether output the variance of the predicted trajectory
         """
         super(TrajectoryDecoder, self).__init__()
         self.feature_dim = feature_dim
@@ -989,6 +991,7 @@ class TrajectoryDecoder(nn.Module):
         self._network_kwargs = network_kwargs
         self._dynamics_type = dynamics_type
         self._dynamics_kwargs = dynamics_kwargs
+        self.Gaussian_var = Gaussian_var
         self._create_dynamics()
         self._create_networks()
 
@@ -1047,6 +1050,7 @@ class MLPTrajectoryDecoder(TrajectoryDecoder):
         net_kwargs = dict() if self._network_kwargs is None else dict(self._network_kwargs)
         if self._network_kwargs is None:
             net_kwargs = dict()
+        
         assert isinstance(self.num_steps, int)
         if self.dyn is None:
             pred_shapes = OrderedDict(
@@ -1054,6 +1058,8 @@ class MLPTrajectoryDecoder(TrajectoryDecoder):
         else:
             pred_shapes = OrderedDict(
                 trajectories=(self.num_steps, self.dyn.udim))
+        if self.Gaussian_var:
+            pred_shapes["logvar"] = (self.num_steps, self.state_dim)
 
         state_as_input = net_kwargs.pop("state_as_input")
         if self.dyn is not None:
