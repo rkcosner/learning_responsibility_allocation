@@ -81,7 +81,8 @@ class L5RasterizedDataModule(pl.LightningDataModule, L5BaseDatasetModule):
     def modality_shapes(self):
         dm = LocalDataManager(None)
         rasterizer = build_rasterizer(self._l5_config, dm)
-        return OrderedDict(image=(rasterizer.num_channels(), 224, 224))
+        h, w = self._l5_config["raster_params"]["raster_size"]
+        return OrderedDict(image=(rasterizer.num_channels(), h, w))
 
     def setup(self, stage: Optional[str] = None):
         os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath(self._train_config.dataset_path)
@@ -154,5 +155,6 @@ class L5MixedDataModule(L5RasterizedDataModule):
             self.train_dataset = EgoDatasetMixed(self._l5_config, train_zarr, self.vectorizer, self.rasterizer)
             self.valid_dataset = EgoDatasetMixed(self._l5_config, valid_zarr, self.vectorizer, self.rasterizer)
         else:
-            self.train_dataset = AgentDatasetMixed(self._l5_config, train_zarr, self.vectorizer, self.rasterizer)
-            self.valid_dataset = AgentDatasetMixed(self._l5_config, valid_zarr, self.vectorizer, self.rasterizer)
+            read_cached_mask = not self._train_config.on_ngc
+            self.train_dataset = AgentDatasetMixed(self._l5_config, train_zarr, self.vectorizer, self.rasterizer, read_cached_mask=read_cached_mask)
+            self.valid_dataset = AgentDatasetMixed(self._l5_config, valid_zarr, self.vectorizer, self.rasterizer, read_cached_mask=read_cached_mask)

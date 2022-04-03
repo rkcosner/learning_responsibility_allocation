@@ -14,8 +14,9 @@ class L5KitTrainConfig(TrainConfig):
         self.dataset_train_key = "scenes/train.zarr"
         self.dataset_meta_key = "meta.json"
         self.datamodule_class = "L5RasterizedDataModule"
+        self.dataset_mode = "ego"
 
-        self.rollout.enabled = True
+        self.rollout.enabled = False
         self.rollout.every_n_steps = 500
         self.rollout.num_episodes = 10
         self.rollout.num_scenes = 3
@@ -249,7 +250,7 @@ class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
         self.decoder.layer_dims = (128, 128)
 
         self.use_rotated_roi = False
-        self.use_transformer = True
+        self.use_transformer = False
         self.roi_layer_key = "layer4"
         self.use_GAN = False
 

@@ -243,6 +243,12 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--on_ngc",
+        action="store_true",
+        help="whether running the script on ngc (this will change some behaviors like avoid writing into dataset)"
+    )
+
+    parser.add_argument(
         "--debug", action="store_true", help="Debug mode, suppress wandb logging, etc."
     )
 
@@ -269,6 +275,8 @@ if __name__ == "__main__":
 
     if args.wandb_project_name is not None:
         default_config.train.logging.wandb_project_name = args.wandb_project_name
+
+    default_config.train.on_ngc = args.on_ngc
 
     if args.debug:
         # Test policy rollout
