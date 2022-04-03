@@ -9,6 +9,7 @@ from tbsim.algos.l5kit_algos import (
     L5VAETrafficModel,
     L5TrafficModelGC,
     SpatialPlanner,
+    GANTrafficModel
 )
 
 from tbsim.algos.multiagent_algos import (
@@ -65,6 +66,8 @@ def algo_factory(config: ExperimentConfig, modality_shapes: dict, data_module: L
         algo = SelfPlayHierarchical(cfg=config, data_module=data_module)
     elif algo_name == "l5_ebm":
         algo = EBMMetric(algo_config=algo_config, modality_shapes=modality_shapes)
+    elif algo_name == "gan":
+        algo = GANTrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
     else:
         raise NotImplementedError("{} is not a valid algorithm" % algo_name)
     return algo

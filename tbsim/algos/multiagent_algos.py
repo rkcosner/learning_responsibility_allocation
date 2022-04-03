@@ -37,7 +37,7 @@ class MATrafficModel(pl.LightningModule):
             use_rotated_roi=algo_config.use_rotated_roi,
             use_transformer=algo_config.use_transformer,
             roi_layer_key=algo_config.roi_layer_key,
-            use_GAN=algo_config.use_GAN
+            use_gan=algo_config.use_GAN
         )
 
     @property

@@ -14,7 +14,8 @@ from tbsim.configs.l5kit_config import (
     L5KitMixedSemanticMapEnvConfig,
     MARasterizedPlanningConfig,
     L5RasterizedVAEConfig,
-    EBMMetricConfig
+    EBMMetricConfig,
+    L5RasterizedGANConfig
 )
 
 from tbsim.configs.l5kit_online_config import (
@@ -59,6 +60,13 @@ EXP_CONFIG_REGISTRY["l5_mixed_plan"] = ExperimentConfig(
     registered_name="l5_mixed_plan",
 )
 
+EXP_CONFIG_REGISTRY["l5_gan_plan"] = ExperimentConfig(
+    train_config=L5KitTrainConfig(),
+    env_config=L5KitEnvConfig(),
+    algo_config=L5RasterizedGANConfig(),
+    registered_name="l5_gan_plan",
+)
+
 EXP_CONFIG_REGISTRY["l5_mixed_vae_plan"] = ExperimentConfig(
     train_config=L5KitMixedTrainConfig(),
     env_config=L5KitMixedSemanticMapEnvConfig(),
@@ -78,13 +86,6 @@ EXP_CONFIG_REGISTRY["l5_mixed_transformerGAN_plan"] = ExperimentConfig(
     env_config=L5KitMixedEnvConfig(),
     algo_config=L5TransformerGANConfig(),
     registered_name="l5_mixed_transformerGAN_plan",
-)
-
-EXP_CONFIG_REGISTRY["l5_sp_hierarchical"] = ExperimentConfig(
-    train_config=L5KitOnlineTrainConfig(),
-    env_config=L5KitMixedSemanticMapEnvConfig(),
-    algo_config=SelfPlayHierarchicalConfig(),
-    registered_name="l5_sp_hierarchical",
 )
 
 EXP_CONFIG_REGISTRY["l5_ebm"] = ExperimentConfig(

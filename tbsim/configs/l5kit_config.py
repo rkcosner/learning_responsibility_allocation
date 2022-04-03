@@ -294,6 +294,28 @@ class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
         self.loss_weights.kl_loss = 1e-4
 
 
+class L5RasterizedGANConfig(L5RasterizedPlanningConfig):
+    def __init__(self):
+        super(L5RasterizedGANConfig, self).__init__()
+        self.name = "gan"
+        self.map_feature_dim = 256
+
+        self.decoder.layer_dims = (128, 128)
+
+        self.traj_encoder.rnn_hidden_size = 100
+        self.traj_encoder.feature_dim = 32
+        self.traj_encoder.mlp_layer_dims = (128, 128)
+
+        self.gan.latent_dim = 4
+        self.gan.loss_type = "lsgan"
+        self.gan.disc_layer_dims = (128, 128)
+        self.gan.num_eval_samples = 10
+
+        self.loss_weights.prediction_loss = 0.0
+        self.loss_weights.gan_gen_loss = 1.0
+        self.loss_weights.gan_disc_loss = 1.0
+
+
 class L5TransformerPredConfig(AlgoConfig):
     def __init__(self):
         super(L5TransformerPredConfig, self).__init__()
