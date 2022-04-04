@@ -48,6 +48,7 @@ def generate_agent_sample_mixed(
     vectorize_lane=False,
     skimp_fn=False,
     rasterize_agents=False,
+    vectorize_agents=True,
 ) -> dict:
     """Generates the inputs and targets to train a deep prediction model with vectorized inputs.
     A deep prediction model takes as input the state of the world in vectorized form,
@@ -217,7 +218,7 @@ def generate_agent_sample_mixed(
     }
 
     with timer.timed("vectorize"):
-        if not skimp_fn():
+        if not skimp_fn() and vectorize_agents:
             vectorized_features = vectorizer.vectorize(
                 selected_track_id,
                 agent_centroid_m,
@@ -273,7 +274,7 @@ def generate_agent_sample_mixed(
                 vectorized_features["other_agents_agent_from_world"] =other_agents_agent_from_world
         else:
             vectorized_features = dict()
-    if vectorize_lane:
+    if not skimp_fn() and vectorize_agents and vectorize_lane:
         other_agents_idx = np.where(
             vectorized_features["all_other_agents_history_availability"][:, 0]
             & (vectorized_features["all_other_agents_types"] >= 3)

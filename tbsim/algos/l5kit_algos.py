@@ -12,6 +12,7 @@ from tbsim.models.rasterized_models import (
     RasterizedPlanningModel,
     RasterizedVAEModel,
     RasterizedGCModel,
+    RasterizedGANModel,
     RasterizedDiscreteVAEModel,
 )
 from tbsim.models.base_models import (
@@ -83,24 +84,24 @@ class L5TrafficModel(pl.LightningModule):
         metrics["ego_ADE"] = np.mean(ade)
         metrics["ego_FDE"] = np.mean(fde)
 
-        targets_all = L5Utils.batch_to_target_all_agents(data_batch)
-        raw_type = torch.cat(
-            (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
-            dim=1,
-        ).type(torch.int64)
-
-        pred_edges = L5Utils.generate_edges(
-            raw_type,
-            targets_all["extents"],
-            pos_pred=targets_all["target_positions"],
-            yaw_pred=targets_all["target_yaws"],
-        )
-
-        coll_rates = TensorUtils.to_numpy(
-            Metrics.batch_pairwise_collision_rate(pred_edges)
-        )
-        for c in coll_rates:
-            metrics["coll_" + c] = float(coll_rates[c])
+        # targets_all = L5Utils.batch_to_target_all_agents(data_batch)
+        # raw_type = torch.cat(
+        #     (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
+        #     dim=1,
+        # ).type(torch.int64)
+        #
+        # pred_edges = L5Utils.generate_edges(
+        #     raw_type,
+        #     targets_all["extents"],
+        #     pos_pred=targets_all["target_positions"],
+        #     yaw_pred=targets_all["target_yaws"],
+        # )
+        #
+        # coll_rates = TensorUtils.to_numpy(
+        #     Metrics.batch_pairwise_collision_rate(pred_edges)
+        # )
+        # for c in coll_rates:
+        #     metrics["coll_" + c] = float(coll_rates[c])
 
         return metrics
 
@@ -253,7 +254,7 @@ class SpatialPlanner(pl.LightningModule):
             keys["valCELoss"] = "val/losses_pixel_ce_loss"
         return keys
 
-    def forward(self, obs_dict, mask_drivable=False, num_samples=None,clearance=None):
+    def forward(self, obs_dict, mask_drivable=False, num_samples=None, clearance=None):
         pred_map = self.nets["policy"](obs_dict["image"])
         assert pred_map.shape[1] == 4  # [location_logits, residual_x, residual_y, yaw]
 
@@ -559,6 +560,7 @@ class L5VAETrafficModel(pl.LightningModule):
         )
         return action, info
 
+
 class L5DiscreteVAETrafficModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):
         super(L5DiscreteVAETrafficModel, self).__init__()
@@ -636,7 +638,6 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
             weight_decay=optim_params["regularization"]["L2"],
         )
 
-
     def _compute_metrics(self, pred_batch, sample_batch, data_batch):
         metrics = {}
 
@@ -692,6 +693,138 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
             # otherwise, sample action from posterior
             action_preds = self.nets["policy"].predict(obs_dict)["predictions"]
             info = dict()
+
+        action = Action(
+            positions=action_preds["positions"],
+            yaws=action_preds["yaws"]
+        )
+        return action, info
+
+
+class GANTrafficModel(pl.LightningModule):
+    def __init__(self, algo_config, modality_shapes):
+        super(GANTrafficModel, self).__init__()
+
+        self.algo_config = algo_config
+        self.nets = RasterizedGANModel(
+            algo_config=algo_config,
+            modality_shapes=modality_shapes,
+            weights_scaling=[1.0, 1.0, 1.0],
+        )
+
+    @property
+    def checkpoint_monitor_keys(self):
+        return {"egoADE": "val/metrics_ego_ADE"}
+
+    def forward(self, obs_dict):
+        return self.nets.forward(obs_dict)["predictions"]
+
+    def _compute_metrics(self, pred_batch, data_batch, sample_batch = None):
+        metrics = {}
+
+        gt = TensorUtils.to_numpy(data_batch["target_positions"])
+        avail = TensorUtils.to_numpy(data_batch["target_availabilities"])
+
+        # compute ADE & FDE based on posterior params
+        recon_preds = TensorUtils.to_numpy(pred_batch["predictions"]["positions"])
+        metrics["ego_ADE"] = Metrics.single_mode_metrics(
+            Metrics.batch_average_displacement_error, gt, recon_preds, avail
+        ).mean()
+        metrics["ego_FDE"] = Metrics.single_mode_metrics(
+            Metrics.batch_final_displacement_error, gt, recon_preds, avail
+        ).mean()
+
+        # print(metrics["ego_ADE"])
+
+        # compute ADE & FDE based on trajectory samples
+        if sample_batch is None:
+            return metrics
+
+        sample_preds = TensorUtils.to_numpy(sample_batch["predictions"]["positions"])
+        conf = np.ones(sample_preds.shape[0:2]) / float(sample_preds.shape[1])
+        metrics["ego_avg_ADE"] = Metrics.batch_average_displacement_error(gt, sample_preds, conf, avail, "mean").mean()
+        metrics["ego_min_ADE"] = Metrics.batch_average_displacement_error(gt, sample_preds, conf, avail, "oracle").mean()
+        metrics["ego_avg_FDE"] = Metrics.batch_final_displacement_error(gt, sample_preds, conf, avail, "mean").mean()
+        metrics["ego_min_FDE"] = Metrics.batch_final_displacement_error(gt, sample_preds, conf, avail, "oracle").mean()
+
+        # compute diversity scores based on trajectory samples
+        metrics["ego_avg_ATD"] = Metrics.batch_average_diversity(gt, sample_preds, conf, avail, "mean").mean()
+        metrics["ego_max_ATD"] = Metrics.batch_average_diversity(gt, sample_preds, conf, avail, "max").mean()
+        metrics["ego_avg_FTD"] = Metrics.batch_final_diversity(gt, sample_preds, conf, avail, "mean").mean()
+        metrics["ego_max_FTD"] = Metrics.batch_final_diversity(gt, sample_preds, conf, avail, "max").mean()
+
+        return metrics
+
+    def training_step(self, batch, batch_idx, optimizer_idx):
+        # pout = self.nets(batch)
+        # losses = self.nets.compute_losses(pout, batch)
+
+        if optimizer_idx == 0:
+            pout = self.nets.forward_generator(batch)
+            losses = self.nets.compute_losses_generator(pout, batch)
+            total_loss = 0.0
+            for lk, l in losses.items():
+                loss = l * self.algo_config.loss_weights[lk]
+                self.log("train/losses_" + lk, loss)
+                total_loss += loss
+            metrics = self._compute_metrics(pout, batch)
+            for mk, m in metrics.items():
+                self.log("train/metrics_" + mk, m)
+            # print("gen", gen_loss.item())
+            return total_loss
+        if optimizer_idx == 1:
+            pout = self.nets.forward_discriminator(batch)
+            losses = self.nets.compute_losses_discriminator(pout, batch)
+            total_loss = losses["gan_disc_loss"] * self.algo_config.loss_weights["gan_disc_loss"]
+            # print("disc", total_loss.item())
+            self.log("train/losses_disc_loss", total_loss)
+            return total_loss
+
+    def validation_step(self, batch, batch_idx):
+        pout = TensorUtils.detach(self.nets.forward_generator(batch))
+        losses = self.nets.compute_losses_generator(pout, batch)
+        with torch.no_grad():
+            samples = self.nets.sample(batch, n=self.algo_config.gan.num_eval_samples)
+        metrics = self._compute_metrics(pout, batch, samples)
+        return {"losses": losses, "metrics": metrics}
+
+    def validation_epoch_end(self, outputs) -> None:
+        for k in outputs[0]["losses"]:
+            m = torch.stack([o["losses"][k] for o in outputs]).mean()
+            self.log("val/losses_" + k, m)
+
+        for k in outputs[0]["metrics"]:
+            m = np.stack([o["metrics"][k] for o in outputs]).mean()
+            self.log("val/metrics_" + k, m)
+
+    def configure_optimizers(self):
+        optim_params = self.algo_config.optim_params["policy"]
+        gen_optim = optim.Adam(
+            params=self.nets.generator_mods.parameters(),
+            lr=optim_params["learning_rate"]["initial"],
+            weight_decay=optim_params["regularization"]["L2"],
+        )
+
+        optim_params = self.algo_config.optim_params["disc"]
+        disc_optim = optim.Adam(
+            params=self.nets.discriminator_mods.parameters(),
+            lr=optim_params["learning_rate"]["initial"],
+            weight_decay=optim_params["regularization"]["L2"],
+        )
+
+        return [gen_optim, disc_optim], []
+
+    def get_action(self, obs_dict, num_action_samples=1, **kwargs):
+        obs_dict = dict(obs_dict)
+
+        preds = self.nets.sample(obs_dict, n=num_action_samples)["predictions"]  # [B, N, T, 3]
+        action_preds = TensorUtils.map_tensor(preds, lambda x: x[:, 0])  # use the first sample as the action
+        info = dict(
+            action_samples=Action(
+                positions=preds["positions"],
+                yaws=preds["yaws"]
+            ).to_dict()
+        )
 
         action = Action(
             positions=action_preds["positions"],

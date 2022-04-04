@@ -97,6 +97,7 @@ if __name__ == "__main__":
         "--wandb_project_name",
         ngc_cfg["wandb_project_name"],
         "--remove_exp_dir",
+        "--on_ngc"
     ]
 
     res = input("upload codebase to ngc workspace? (y/n)")

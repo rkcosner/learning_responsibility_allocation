@@ -45,7 +45,7 @@ class AgentAwareRasterizedModel(nn.Module):
             weights_scaling: tuple = (1.0, 1.0, 1.0),
             use_transformer=True,
             use_rotated_roi=True,
-            use_GAN=False,
+            use_gan=False,
             roi_layer_key="layer4"
     ) -> None:
 
@@ -98,18 +98,17 @@ class AgentAwareRasterizedModel(nn.Module):
         else:
             self.transformer = None
 
-        if use_GAN:
-
+        if use_gan:
             traj_enc_dim = 64
             self.traj_encoder = base_models.MLP(
                 input_dim=2*future_num_frames, output_dim=traj_enc_dim, layer_dims=(64, 64))
             # TODO: make this part of the config
-            self.GAN = base_models.MLP(input_dim=agent_feature_dim + global_feature_dim + goal_dim+traj_enc_dim,
-                                       output_dim=1,
-                                       layer_dims=(256, 128),
-                                       output_activation=nn.Sigmoid)
+            self.gan_disc = base_models.MLP(input_dim=agent_feature_dim + global_feature_dim + goal_dim + traj_enc_dim,
+                                            output_dim=1,
+                                            layer_dims=(256, 128),
+                                            output_activation=nn.Sigmoid)
         else:
-            self.GAN = None
+            self.gan_disc = None
 
         assert len(roi_size) == 2
         self.roi_size = nn.Parameter(
@@ -350,19 +349,19 @@ class AgentAwareRasterizedModel(nn.Module):
         all_feats = self.extract_features(data_batch)
         pred_dict = self.forward_prediction(all_feats, data_batch, plan=plan)
 
-        if self.GAN is not None:
+        if self.gan_disc is not None:
             b = all_feats.shape[0]
             ego_feats = all_feats[:, 0]
             traj_enc_feat_GT = self.traj_encoder(
                 data_batch["target_positions"][..., :2].reshape(b, -1).detach())
-            likelihood_GT = self.GAN(
-                torch.cat((ego_feats.detach(), traj_enc_feat_GT), -1))
+            likelihood_GT = self.gan_disc(
+                torch.cat((ego_feats, traj_enc_feat_GT), -1))
 
             ego_preds = self.get_ego_predictions(pred_dict)
             traj_enc_feat_pred = self.traj_encoder(
                 ego_preds["trajectories"][..., :2].reshape(b, -1))
-            likelihood_pred = self.GAN(
-                torch.cat((ego_feats.detach(), traj_enc_feat_pred), -1))
+            likelihood_pred = self.gan_disc(
+                torch.cat((ego_feats, traj_enc_feat_pred), -1))
             pred_dict["likelihood_GT"] = likelihood_GT
             pred_dict["likelihood_pred"] = likelihood_pred
         return pred_dict
@@ -411,7 +410,7 @@ class AgentAwareRasterizedModel(nn.Module):
             goal_loss=goal_loss,
             collision_loss=coll_loss
         )
-        if self.GAN is not None:
+        if self.gan_disc is not None:
             imitation_loss = F.binary_cross_entropy(
                 pred_batch["likelihood_pred"], torch.ones_like(pred_batch["likelihood_pred"]))
             losses["GAN_loss"] = imitation_loss

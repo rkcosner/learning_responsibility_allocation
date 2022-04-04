@@ -182,8 +182,8 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.history_num_frames = 5
         self.history_num_frames_ego = 5
         self.history_num_frames_agents = 5
-        self.future_num_frames = 50
-        self.step_time = 0.1
+        self.future_num_frames = 25
+        self.step_time = 0.2
         self.render_ego_history = False
 
         self.decoder.layer_dims = ()
@@ -311,6 +311,19 @@ class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
         self.vae.recon_loss_type = "NLL"
 
         self.loss_weights.kl_loss = 1e-4
+
+class L5RasterizedECConfig(L5RasterizedPlanningConfig):
+    def __init__(self):
+        super(L5RasterizedECConfig, self).__init__()
+        self.name = "l5_rasterized_EC"
+        self.map_feature_dim = 256
+        self.goal_conditional = True
+        self.goal_feature_dim = 32
+
+        self.EC.feature_dim = 64
+        self.EC.RNN_hidden_size = 32
+
+
 
 class L5TransformerPredConfig(AlgoConfig):
     def __init__(self):

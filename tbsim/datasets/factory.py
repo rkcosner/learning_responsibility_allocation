@@ -3,7 +3,7 @@ from tbsim.utils.config_utils import translate_l5kit_cfg
 from tbsim.datasets.l5kit_datamodules import L5MixedDataModule, L5RasterizedDataModule
 
 
-def datamodule_factory(cls_name: str, config, **kwargs):
+def datamodule_factory(cls_name: str, config):
     """
     A factory for creating pl.DataModule.
 
@@ -18,7 +18,7 @@ def datamodule_factory(cls_name: str, config, **kwargs):
     """
     if cls_name.startswith("L5"):  # TODO: make this less hacky
         l5_config = translate_l5kit_cfg(config)
-        datamodule = eval(cls_name)(l5_config=l5_config, train_config=config.train, mode=kwargs["mode"])
+        datamodule = eval(cls_name)(l5_config=l5_config, train_config=config.train)
     else:
         raise NotImplementedError("{} is not a supported datamodule type".format(cls_name))
     return datamodule

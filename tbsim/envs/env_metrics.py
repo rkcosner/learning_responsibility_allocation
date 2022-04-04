@@ -235,11 +235,12 @@ class CollisionRate(EnvMetrics):
 
 
 class LearnedMetric(EnvMetrics):
-    def __init__(self, metric_algo):
+    def __init__(self, metric_algo, perturbations=None):
         super(LearnedMetric, self).__init__()
         self.metric_algo = metric_algo
         self.traj_len = metric_algo.algo_config.future_num_frames
         self.state_buffer = []
+        self.perturbations = dict() if perturbations is None else perturbations
         self.total_steps = 0
 
     def reset(self):
@@ -270,7 +271,7 @@ class LearnedMetric(EnvMetrics):
         state = dict(state_buffer[0])  # avoid changing the original state_dict
         state["image"] = (state["image"] / 255.).astype(np.float32)
         agent_from_world = state["agent_from_world"]
-        yaw_world = state["yaw"]
+        yaw_current = state["yaw"]
 
         # transform traversed trajectories into the ego frame of a given state
         traj_inds = range(1, self.traj_len + 1)
@@ -281,14 +282,23 @@ class LearnedMetric(EnvMetrics):
         assert traj_pos.shape[0] == traj_yaw.shape[0]
 
         agent_traj_pos = transform_points(points=traj_pos, transf_matrix=agent_from_world)
-        agent_traj_yaw = angular_distance(traj_yaw, yaw_world[:, None])
+        agent_traj_yaw = angular_distance(traj_yaw, yaw_current[:, None])
 
         state["target_positions"] = agent_traj_pos
         state["target_yaws"] = agent_traj_yaw[:, :, None]
 
-        state_torch = TensorUtils.to_torch(state, self.metric_algo.device)
-        with torch.no_grad():
-            metrics = self.metric_algo.get_metrics(state_torch)
+        metrics = dict()
+        if self.perturbations is None:
+            state_torch = TensorUtils.to_torch(state, self.metric_algo.device)
+            with torch.no_grad():
+                metrics = self.metric_algo.get_metrics(state_torch)
+        else:
+            for k, v in self.perturbations.items():
+                state_perturbed = v.perturb(state)
+                state_torch = TensorUtils.to_torch(state_perturbed, self.metric_algo.device)
+                m = self.metric_algo.get_metrics(state_torch)
+                for mk in m:
+                    metrics["{}_{}".format(k, mk)] = m[mk]
         metrics= TensorUtils.to_numpy(metrics)
 
         step_metrics = dict()
@@ -313,5 +323,5 @@ class LearnedMetric(EnvMetrics):
             ep_metrics_agg[k] = np.mean(met, axis=1)
             for met_horizon in [10, 50, 100, 150]:
                 if met.shape[1] >= met_horizon:
-                    ep_metrics_agg[k + "_@{}".format(met_horizon)] = np.mean(met[:, :met_horizon], axis=1)
+                    ep_metrics_agg[k + "@{}".format(met_horizon)] = np.mean(met[:, :met_horizon], axis=1)
         return ep_metrics_agg

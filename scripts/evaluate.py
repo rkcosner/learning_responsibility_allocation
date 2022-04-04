@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader
 from l5kit.data import LocalDataManager, ChunkedDataset
 from l5kit.dataset import EgoDataset
 from l5kit.rasterization import build_rasterizer
+from l5kit.kinematic import Perturbation
 
 from tbsim.l5kit.vectorizer import build_vectorizer
 from tbsim.algos.l5kit_algos import L5TrafficModel, L5VAETrafficModel, L5TrafficModelGC, SpatialPlanner
@@ -141,8 +142,25 @@ class HierAgentAware(Hierarchical):
         return self.policy
 
 
+class RandomPerturbation(object):
+    def __init__(self, std: np.ndarray):
+        assert std.shape == (3,) and np.all(std >= 0)
+        self.std = std
+
+    def perturb(self, obs):
+        obs = dict(obs)
+        target_traj = np.concatenate((obs["target_positions"], obs["target_yaws"]), axis=-1)
+        std = np.ones_like(target_traj) * self.std[None, :]
+        noise = np.random.normal(np.zeros_like(target_traj), std)
+        target_traj += noise
+        obs["target_positions"] = target_traj[..., :2]
+        obs["target_yaws"] = target_traj[..., :1]
+        return obs
+
+
 def create_env(
         sim_cfg,
+        eval_cfg,
         num_scenes_per_batch,
         device,
         num_simulation_steps=200,
@@ -155,6 +173,7 @@ def create_env(
     rasterizer = build_rasterizer(l5_config, dm)
     vectorizer = build_vectorizer(l5_config, dm)
     eval_zarr = ChunkedDataset(dm.require(sim_cfg.train.dataset_valid_key)).open()
+
     env_dataset = EgoDatasetMixed(l5_config, eval_zarr, vectorizer, rasterizer)
     modality_shapes = OrderedDict(image=[rasterizer.num_channels()] + list(sim_cfg.env.rasterizer.raster_size))
 
@@ -179,10 +198,19 @@ def create_env(
             modality_shapes=modality_shapes
         ).eval().to(device)
 
+        base_noise = np.array(eval_cfg.perturb.std)
+        perturbations = {
+            "p=0.0": RandomPerturbation(std=base_noise * 0.0),
+            "p=0.1": RandomPerturbation(std=base_noise * 0.1),
+            "p=0.2": RandomPerturbation(std=base_noise * 0.2),
+            "p=0.5": RandomPerturbation(std=base_noise * 0.5),
+            "p=1.0": RandomPerturbation(std=base_noise * 1.0)
+        }
+
         metrics = dict(
             all_off_road_rate=EnvMetrics.OffRoadRate(),
             all_collision_rate=EnvMetrics.CollisionRate(),
-            all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo)
+            all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations)
         )
         # metrics = dict(
         #     all_off_road_rate=EnvMetrics.OffRoadRate(),
@@ -198,15 +226,8 @@ def create_env(
         prediction_only=False,
         renderer=render_rasterizer,
         metrics=metrics,
-        skimp_rollout=skimp_rollout
+        skimp_rollout=skimp_rollout,
     )
-
-    # npr = np.random.RandomState(seed=0)  # TODO: maybe put indices into a file?
-    # eval_scenes = npr.choice(
-    #     np.arange(env.total_num_scenes),
-    #     size=eval_cfg.num_scenes_to_evaluate,
-    #     replace=False
-    # )
 
     eval_scenes = [9058, 5232, 14153, 8173, 10314, 7027, 9812, 1090, 9453, 978, 10263, 874, 5563, 9613, 261, 2826, 2175, 9977, 6423, 1069, 1836, 8198, 5034, 6016, 2525, 927, 3634, 11806, 4911, 6192, 11641, 461, 142, 15493, 4919, 8494, 14572, 2402, 308, 1952, 13287, 15614, 6529, 12, 11543, 4558, 489, 6876, 15279, 6095, 5877, 8928, 10599, 16150, 11296, 9382, 13352, 1794, 16122, 12429, 15321, 8614, 12447, 4502, 13235, 2919, 15893, 12960, 7043, 9278, 952, 4699, 768, 13146, 8827, 16212, 10777, 15885, 11319, 9417, 14092, 14873, 6740, 11847, 15331, 15639, 11361, 14784, 13448, 10124, 4872, 3567, 5543, 2214, 7624, 10193, 7297, 1308, 3951, 14001]
     return env, modality_shapes, eval_scenes
@@ -249,6 +270,7 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
 
     env, modality_shapes, eval_scenes = create_env(
         sim_cfg,
+        eval_cfg,
         device=device,
         num_scenes_per_batch=eval_cfg.num_scenes_per_batch,
         num_simulation_steps=eval_cfg.num_simulation_steps,
