@@ -132,7 +132,8 @@ class HierAgentAware(Hierarchical):
             planner,
             mask_drivable=kwargs.get("mask_drivable"),
             sample=True,
-            num_plan_samples=kwargs.get("num_plan_samples")
+            num_plan_samples=kwargs.get("num_plan_samples"),
+            clearance=3,
         )
         sampler = HierarchicalSamplerWrapper(plan_sampler, controller)
 
@@ -170,7 +171,7 @@ def create_env(
 
     metrics = dict()
     if compute_metrics:
-        ckpt_path, cfg_path = get_checkpoint("2759937", "47999_")
+        ckpt_path, cfg_path = get_checkpoint("2761440", "69999_")
         metric_cfg = get_experiment_config_from_file(cfg_path, locked=True)
         metric_algo = EBMMetric.load_from_checkpoint(
             checkpoint_path=ckpt_path,
@@ -428,7 +429,7 @@ if __name__ == "__main__":
         data_to_disk = False
         skimp_rollout = False
         compute_metrics = True
-
+    # compute_metrics = False
     cfg.lock()
     run_evaluation(
         cfg,

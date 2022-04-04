@@ -71,8 +71,8 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
 
     data_cfg = get_experiment_config_from_file(predictor_config_path)
     assert data_cfg.env.rasterizer.map_type == "py_semantic"
-    # os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath("/home/chenyx/repos/l5kit/prediction-dataset")
-    os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath("/home/chenyx/repos/l5kit/prediction-dataset")
+    # os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath("/home/yuxiaoc/repos/l5kit/prediction-dataset")
+    os.environ["L5KIT_DATA_FOLDER"] = os.path.abspath("/home/yuxiaoc/repos/l5kit/prediction-dataset")
     dm = LocalDataManager(None)
     l5_config = translate_l5kit_cfg(data_cfg)
     rasterizer = build_rasterizer(l5_config, dm)
@@ -180,6 +180,7 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
         # scene_indices=[150, 1652, 2258, 3496, 14962, 15756]
     )
     print(stats)
+    import pdb
     for i, scene_images in enumerate(renderings[0]):
         writer = get_writer(os.path.join(
             video_dir, "{}.mp4".format(info["scene_index"][i])), fps=10)
@@ -190,8 +191,8 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
 
 
 def test_sample_planner():
-    os.environ["L5KIT_DATA_FOLDER"] = "/home/chenyx/repos/l5kit/prediction-dataset"
-    config_file = "/home/chenyx/repos/behavior-generation/experiments/templates/l5_ma_rasterized_plan.json"
+    os.environ["L5KIT_DATA_FOLDER"] = "/home/yuxiaoc/repos/l5kit/prediction-dataset"
+    config_file = "/home/yuxiaoc/repos/behavior-generation/experiments/templates/l5_ma_rasterized_plan.json"
     pred_cfg = get_experiment_config_from_file(config_file)
 
     # set env variable for data

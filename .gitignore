@@ -1,6 +1,7 @@
 TransformerGAN_trained_models/
 TransformerPred_trained_models/
 l5_rasterized_vae_trained_models/
+l5_rasterized_discrete_vae_trained_models/
 wandb/
 tbsim-ws/
 videos/
@@ -11,6 +12,7 @@ experiments/test/
 l5_rasterized_gc_trained_models/
 ma_rasterized_trained_models/
 spatial_planner_trained_models/
+results/
 
 ## config files
 *.yaml

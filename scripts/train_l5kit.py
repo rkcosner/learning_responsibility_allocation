@@ -150,17 +150,17 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
             "WANDB_APIKEY" in os.environ
         ), "Set api key by `export WANDB_APIKEY=<your-apikey>`"
         apikey = os.environ["WANDB_APIKEY"]
-        wandb.login(key=apikey)
-        logger = WandbLogger(
-            name=cfg.name, project=cfg.train.logging.wandb_project_name
-        )
+        # wandb.login(key=apikey)
+        # logger = WandbLogger(
+        #     name=cfg.name, project=cfg.train.logging.wandb_project_name
+        # )
         # record the entire config on wandb
-        logger.experiment.config.update(cfg.to_dict())
-        logger.watch(model=model)
+        # logger.experiment.config.update(cfg.to_dict())
+        # logger.watch(model=model)
     else:
         logger = None
         print("WARNING: not logging training stats")
-
+    logger = None
     # Train
     trainer = pl.Trainer(
         default_root_dir=root_dir,
