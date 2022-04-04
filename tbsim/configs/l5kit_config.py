@@ -122,6 +122,7 @@ class L5KitMixedEnvConfig(EnvConfig):
         self.data_generation_params.lane_params.max_retrieval_distance_m = 35
         self.data_generation_params.lane_params.max_num_crosswalks = 20
         self.data_generation_params.rasterize_agents = False
+        self.data_generation_params.vectorize_agents = True
 
         # step size of lane interpolation
         self.data_generation_params.lane_params.lane_interp_step_size = 5.0

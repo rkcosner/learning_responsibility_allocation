@@ -75,8 +75,8 @@ class EgoDatasetMixed(BaseEgoDataset):
             rasterizer=self.rasterizer,
             skimp_fn=self.is_skimp,
             vectorize_lane=self.cfg["data_generation_params"]["vectorize_lane"],
-            rasterize_agents = self.cfg["data_generation_params"]["rasterize_agents"] if "rasterize_agents" in self.cfg["data_generation_params"] else False,
-
+            rasterize_agents = self.cfg["data_generation_params"].get("rasterize_agents", False),
+            vectorize_agents = self.cfg["data_generation_params"].get("vectorize_agents", True),
         )
 
     def get_scene_dataset(self, scene_index: int) -> "EgoDatasetMixed":

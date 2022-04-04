@@ -18,8 +18,11 @@ from l5kit.data import ChunkedDataset, get_frames_slice_from_scenes, get_agents_
 from l5kit.dataset.utils import convert_str_to_fixed_length_tensor
 from l5kit.kinematic import Perturbation
 from l5kit.rasterization import Rasterizer, RenderContext
+from l5kit.dataset import EgoDataset
 from l5kit.dataset.select_agents import select_agents, get_valid_agents, TH_DISTANCE_AV, TH_YAW_DEGREE, TH_EXTENT_RATIO
 from tbsim.l5kit.vectorizer import Vectorizer
+from tbsim.l5kit.agent_sampling_mixed import generate_agent_sample_mixed
+from tbsim.utils.timer import Timers
 
 from tbsim.l5kit.l5_ego_dataset import EgoDatasetMixed
 
@@ -77,12 +80,11 @@ def select_agents_np(
     return agents_mask
 
 
-class AgentDatasetMixed(EgoDatasetMixed):
+class AgentDataset(EgoDataset):
     def __init__(
             self,
             cfg: dict,
             zarr_dataset: ChunkedDataset,
-            vectorizer: Vectorizer,
             rasterizer: Rasterizer,
             perturbation: Optional[Perturbation] = None,
             read_cached_mask: bool = True,
@@ -92,7 +94,7 @@ class AgentDatasetMixed(EgoDatasetMixed):
     ):
         assert perturbation is None, "AgentDataset does not support perturbation (yet)"
 
-        super(AgentDatasetMixed, self).__init__(cfg, zarr_dataset, vectorizer, rasterizer, perturbation)
+        super(AgentDataset, self).__init__(cfg, zarr_dataset, rasterizer, perturbation)
 
         # store the valid agents indices (N_valid_agents,)
         if agents_mask is None:
@@ -178,13 +180,13 @@ class AgentDatasetMixed(EgoDatasetMixed):
             state_index = frame_index - self.cumulative_sizes[scene_index - 1]
         return self.get_frame(scene_index, state_index, track_id=track_id)
 
-    def get_scene_dataset(self, scene_index: int) -> "AgentDatasetMixed":
+    def get_scene_dataset(self, scene_index: int) -> "AgentDataset":
         """
         Differs from parent only in the return type.
         Instead of doing everything from scratch, we rely on super call and fix the agents_mask
         """
 
-        new_dataset = super(AgentDatasetMixed, self).get_scene_dataset(scene_index).dataset
+        new_dataset = super(AgentDataset, self).get_scene_dataset(scene_index).dataset
 
         # filter agents_bool values
         frame_interval = self.dataset.scenes[scene_index]["frame_index_interval"]
@@ -193,8 +195,8 @@ class AgentDatasetMixed(EgoDatasetMixed):
         end_index = self.dataset.frames[frame_interval[1] - 1]["agent_index_interval"][1]
         agents_mask = self.agents_mask[start_index:end_index].copy()
 
-        return AgentDatasetMixed(
-            self.cfg, new_dataset, self.vectorizer, self.rasterizer, self.perturbation, agents_mask  # overwrite the loaded one
+        return AgentDataset(
+            self.cfg, new_dataset, self.rasterizer, self.perturbation, agents_mask  # overwrite the loaded one
         )
 
     def get_scene_indices(self, scene_idx: int) -> np.ndarray:
@@ -235,3 +237,87 @@ class AgentDatasetMixed(EgoDatasetMixed):
         mask_idx = self.mask_indices[agent_start:agent_end]
         indices = mask_idx[mask_idx != -1]
         return indices
+
+
+class AgentDatasetMixed(AgentDataset):
+    def __init__(
+            self,
+            cfg: dict,
+            zarr_dataset: ChunkedDataset,
+            vectorizer: Vectorizer,
+            rasterizer: Rasterizer,
+            perturbation: Optional[Perturbation] = None,
+            read_cached_mask: bool = True,
+            agents_mask: Optional[np.ndarray] = None,
+            min_frame_history: int = MIN_FRAME_HISTORY,
+            min_frame_future: int = MIN_FRAME_FUTURE,
+    ):
+        self.vectorizer = vectorizer
+        self._skimp = False
+        self.timer = Timers()
+
+        super(AgentDatasetMixed, self).__init__(
+            cfg=cfg,
+            zarr_dataset=zarr_dataset,
+            rasterizer=rasterizer,
+            perturbation=perturbation,
+            read_cached_mask=read_cached_mask,
+            agents_mask=agents_mask,
+            min_frame_history=min_frame_history,
+            min_frame_future=min_frame_future
+        )
+
+    def set_skimp(self, skimp):
+        self._skimp = skimp
+
+    def is_skimp(self):
+        return self._skimp
+
+    def _get_sample_function(self) -> Callable[..., dict]:
+        render_context = RenderContext(
+            raster_size_px=np.array(self.cfg["raster_params"]["raster_size"]),
+            pixel_size_m=np.array(self.cfg["raster_params"]["pixel_size"]),
+            center_in_raster_ratio=np.array(self.cfg["raster_params"]["ego_center"]),
+            set_origin_to_bottom=self.cfg["raster_params"]["set_origin_to_bottom"],
+        )
+        return partial(
+            generate_agent_sample_mixed,
+            render_context=render_context,
+            history_num_frames_ego=self.cfg["model_params"]["history_num_frames_ego"],
+            history_num_frames_agents=self.cfg["model_params"][
+                "history_num_frames_agents"
+            ],
+            future_num_frames=self.cfg["model_params"]["future_num_frames"],
+            step_time=self.cfg["model_params"]["step_time"],
+            filter_agents_threshold=self.cfg["raster_params"][
+                "filter_agents_threshold"
+            ],
+            timer=self.timer,
+            perturbation=self.perturbation,
+            vectorizer=self.vectorizer,
+            rasterizer=self.rasterizer,
+            skimp_fn=self.is_skimp,
+            vectorize_lane=self.cfg["data_generation_params"]["vectorize_lane"],
+            rasterize_agents = self.cfg["data_generation_params"].get("rasterize_agents", False),
+            vectorize_agents = self.cfg["data_generation_params"].get("vectorize_agents", True),
+        )
+
+    def get_scene_dataset(self, scene_index: int) -> "AgentDatasetMixed":
+        """
+        Differs from parent only in the return type.
+        Instead of doing everything from scratch, we rely on super call and fix the agents_mask
+        """
+
+        new_dataset = super(AgentDataset, self).get_scene_dataset(scene_index).dataset
+
+        # filter agents_bool values
+        frame_interval = self.dataset.scenes[scene_index]["frame_index_interval"]
+        # ASSUMPTION: all agents_index are consecutive
+        start_index = self.dataset.frames[frame_interval[0]]["agent_index_interval"][0]
+        end_index = self.dataset.frames[frame_interval[1] - 1]["agent_index_interval"][1]
+        agents_mask = self.agents_mask[start_index:end_index].copy()
+
+        return AgentDatasetMixed(
+            self.cfg, new_dataset, self.vectorizer, self.rasterizer, self.perturbation, agents_mask  # overwrite the loaded one
+        )
+

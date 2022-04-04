@@ -21,7 +21,7 @@ from tbsim.l5kit.l5_ego_dataset import (
     EgoDatasetMixed, EgoReplayBufferMixed
 )
 
-from tbsim.l5kit.l5_agent_dataset import AgentDatasetMixed
+from tbsim.l5kit.l5_agent_dataset import AgentDatasetMixed, AgentDataset
 
 
 class LazyRasterizer(Rasterizer):
@@ -98,8 +98,9 @@ class L5RasterizedDataModule(pl.LightningDataModule, L5BaseDatasetModule):
             self.train_dataset = EgoDataset(self._l5_config, train_zarr, self.rasterizer)
             self.valid_dataset = EgoDataset(self._l5_config, valid_zarr, self.rasterizer)
         else:
-            raise NotImplementedError
-
+            read_cached_mask = not self._train_config.on_ngc
+            self.train_dataset = AgentDataset(self._l5_config, train_zarr, self.rasterizer, read_cached_mask=read_cached_mask)
+            self.valid_dataset = AgentDataset(self._l5_config, valid_zarr, self.rasterizer, read_cached_mask=read_cached_mask)
 
     def train_dataloader(self):
         return DataLoader(
@@ -145,13 +146,6 @@ class L5MixedDataModule(L5RasterizedDataModule):
         valid_zarr = ChunkedDataset(dm.require(self._train_config.dataset_valid_key)).open()
 
         if self._mode == "ego":
-            if isinstance(self._train_config, L5KitOnlineTrainConfig):
-                self.experience_dataset = EgoReplayBufferMixed(
-                    self._l5_config,
-                    vectorizer=self.vectorizer,
-                    rasterizer=self.rasterizer,
-                    capacity=self._train_config.training.buffer_size
-                )
             self.train_dataset = EgoDatasetMixed(self._l5_config, train_zarr, self.vectorizer, self.rasterizer)
             self.valid_dataset = EgoDatasetMixed(self._l5_config, valid_zarr, self.vectorizer, self.rasterizer)
         else:
