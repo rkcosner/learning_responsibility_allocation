@@ -16,7 +16,7 @@ def generate_proxy_mask(orig_loc, radius,mode="L1"):
 
 
 
-def decode_spatial_prediction(prob_map, residual_yaw_map, num_samples=None,clearance=None):
+def decode_spatial_prediction(prob_map, residual_yaw_map, num_samples=None, clearance=None):
     """
     Decode spatial predictions (e.g., UNet output) to a list of locations
     Args:

@@ -84,24 +84,24 @@ class L5TrafficModel(pl.LightningModule):
         metrics["ego_ADE"] = np.mean(ade)
         metrics["ego_FDE"] = np.mean(fde)
 
-        targets_all = L5Utils.batch_to_target_all_agents(data_batch)
-        raw_type = torch.cat(
-            (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
-            dim=1,
-        ).type(torch.int64)
-
-        pred_edges = L5Utils.generate_edges(
-            raw_type,
-            targets_all["extents"],
-            pos_pred=targets_all["target_positions"],
-            yaw_pred=targets_all["target_yaws"],
-        )
-
-        coll_rates = TensorUtils.to_numpy(
-            Metrics.batch_pairwise_collision_rate(pred_edges)
-        )
-        for c in coll_rates:
-            metrics["coll_" + c] = float(coll_rates[c])
+        # targets_all = L5Utils.batch_to_target_all_agents(data_batch)
+        # raw_type = torch.cat(
+        #     (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
+        #     dim=1,
+        # ).type(torch.int64)
+        #
+        # pred_edges = L5Utils.generate_edges(
+        #     raw_type,
+        #     targets_all["extents"],
+        #     pos_pred=targets_all["target_positions"],
+        #     yaw_pred=targets_all["target_yaws"],
+        # )
+        #
+        # coll_rates = TensorUtils.to_numpy(
+        #     Metrics.batch_pairwise_collision_rate(pred_edges)
+        # )
+        # for c in coll_rates:
+        #     metrics["coll_" + c] = float(coll_rates[c])
 
         return metrics
 
@@ -560,6 +560,7 @@ class L5VAETrafficModel(pl.LightningModule):
         )
         return action, info
 
+
 class L5DiscreteVAETrafficModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):
         super(L5DiscreteVAETrafficModel, self).__init__()
@@ -762,13 +763,11 @@ class GANTrafficModel(pl.LightningModule):
         if optimizer_idx == 0:
             pout = self.nets.forward_generator(batch)
             losses = self.nets.compute_losses_generator(pout, batch)
-            pred_loss = losses["prediction_loss"] * self.algo_config.loss_weights["prediction_loss"]
-            gen_loss = losses["gan_gen_loss"] * self.algo_config.loss_weights["gan_gen_loss"]
-            yaw_loss = losses["yaw_reg_loss"] * self.algo_config.loss_weights["yaw_reg_loss"]
-            self.log("train/losses_prediction_loss", pred_loss)
-            self.log("train/losses_gen_loss", gen_loss)
-            self.log("train/losses_yaw_loss", yaw_loss)
-            total_loss = pred_loss + gen_loss + yaw_loss
+            total_loss = 0.0
+            for lk, l in losses.items():
+                loss = l * self.algo_config.loss_weights[lk]
+                self.log("train/losses_" + lk, loss)
+                total_loss += loss
             metrics = self._compute_metrics(pout, batch)
             for mk, m in metrics.items():
                 self.log("train/metrics_" + mk, m)
@@ -806,8 +805,8 @@ class GANTrafficModel(pl.LightningModule):
             lr=optim_params["learning_rate"]["initial"],
             weight_decay=optim_params["regularization"]["L2"],
         )
-        optim_params = self.algo_config.optim_params["GAN"]
 
+        optim_params = self.algo_config.optim_params["disc"]
         disc_optim = optim.Adam(
             params=self.nets.discriminator_mods.parameters(),
             lr=optim_params["learning_rate"]["initial"],
@@ -825,7 +824,7 @@ class GANTrafficModel(pl.LightningModule):
             action_samples=Action(
                 positions=preds["positions"],
                 yaws=preds["yaws"]
-            )
+            ).to_dict()
         )
 
         action = Action(
