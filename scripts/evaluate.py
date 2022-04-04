@@ -18,7 +18,14 @@ from l5kit.rasterization import build_rasterizer
 from l5kit.kinematic import Perturbation
 
 from tbsim.l5kit.vectorizer import build_vectorizer
-from tbsim.algos.l5kit_algos import L5TrafficModel, L5VAETrafficModel, L5TrafficModelGC, SpatialPlanner
+from tbsim.algos.l5kit_algos import (
+    L5TrafficModel,
+    L5VAETrafficModel,
+    L5TrafficModelGC,
+    SpatialPlanner,
+    GANTrafficModel,
+    L5DiscreteVAETrafficModel
+)
 from tbsim.algos.metric_algos import EBMMetric
 from tbsim.algos.multiagent_algos import MATrafficModel
 from tbsim.configs.registry import get_registered_experiment_config
@@ -67,6 +74,67 @@ class ReplayAction(PolicyComposer):
 class GroundTruth(PolicyComposer):
     def get_policy(self, **kwargs):
         return GTPolicy(device=self.device)
+
+
+class BC(PolicyComposer):
+    def get_policy(self, **kwargs):
+        policy_ckpt_path, policy_config_path = get_checkpoint(
+            ngc_job_id="2775586",
+            ckpt_key="iter73000",
+            ckpt_root_dir=self.ckpt_dir,
+        )
+        policy_cfg = get_experiment_config_from_file(policy_config_path)
+        policy = L5TrafficModel.load_from_checkpoint(
+            policy_ckpt_path,
+            algo_config=policy_cfg.algo,
+            modality_shapes=self.modality_shapes,
+        ).to(self.device).eval()
+        return policy
+
+
+class TrafficSim(PolicyComposer):
+    def get_policy(self, **kwargs):
+        policy_ckpt_path, policy_config_path = get_checkpoint(
+            ngc_job_id="",
+            ckpt_key="",
+            ckpt_root_dir=self.ckpt_dir,
+        )
+        policy_cfg = get_experiment_config_from_file(policy_config_path)
+        policy = L5VAETrafficModel.load_from_checkpoint(
+            policy_ckpt_path,
+            algo_config=policy_cfg.algo,
+            modality_shapes=self.modality_shapes,
+        ).to(self.device).eval()
+        return policy
+
+
+class TPP(PolicyComposer):
+    def get_policy(self, **kwargs):
+        policy_ckpt_path, policy_config_path = get_checkpoint(
+            ngc_job_id="",
+            ckpt_key="",
+            ckpt_root_dir=self.ckpt_dir,
+        )
+        policy_cfg = get_experiment_config_from_file(policy_config_path)
+        policy = L5DiscreteVAETrafficModel.load_from_checkpoint(
+            policy_ckpt_path,
+            algo_config=policy_cfg.algo,
+            modality_shapes=self.modality_shapes,
+        ).to(self.device).eval()
+        return policy
+
+
+class GAN(PolicyComposer):
+    def get_policy(self, **kwargs):
+        policy_ckpt_path = "/home/danfeix/workspace/tbsim/gan_trained_models/test/run0/checkpoints/iter11999_ep0_egoADE1.41.ckpt"
+        policy_config_path = "/home/danfeix/workspace/tbsim/gan_trained_models/test/run0/config.json"
+        policy_cfg = get_experiment_config_from_file(policy_config_path)
+        policy = GANTrafficModel.load_from_checkpoint(
+            policy_ckpt_path,
+            algo_config=policy_cfg.algo,
+            modality_shapes=self.modality_shapes,
+        ).to(self.device).eval()
+        return policy
 
 
 class Hierarchical(PolicyComposer):
@@ -198,13 +266,14 @@ def create_env(
         ).eval().to(device)
 
         base_noise = np.array(eval_cfg.perturb.std)
-        perturbations = {
-            "p=0.0": RandomPerturbation(std=base_noise * 0.0),
-            "p=0.1": RandomPerturbation(std=base_noise * 0.1),
-            "p=0.2": RandomPerturbation(std=base_noise * 0.2),
-            "p=0.5": RandomPerturbation(std=base_noise * 0.5),
-            "p=1.0": RandomPerturbation(std=base_noise * 1.0)
-        }
+        perturbations = dict()
+        # perturbations = {
+        #     "p=0.0": RandomPerturbation(std=base_noise * 0.0),
+        #     "p=0.1": RandomPerturbation(std=base_noise * 0.1),
+        #     "p=0.2": RandomPerturbation(std=base_noise * 0.2),
+        #     "p=0.5": RandomPerturbation(std=base_noise * 0.5),
+        #     "p=1.0": RandomPerturbation(std=base_noise * 1.0)
+        # }
 
         metrics = dict(
             all_off_road_rate=EnvMetrics.OffRoadRate(),
@@ -290,7 +359,19 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
     obs_to_torch = eval_cfg.eval_class not in ["GroundTruth", "ReplayAction"]
 
     result_stats = None
+    scene_i = 0
+    parallel_count = 0
+
     while scene_i < eval_cfg.num_scenes_to_evaluate:
+        scene_indices = eval_scenes[scene_i: scene_i + eval_cfg.num_scenes_per_batch]
+        if eval_cfg.parallel_simulation:
+            parallel_count += 1
+            if parallel_count == eval_cfg.num_parallel:
+                parallel_count = 0
+                scene_i += eval_cfg.num_scenes_per_batch
+        else:
+            scene_i += eval_cfg.num_scenes_per_batch
+
         stats, info, renderings = rollout_episodes(
             env,
             rollout_policy,
@@ -298,10 +379,9 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
             n_step_action=eval_cfg.n_step_action,
             render=render_to_video,
             skip_first_n=1,
-            scene_indices=eval_scenes[scene_i: scene_i + eval_cfg.num_scenes_per_batch],
+            scene_indices=scene_indices,
             obs_to_torch=obs_to_torch
         )
-        scene_i += eval_cfg.num_scenes_per_batch
 
         print(info["scene_index"])
         print(stats)
