@@ -164,13 +164,22 @@ class RasterizedGANModel(nn.Module):
         super().__init__()
         trajectory_shape = (algo_config.future_num_frames, 3)
 
-        self.map_encoder = base_models.RasterizedMapEncoder(
+        self.gen_map_encoder = base_models.RasterizedMapEncoder(
             model_arch=algo_config.model_architecture,
             input_image_shape=modality_shapes["image"],
             feature_dim=algo_config.map_feature_dim,
             use_spatial_softmax=algo_config.spatial_softmax.enabled,
             spatial_softmax_kwargs=algo_config.spatial_softmax.kwargs
         )
+
+        self.disc_map_encoder = base_models.RasterizedMapEncoder(
+            model_arch=algo_config.model_architecture,
+            input_image_shape=modality_shapes["image"],
+            feature_dim=algo_config.map_feature_dim,
+            use_spatial_softmax=algo_config.spatial_softmax.enabled,
+            spatial_softmax_kwargs=algo_config.spatial_softmax.kwargs
+        )
+
         self.traj_encoder = base_models.RNNTrajectoryEncoder(
             trajectory_dim=3,
             rnn_hidden_size=algo_config.traj_encoder.rnn_hidden_size,
@@ -192,8 +201,8 @@ class RasterizedGANModel(nn.Module):
             layer_dims=algo_config.gan.disc_layer_dims
         )
 
-        self.generator_mods = nn.ModuleList(modules=[self.map_encoder, self.traj_encoder, self.traj_decoder])
-        self.discriminator_mods = nn.ModuleList(modules=[self.map_encoder, self.traj_encoder, self.gan_disc])
+        self.generator_mods = nn.ModuleList(modules=[self.gen_map_encoder, self.traj_decoder])
+        self.discriminator_mods = nn.ModuleList(modules=[self.disc_map_encoder, self.traj_encoder, self.gan_disc])
 
         self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
         self.algo_config = algo_config
@@ -236,9 +245,63 @@ class RasterizedGANModel(nn.Module):
 
         return out_dict
 
+    def forward_generator(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        image_batch = data_batch["image"]
+        map_feat = self.gen_map_encoder(image_batch)
+
+        if self.traj_decoder.dyn is not None:
+            curr_states = L5Utils.get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
+        else:
+            curr_states = None
+
+        gan_noise = torch.randn(image_batch.shape[0], self.algo_config.gan.latent_dim).to(image_batch.device)
+        input_feats = torch.cat((map_feat, gan_noise), dim=-1)
+        dec_output = self.traj_decoder.forward(inputs=input_feats, current_states=curr_states)
+        traj = dec_output["trajectories"]
+
+        pred_positions = traj[:, :, :2]
+        pred_yaws = traj[:, :, 2:3]
+        out_dict = {
+            "trajectories": traj,
+            "predictions": {"positions": pred_positions, "yaws": pred_yaws}
+        }
+        if self.traj_decoder.dyn is not None:
+            out_dict["controls"] = dec_output["controls"]
+
+        pred_traj_feats = self.traj_encoder(traj)
+        pred_score = self.gan_disc(torch.cat((map_feat, pred_traj_feats), dim=-1))
+        out_dict["gen_score"] = torch.sigmoid(pred_score).squeeze(-1)
+        return out_dict
+
+    def forward_discriminator(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        image_batch = data_batch["image"]
+        map_feat = self.gen_map_encoder(image_batch)
+
+        if self.traj_decoder.dyn is not None:
+            curr_states = L5Utils.get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
+        else:
+            curr_states = None
+
+
+        gan_noise = torch.randn(image_batch.shape[0], self.algo_config.gan.latent_dim).to(image_batch.device)
+        input_feats = torch.cat((map_feat, gan_noise), dim=-1)
+        dec_output = self.traj_decoder.forward(inputs=input_feats, current_states=curr_states)
+        traj = dec_output["trajectories"]
+
+        target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=2)
+        pred_traj_feats = self.traj_encoder(traj.detach())
+        real_traj_feats = self.traj_encoder(target_traj)
+        disc_pred_score = self.gan_disc(torch.cat((map_feat, pred_traj_feats), dim=-1))
+        disc_real_score = self.gan_disc(torch.cat((map_feat, real_traj_feats), dim=-1))
+
+        out_dict = dict()
+        out_dict["disc_pred_score"] = torch.sigmoid(disc_pred_score).squeeze(-1)
+        out_dict["disc_real_score"] = torch.sigmoid(disc_real_score).squeeze(-1)
+        return out_dict
+
     def sample(self, data_batch, n):
         image_batch = data_batch["image"]
-        map_feat = self.map_encoder(image_batch)
+        map_feat = self.gen_map_encoder(image_batch)
         map_feat = TensorUtils.repeat_by_expand_at(map_feat, repeats=n, dim=0)
 
         if self.traj_decoder.dyn is not None:
@@ -261,7 +324,16 @@ class RasterizedGANModel(nn.Module):
 
         return TensorUtils.reshape_dimensions(out_dict, begin_axis=0, end_axis=1, target_dims=(image_batch.shape[0], n))
 
-    def compute_losses(self, pred_batch, data_batch):
+    def get_adv_loss_function(self):
+        if self.algo_config.gan.loss_type == "gan":
+            adv_loss_func = nn.BCELoss()
+        elif self.algo_config.gan.loss_type == "lsgan":
+            adv_loss_func = nn.MSELoss()
+        else:
+            raise Exception("GAN loss {} is not supported".format(self.algo_config.gan.loss_type))
+        return adv_loss_func
+
+    def compute_losses_generator(self, pred_batch, data_batch):
         target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=2)
         pred_loss = trajectory_loss(
             predictions=pred_batch["trajectories"],
@@ -269,30 +341,31 @@ class RasterizedGANModel(nn.Module):
             availabilities=data_batch["target_availabilities"],
             weights_scaling=self.weights_scaling
         )
+        device = target_traj.device
+        valid = torch.ones(target_traj.shape[0]).to(device)
+        gen_loss = self.get_adv_loss_function()(pred_batch["gen_score"], valid)
+        losses = OrderedDict(
+            prediction_loss=pred_loss,
+            gan_gen_loss=gen_loss,
+        )
+        if self.traj_decoder.dyn is not None:
+            losses["yaw_reg_loss"] = torch.mean(pred_batch["controls"][..., 1] ** 2)
+        return losses
 
-        # compute gan loss
-        if self.algo_config.gan.loss_type == "gan":
-            adv_loss_func = nn.BCELoss()
-        elif self.algo_config.gan.loss_type == "lsgan":
-            adv_loss_func = nn.MSELoss()
-        else:
-            raise Exception("GAN loss {} is not supported".format(self.algo_config.gan.loss_type))
+    def compute_losses_discriminator(self, pred_batch, data_batch):
+        target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=2)
 
         device = target_traj.device
         valid = torch.ones(target_traj.shape[0]).to(device)
         fake = torch.zeros(target_traj.shape[0]).to(device)
-        gen_loss = adv_loss_func(pred_batch["gen_score"], valid)
+        adv_loss_func = self.get_adv_loss_function()
         real_loss = adv_loss_func(pred_batch["disc_real_score"], valid)
         fake_loss = adv_loss_func(pred_batch["disc_pred_score"], fake)
         disc_loss = (real_loss + fake_loss) / 2
 
         losses = OrderedDict(
-            prediction_loss=pred_loss,
-            gan_gen_loss=gen_loss,
             gan_disc_loss=disc_loss
         )
-        if self.traj_decoder.dyn is not None:
-            losses["yaw_reg_loss"] = torch.mean(pred_batch["controls"][..., 1] ** 2)
         return losses
 
 

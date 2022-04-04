@@ -299,6 +299,8 @@ class L5RasterizedGANConfig(L5RasterizedPlanningConfig):
         super(L5RasterizedGANConfig, self).__init__()
         self.name = "gan"
         self.map_feature_dim = 256
+        self.optim_params.GAN.learning_rate.initial = 1e-3  # disc learning rate
+        self.optim_params.policy.learning_rate.initial = 1e-4  # generator learning rate
 
         self.decoder.layer_dims = (128, 128)
 

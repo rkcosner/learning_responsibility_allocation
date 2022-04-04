@@ -614,29 +614,35 @@ class GANTrafficModel(pl.LightningModule):
         return metrics
 
     def training_step(self, batch, batch_idx, optimizer_idx):
-        pout = self.nets(batch)
-        losses = self.nets.compute_losses(pout, batch)
+        # pout = self.nets(batch)
+        # losses = self.nets.compute_losses(pout, batch)
 
         if optimizer_idx == 0:
+            pout = self.nets.forward_generator(batch)
+            losses = self.nets.compute_losses_generator(pout, batch)
             pred_loss = losses["prediction_loss"] * self.algo_config.loss_weights["prediction_loss"]
             gen_loss = losses["gan_gen_loss"] * self.algo_config.loss_weights["gan_gen_loss"]
+            yaw_loss = losses["yaw_reg_loss"] * self.algo_config.loss_weights["yaw_reg_loss"]
             self.log("train/losses_prediction_loss", pred_loss)
             self.log("train/losses_gen_loss", gen_loss)
-            total_loss = pred_loss + gen_loss
+            self.log("train/losses_yaw_loss", yaw_loss)
+            total_loss = pred_loss + gen_loss + yaw_loss
             metrics = self._compute_metrics(pout, batch)
             for mk, m in metrics.items():
                 self.log("train/metrics_" + mk, m)
-            # print("gen", total_loss.item())
+            # print("gen", gen_loss.item())
             return total_loss
         if optimizer_idx == 1:
+            pout = self.nets.forward_discriminator(batch)
+            losses = self.nets.compute_losses_discriminator(pout, batch)
             total_loss = losses["gan_disc_loss"] * self.algo_config.loss_weights["gan_disc_loss"]
             # print("disc", total_loss.item())
             self.log("train/losses_disc_loss", total_loss)
             return total_loss
 
     def validation_step(self, batch, batch_idx):
-        pout = TensorUtils.detach(self.nets(batch))
-        losses = self.nets.compute_losses(pout, batch)
+        pout = TensorUtils.detach(self.nets.forward_generator(batch))
+        losses = self.nets.compute_losses_generator(pout, batch)
         with torch.no_grad():
             samples = self.nets.sample(batch, n=self.algo_config.gan.num_eval_samples)
         metrics = self._compute_metrics(pout, batch, samples)
