@@ -246,6 +246,18 @@ class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
         self.roi_layer_key = "layer2"
         self.use_GAN = False
 
+        self.loss_weights.lane_reg_loss = 0.5
+        self.loss_weights.GAN_loss = 0.5
+
+        self.optim_params.GAN.learning_rate.initial = 3e-4  # policy learning rate
+        self.optim_params.GAN.learning_rate.decay_factor = (
+            0.1  # factor to decay LR by (if epoch schedule non-empty)
+        )
+        self.optim_params.GAN.learning_rate.epoch_schedule = (
+            []
+        )  # epochs where LR decay occurs
+        self.optim_params.GAN.regularization.L2 = 0.00  # L2 regularization strength
+
 
 class L5RasterizedGCConfig(L5RasterizedPlanningConfig):
     def __init__(self):
@@ -272,7 +284,7 @@ class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
         super(L5RasterizedVAEConfig, self).__init__()
         self.name = "l5_rasterized_vae"
         self.map_feature_dim = 256
-        self.goal_conditional = True
+        self.goal_conditional = False
         self.goal_feature_dim = 32
 
         self.vae.latent_dim = 4
@@ -305,6 +317,8 @@ class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
         self.vae.recon_loss_type = "NLL"
 
         self.loss_weights.kl_loss = 1e-4
+
+        self.min_std = 0.1
 
 
 class L5RasterizedGANConfig(L5RasterizedPlanningConfig):

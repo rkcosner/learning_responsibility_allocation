@@ -200,7 +200,7 @@ class MAGANTrafficModel(MATrafficModel):
         gen_params = list()
         discr_params = list()
         for com_name, com in self.model.named_children():
-            if com_name not in ["GAN", "traj_encoder"]:
+            if com_name not in ["gan_disc", "traj_encoder"]:
                 gen_params += list(com.parameters())
             else:
                 discr_params += list(com.parameters())

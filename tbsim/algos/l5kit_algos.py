@@ -638,7 +638,6 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
             weight_decay=optim_params["regularization"]["L2"],
         )
 
-
     def _compute_metrics(self, pred_batch, sample_batch, data_batch):
         metrics = {}
 

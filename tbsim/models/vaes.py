@@ -8,6 +8,7 @@ from tbsim.utils.loss_utils import KLD_0_1_loss, KLD_gaussian_loss, KLD_discrete
 from tbsim.utils.torch_utils import reparameterize
 import tbsim.utils.tensor_utils as TensorUtils
 from torch.distributions import Categorical
+
 class Prior(nn.Module):
     def __init__(self, latent_dim, input_dim=None, device=None):
         """
@@ -319,6 +320,7 @@ class CVAE(nn.Module):
         """
         return self.prior.kl_loss(outputs["q_params"], inputs=outputs["c"])
 
+
 class DiscreteCVAE(nn.Module):
     def __init__(
             self,
@@ -372,8 +374,12 @@ class DiscreteCVAE(nn.Module):
         logp = self.p_net(c)["logp"]
         # p = torch.exp(logp)
         # p = p/p.sum(dim=-1,keepdim=True)
-        z = (-logp).argsort()[...,:n]
-        z = F.one_hot(z,self.K)
+        # z = (-logp).argsort()[...,:n]
+        # z = F.one_hot(z,self.K)
+
+        dis_p = Categorical(probs=torch.exp(logp))  # [n_sample, batch] -> [batch, n_sample]
+        z = dis_p.sample((n,)).permute(1, 0)
+        z = F.one_hot(z, self.K)
 
         z_samples = TensorUtils.join_dimensions(z, begin_axis=0, end_axis=2)  # [B * N, ...]
         c_samples = TensorUtils.repeat_by_expand_at(c, repeats=n, dim=0)  # [B * N, ...]
@@ -449,6 +455,7 @@ class DiscreteCVAE(nn.Module):
         p = outputs["p"]
         q = outputs["q"]
         return (p*(torch.log(p)-torch.log(q))).sum(dim=-1).mean()
+
     def compute_losses(self,outputs,targets,gamma=1):
         recon_loss = 0
         for k,v in outputs['x_recons'].items():

@@ -3,6 +3,8 @@ from collections import OrderedDict
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import torch.distributions as distributions
 
 import tbsim.models.base_models as base_models
 import tbsim.models.vaes as vaes
@@ -565,14 +567,15 @@ class RasterizedDiscreteVAEModel(nn.Module):
         decoder = base_models.ConditionDecoder(traj_decoder)
 
         self.vae = vaes.DiscreteCVAE(
-        q_net=q_encoder,
-        p_net=p_encoder,
-        c_net=c_encoder,
-        decoder=decoder,
-        K=algo_config.vae.latent_dim,
-    )
+            q_net=q_encoder,
+            p_net=p_encoder,
+            c_net=c_encoder,
+            decoder=decoder,
+            K=algo_config.vae.latent_dim,
+        )
 
         self.dyn = traj_decoder.dyn
+        self.algo_config = algo_config
 
     def _traj_to_preds(self, traj):
         pred_positions = traj[..., :2]
@@ -636,9 +639,43 @@ class RasterizedDiscreteVAEModel(nn.Module):
         
         if self.recon_loss_type=="NLL":
             assert "logvar" in pred_batch["x_recons"]
-            bs,M,T,D = pred_batch["trajectories"].shape
+            bs, M, T, D = pred_batch["trajectories"].shape
             var = torch.exp(pred_batch["x_recons"]["logvar"]).reshape(bs,M,-1)
-            pred_loss = NLL_GMM_loss(target_traj.reshape(bs,-1), pred_batch["trajectories"].reshape(bs,M,-1), var, pred_batch["q"].log()).clip(-1e5,1e5).mean()
+            avails = data_batch["target_availabilities"].unsqueeze(-1).repeat(1, 1, target_traj.shape[-1]).reshape(bs, -1)
+            pred_loss = NLL_GMM_loss(
+                x=target_traj.reshape(bs,-1),
+                m=pred_batch["trajectories"].reshape(bs,M,-1),
+                v=var,
+                logpi=pred_batch["q"].log(),
+                avails=avails
+            ).clip(-1e5,1e5)
+            pred_loss = pred_loss.mean()
+        elif self.recon_loss_type=="NLL_torch":
+            bs, num_modes, _, _ = pred_batch["trajectories"].shape
+            # Use torch distribution family to calculate likelihood
+            means = pred_batch["trajectories"].reshape(bs, num_modes, -1)
+            scales = torch.exp(pred_batch["x_recons"]["logvar"]).reshape(bs, num_modes, -1)
+            mode_probs = pred_batch["q"].reshape(bs, num_modes)
+            # Calculate scale
+            # post-process the scale accordingly
+            scales = scales + self.algo_config.min_std
+
+            # mixture components - make sure that `batch_shape` for the distribution is equal
+            # to (batch_size, num_modes) since MixtureSameFamily expects this shape
+            component_distribution = distributions.Normal(loc=means, scale=scales)
+            component_distribution = distributions.Independent(component_distribution, 1)
+
+            # unnormalized logits to categorical distribution for mixing the modes
+            mixture_distribution = distributions.Categorical(probs=mode_probs)
+
+            dist = distributions.MixtureSameFamily(
+                mixture_distribution=mixture_distribution,
+                component_distribution=component_distribution,
+            )
+            log_prob = dist.log_prob(target_traj.reshape(bs, -1))
+            pred_loss = -log_prob.mean()
+            # TODO: support detach mode and masking
+
         elif self.recon_loss_type=="MSE":
             pred_loss = MultiModal_trajectory_loss(
                 predictions=pred_batch["trajectories"],
@@ -647,6 +684,8 @@ class RasterizedDiscreteVAEModel(nn.Module):
                 prob = pred_batch["q"],
                 weights_scaling=self.weights_scaling,
             )
+        else:
+            raise NotImplementedError("{} is not implemented".format(self.recon_loss_type))
         losses = OrderedDict(prediction_loss=pred_loss, kl_loss=kl_loss)
         if self.dyn is not None:
             losses["yaw_reg_loss"] = torch.mean(pred_batch["controls"][..., 1] ** 2)
