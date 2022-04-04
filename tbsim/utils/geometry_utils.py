@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from tbsim.utils.tensor_utils import round_2pi
 from enum import IntEnum
-
+import pdb
 
 def get_box_agent_coords(pos, yaw, extent):
     corners = (torch.tensor([[-1, -1], [-1, 1], [1, 1], [1, -1]]) * 0.5).to(pos.device) * (
@@ -334,11 +334,13 @@ def detect_collision(
     """
     from l5kit.planning import utils
     ego_bbox = utils._get_bounding_box(centroid=ego_pos, yaw=ego_yaw, extent=ego_extent)
+    
     # within_range_mask = utils.within_range(ego_pos, ego_extent, other_pos, other_extent)
     for i in range(other_pos.shape[0]):
         agent_bbox = utils._get_bounding_box(other_pos[i], other_yaw[i], other_extent[i])
-
-        if ego_bbox.intersects(agent_bbox):
+        if ego_bbox.intersects(agent_bbox) and other_extent[i][0]>3 and ego_extent[0]>3:
+            # if other_extent[i][0]>3 and ego_extent[0]>3:
+            #     pdb.set_trace()
             front_side, rear_side, left_side, right_side = utils._get_sides(ego_bbox)
 
             intersection_length_per_side = np.asarray(
@@ -360,7 +362,7 @@ def detect_collision(
     return None
 
 
-def calc_distance_map(road_flag,max_dis = 10):
+def calc_distance_map(road_flag,max_dis = 10,mode="L1"):
     """mark the image with manhattan distance to the drivable area
 
     Args:
@@ -370,10 +372,21 @@ def calc_distance_map(road_flag,max_dis = 10):
     out = torch.zeros_like(road_flag,dtype=torch.float)
     out[road_flag==0] = max_dis 
     out[road_flag==1] = 0
-    for i in range(max_dis-1):
-        out[...,1:,:] = torch.min(out[...,1:,:],out[...,:-1,:]+1)
-        out[...,:-1,:] = torch.min(out[...,:-1,:],out[...,1:,:]+1)
-        out[...,:,1:] = torch.min(out[...,:,1:],out[...,:,:-1]+1)
-        out[...,:,:-1] = torch.min(out[...,:,:-1],out[...,:,1:]+1)
+    if mode=="L1":
+        for i in range(max_dis-1):
+            out[...,1:,:] = torch.min(out[...,1:,:],out[...,:-1,:]+1)
+            out[...,:-1,:] = torch.min(out[...,:-1,:],out[...,1:,:]+1)
+            out[...,:,1:] = torch.min(out[...,:,1:],out[...,:,:-1]+1)
+            out[...,:,:-1] = torch.min(out[...,:,:-1],out[...,:,1:]+1)
+    elif mode=="Linf":
+        for i in range(max_dis-1):
+            out[...,1:,:] = torch.min(out[...,1:,:],out[...,:-1,:]+1)
+            out[...,:-1,:] = torch.min(out[...,:-1,:],out[...,1:,:]+1)
+            out[...,:,1:] = torch.min(out[...,:,1:],out[...,:,:-1]+1)
+            out[...,:,:-1] = torch.min(out[...,:,:-1],out[...,:,1:]+1)
+            out[...,1:,1:] = torch.min(out[...,1:,1:],out[...,:-1,:-1]+1)
+            out[...,1:,:-1] = torch.min(out[...,1:,:-1],out[...,:-1,1:]+1)
+            out[...,:-1,:-1] = torch.min(out[...,:-1,:-1],out[...,1:,1:]+1)
+            out[...,:-1,1:] = torch.min(out[...,:-1,1:],out[...,1:,:-1]+1)
 
     return out

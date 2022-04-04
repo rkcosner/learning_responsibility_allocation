@@ -10,8 +10,11 @@ import tbsim.utils.l5_utils as L5Utils
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.utils.loss_utils import (
     trajectory_loss,
+    MultiModal_trajectory_loss,
     goal_reaching_loss,
-    collision_loss
+    collision_loss,
+    log_normal_mixture,
+    NLL_GMM_loss
 )
 
 
@@ -496,6 +499,154 @@ class RasterizedVAEModel(nn.Module):
             availabilities=data_batch["target_availabilities"],
             weights_scaling=self.weights_scaling
         )
+        losses = OrderedDict(prediction_loss=pred_loss, kl_loss=kl_loss)
+        if self.dyn is not None:
+            losses["yaw_reg_loss"] = torch.mean(pred_batch["controls"][..., 1] ** 2)
+        return losses
+
+
+class RasterizedDiscreteVAEModel(nn.Module):
+    def __init__(self, algo_config, modality_shapes, weights_scaling):
+        super(RasterizedDiscreteVAEModel, self).__init__()
+        trajectory_shape = (algo_config.future_num_frames, 3)
+        self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
+
+        goal_dim = 0 if not algo_config.goal_conditional else algo_config.goal_feature_dim
+
+        map_encoder = base_models.RasterizedMapEncoder(
+            model_arch=algo_config.model_architecture,
+            input_image_shape=modality_shapes["image"],
+            feature_dim=algo_config.map_feature_dim,
+            use_spatial_softmax=algo_config.spatial_softmax.enabled,
+            spatial_softmax_kwargs=algo_config.spatial_softmax.kwargs,
+        )
+
+        traj_decoder = base_models.MLPTrajectoryDecoder(
+            feature_dim=algo_config.vae.condition_dim + goal_dim + algo_config.vae.latent_dim,
+            state_dim=trajectory_shape[-1],
+            num_steps=algo_config.future_num_frames,
+            dynamics_type=algo_config.dynamics.type,
+            dynamics_kwargs=algo_config.dynamics,
+            network_kwargs=algo_config.decoder,
+            step_time=algo_config.step_time,
+            Gaussian_var=algo_config.vae.decoder.Gaussian_var
+        )
+        self.recon_loss_type = algo_config.vae.recon_loss_type
+
+        if algo_config.goal_conditional:
+            goal_encoder = base_models.MLP(
+                input_dim=traj_decoder.state_dim,
+                output_dim=algo_config.goal_feature_dim,
+                output_activation=nn.ReLU
+            )
+        else:
+            goal_encoder = None
+
+        c_encoder = base_models.ConditionEncoder(
+            map_encoder=map_encoder,
+            trajectory_shape=trajectory_shape,
+            condition_dim=algo_config.vae.condition_dim,
+            mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
+            goal_encoder=goal_encoder,
+            rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
+        )
+        q_encoder = base_models.PosteriorEncoder(
+            condition_dim=algo_config.vae.condition_dim + goal_dim,
+            trajectory_shape=trajectory_shape,
+            output_shapes=OrderedDict(logq=(algo_config.vae.latent_dim,)),
+            mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
+            rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
+        )
+        p_encoder = base_models.SplitMLP(
+            input_dim=algo_config.vae.condition_dim+goal_dim,
+            layer_dims=algo_config.vae.encoder.mlp_layer_dims,
+            output_shapes=OrderedDict(logp=(algo_config.vae.latent_dim,))
+        )
+        decoder = base_models.ConditionDecoder(traj_decoder)
+
+        self.vae = vaes.DiscreteCVAE(
+        q_net=q_encoder,
+        p_net=p_encoder,
+        c_net=c_encoder,
+        decoder=decoder,
+        K=algo_config.vae.latent_dim,
+    )
+
+        self.dyn = traj_decoder.dyn
+
+    def _traj_to_preds(self, traj):
+        pred_positions = traj[..., :2]
+        pred_yaws = traj[..., 2:3]
+        return {
+            "trajectories": traj,
+            "predictions": {"positions": pred_positions, "yaws": pred_yaws}
+        }
+
+    def _get_goal_states(self, data_batch) -> torch.Tensor:
+        target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=-1)
+        goal_inds = L5Utils.get_last_available_index(data_batch["target_availabilities"])  # [B]
+        goal_state = torch.gather(
+            target_traj,  # [B, T, 3]
+            dim=1,
+            index=goal_inds[:, None, None].expand(-1, 1, target_traj.shape[-1])  # [B, 1, 3]
+        ).squeeze(1)  # -> [B, 3]
+        return goal_state
+
+    def forward(self, batch_inputs: dict):
+        trajectories = torch.cat((batch_inputs["target_positions"], batch_inputs["target_yaws"]), dim=-1)
+        inputs = OrderedDict(trajectories=trajectories)
+        condition_inputs = OrderedDict(image=batch_inputs["image"], goal=self._get_goal_states(batch_inputs))
+
+        decoder_kwargs = dict()
+        if self.dyn is not None:
+            current_states = L5Utils.get_current_states(batch_inputs, self.dyn.type())
+            decoder_kwargs["current_states"] = current_states.tile(self.vae.K,1)
+        
+        outs = self.vae.forward(inputs=inputs, condition_inputs=condition_inputs, decoder_kwargs=decoder_kwargs)
+        outs.update(self._traj_to_preds(outs["x_recons"]["trajectories"]))
+        if self.dyn is not None:
+            outs["controls"] = outs["x_recons"]["controls"]
+        return outs
+
+    def sample(self, batch_inputs: dict, n: int):
+        assert n<=self.vae.K
+        condition_inputs = OrderedDict(image=batch_inputs["image"], goal=self._get_goal_states(batch_inputs))
+
+        decoder_kwargs = dict()
+        if self.dyn is not None:
+            curr_states = L5Utils.get_current_states(batch_inputs, self.dyn.type())
+            decoder_kwargs["current_states"] = TensorUtils.repeat_by_expand_at(curr_states, repeats=n, dim=0)
+
+        outs = self.vae.sample(condition_inputs=condition_inputs, n=n, decoder_kwargs=decoder_kwargs)
+        return self._traj_to_preds(outs["trajectories"])
+
+    def predict(self, batch_inputs: dict):
+        condition_inputs = OrderedDict(image=batch_inputs["image"], goal=self._get_goal_states(batch_inputs))
+
+        decoder_kwargs = dict()
+        if self.dyn is not None:
+            decoder_kwargs["current_states"] = L5Utils.get_current_states(batch_inputs, self.dyn.type())
+
+        outs = self.vae.predict(condition_inputs=condition_inputs, decoder_kwargs=decoder_kwargs)
+        return self._traj_to_preds(outs["trajectories"])
+
+    def compute_losses(self, pred_batch, data_batch):
+        kl_loss = self.vae.compute_kl_loss(pred_batch)
+        target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=2)
+        
+        if self.recon_loss_type=="NLL":
+            assert "logvar" in pred_batch["x_recons"]
+            bs,M,T,D = pred_batch["trajectories"].shape
+            var = torch.exp(pred_batch["x_recons"]["logvar"]).reshape(bs,M,-1)
+            pred_loss = NLL_GMM_loss(target_traj.reshape(bs,-1), pred_batch["trajectories"].reshape(bs,M,-1), var, pred_batch["q"].log()).clip(-1e5,1e5).mean()
+        elif self.recon_loss_type=="MSE":
+            pred_loss = MultiModal_trajectory_loss(
+                predictions=pred_batch["trajectories"],
+                targets=target_traj,
+                availabilities=data_batch["target_availabilities"],
+                prob = pred_batch["q"],
+                weights_scaling=self.weights_scaling,
+            )
         losses = OrderedDict(prediction_loss=pred_loss, kl_loss=kl_loss)
         if self.dyn is not None:
             losses["yaw_reg_loss"] = torch.mean(pred_batch["controls"][..., 1] ** 2)

@@ -76,7 +76,7 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
             cfg.env,
             dataset=datamodule.env_dataset,
             seed=cfg.seed,
-            num_scenes=cfg.train.rollout.num_scenes
+            num_scenes=cfg.train.rollout.num_scenes,
         )
         # Run rollout at regular intervals
         rollout_callback = RolloutCallback(

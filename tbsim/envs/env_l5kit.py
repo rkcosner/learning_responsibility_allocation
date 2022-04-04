@@ -379,7 +379,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
     def _step(self, step_actions: RolloutAction):
         obs = self.get_observation()
-
         # record metrics
         self._add_per_step_metrics(obs)
 

@@ -9,7 +9,7 @@ import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.l5_utils as L5Utils
 from tbsim.utils.geometry_utils import transform_points_tensor, detect_collision, CollisionType
 import tbsim.utils.metrics as Metrics
-
+import pdb
 
 class EnvMetrics(abc.ABC):
     def __init__(self):
@@ -200,6 +200,7 @@ class CollisionRate(EnvMetrics):
         return coll_rates, coll_counts
 
     def add_step(self, state_info: dict, all_scene_index: np.ndarray):
+        
         if self._all_scene_index is None:  # start of an episode
             self._all_scene_index = all_scene_index
             self._agent_scene_index = state_info["scene_index"]

@@ -88,8 +88,8 @@ class Hierarchical(PolicyComposer):
         policy_ckpt_path, policy_config_path = get_checkpoint(
             # ngc_job_id="2596419",  # gc_clip_regyaw_dynUnicycle_decmlp128,128_decstateTrue_yrl1.0
             # ckpt_key="iter120999_",
-            ngc_job_id="2645989",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
-            ckpt_key="iter92999_",
+            ngc_job_id="2732861",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
+            ckpt_key="iter20999",
             ckpt_root_dir=self.ckpt_dir
         )
         policy_cfg = get_experiment_config_from_file(policy_config_path)
@@ -112,8 +112,8 @@ class Hierarchical(PolicyComposer):
 class HierAgentAware(Hierarchical):
     def _get_predictor(self):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
-            ngc_job_id="2645989",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
-            ckpt_key="iter92999_",
+            ngc_job_id="2732861",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
+            ckpt_key="iter20999",
             ckpt_root_dir=self.ckpt_dir
         )
         predictor_cfg = get_experiment_config_from_file(predictor_config_path)
@@ -211,6 +211,11 @@ def create_env(
             all_collision_rate=EnvMetrics.CollisionRate(),
             all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations)
         )
+        # metrics = dict(
+        #     all_off_road_rate=EnvMetrics.OffRoadRate(),
+        #     ego_collision_rate=EnvMetrics.CollisionRate(),
+        #     all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo)
+        # )
 
     env = EnvL5KitSimulation(
         sim_cfg.env,

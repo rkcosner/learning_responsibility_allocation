@@ -14,7 +14,7 @@ from tbsim.utils.geometry_utils import (
     PED_PED_collision,
     get_box_world_coords,
 )
-
+import pdb
 
 metric_signature = Callable[
     [np.ndarray, np.ndarray, np.ndarray, np.ndarray], np.ndarray
@@ -50,6 +50,7 @@ def _assert_shapes(
         batch_size,
         num_modes,
     ), f"expected 2D (Batch x Modes) array for confidences, got {confidences.shape}"
+
     assert np.allclose(np.sum(confidences, axis=1), 1), "confidences should sum to 1"
     assert avails.shape == (
         batch_size,
@@ -232,7 +233,7 @@ def batch_average_displacement_error(
     if mode == "oracle":
         error = np.min(error, axis=1)  # use best hypothesis
     elif mode == "mean":
-        error = np.mean(error, axis=1)  # average over hypotheses
+        error = np.sum(error*confidences, axis=1).mean()  # average over hypotheses
     else:
         raise ValueError(f"mode: {mode} not valid")
 
@@ -402,6 +403,7 @@ def batch_pairwise_collision_rate(agent_edges, collision_funcs=None):
             edges[..., 8:],
         )
         dis = dis.min(-1)[0]  # reduction over time
+        pdb.set_trace()
         if isinstance(dis, np.ndarray):
             coll_rates[et] = np.sum(dis <= 0) / float(dis.shape[0])
         else:
