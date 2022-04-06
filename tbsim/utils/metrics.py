@@ -219,6 +219,7 @@ def batch_average_displacement_error(
     Returns:
         np.ndarray: average displacement error (ADE) of the batch, an array of float numbers
     """
+
     _assert_shapes(ground_truth, pred, confidences, avails)
 
     ground_truth = np.expand_dims(ground_truth, 1)  # add modes
@@ -229,7 +230,6 @@ def batch_average_displacement_error(
     )  # reduce coords and use availability
     error = error ** 0.5  # calculate root of error (= L2 norm)
     error = np.mean(error, axis=-1)  # average over timesteps
-
     if mode == "oracle":
         error = np.min(error, axis=1)  # use best hypothesis
     elif mode == "mean":
@@ -262,16 +262,21 @@ def batch_final_displacement_error(
         np.ndarray: final displacement error (FDE) of the batch, an array of float numbers
     """
     _assert_shapes(ground_truth, pred, confidences, avails)
-
+    inds = np.arange(0, pred.shape[2])
+    inds = (avails > 0) * inds  # [B, (A), T] arange indices with unavailable indices set to 0
+    last_inds = inds.max(axis=-1)
+    last_inds = np.tile(last_inds[:, np.newaxis, np.newaxis],(1,pred.shape[1],1))
     ground_truth = np.expand_dims(ground_truth, 1)  # add modes
     avails = avails[:, np.newaxis, :, np.newaxis]  # add modes and cords
-
+    
+    
     error = np.sum(
         ((ground_truth - pred) * avails) ** 2, axis=-1
     )  # reduce coords and use availability
     error = error ** 0.5  # calculate root of error (= L2 norm)
-    error = error[:, :, -1]  # use last timestep
 
+    # error = error[:, :, -1]  # use last timestep
+    error = np.take_along_axis(error,last_inds,axis=2).squeeze(-1)
     if mode == "oracle":
         error = np.min(error, axis=-1)  # use best hypothesis
     elif mode == "mean":
@@ -403,11 +408,43 @@ def batch_pairwise_collision_rate(agent_edges, collision_funcs=None):
             edges[..., 8:],
         )
         dis = dis.min(-1)[0]  # reduction over time
-        pdb.set_trace()
         if isinstance(dis, np.ndarray):
             coll_rates[et] = np.sum(dis <= 0) / float(dis.shape[0])
         else:
             coll_rates[et] = torch.sum(dis <= 0) / float(dis.shape[0])
+    return coll_rates
+
+def batch_pairwise_collision_rate_masked(agent_edges, type_mask,collision_funcs=None):
+    """
+    Count number of collisions among edge pairs in a batch
+    Args:
+        agent_edges (dict): A dict that maps collision types to box locations
+        collision_funcs (dict): A dict of collision functions (implemented in tbsim.utils.geometric_utils)
+
+    Returns:
+        collision loss (torch.Tensor)
+    """
+    if collision_funcs is None:
+        collision_funcs = {
+            "VV": VEH_VEH_collision,
+            "VP": VEH_PED_collision,
+            "PV": PED_VEH_collision,
+            "PP": PED_PED_collision,
+        }
+    coll_rates = {}
+    for et, fun in collision_funcs.items():
+        if et in type_mask and type_mask[et].sum()>0:
+            dis = fun(
+                agent_edges[..., 0:3],
+                agent_edges[..., 3:6],
+                agent_edges[..., 6:8],
+                agent_edges[..., 8:],
+            )
+            dis = dis.min(-1)[0]  # reduction over time
+            if isinstance(dis, np.ndarray):
+                coll_rates[et] = np.sum((dis <= 0)*type_mask[et]) / type_mask[et].sum()
+            else:
+                coll_rates[et] = torch.sum((dis <= 0)*type_mask[et]) / type_mask[et].sum()
     return coll_rates
 
 
