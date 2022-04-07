@@ -1171,7 +1171,7 @@ class MLPECTrajectoryDecoder(TrajectoryDecoder):
         )
         self.traj_encoder = RNNTrajectoryEncoder(
             trajectory_dim = 3, 
-            RNN_hidden_size = self.EC_RNN_dim, 
+            rnn_hidden_size = self.EC_RNN_dim, 
             feature_dim=self.EC_feature_dim,
             mlp_layer_dims=(64,64)
             )
@@ -1185,14 +1185,17 @@ class MLPECTrajectoryDecoder(TrajectoryDecoder):
     def _forward_networks(self, inputs, cond_traj=None, current_states=None, num_steps=None):
         if self._network_kwargs["state_as_input"] and self.dyn is not None:
             inputs = torch.cat((inputs, current_states), dim=-1)
-
         if inputs.ndim == 2:
             # [B, D]
+            
             preds = self.mlp(inputs)
             if cond_traj is not None:
-                EC_feat = self.traj_encoder(cond_traj)
-                EC_feat = torch.cat((inputs,EC_feat),dim=-1)
-                EC_preds = self.offsetmlp(EC_feat)
+                bs,Na,T,D= cond_traj.shape
+                EC_feat = self.traj_encoder(cond_traj.reshape(-1,T,D)).reshape(bs,Na,-1)
+                inputs_tile = inputs.unsqueeze(1).tile(1,Na,1)
+                EC_feat = torch.cat((inputs_tile,EC_feat),dim=-1)
+                EC_preds = TensorUtils.time_distributed(EC_feat, self.offsetmlp)
+                EC_preds["trajectories"] = EC_preds["trajectories"] + preds["trajectories"].unsqueeze(1)
             else:
                 EC_preds = None
 
@@ -1200,9 +1203,14 @@ class MLPECTrajectoryDecoder(TrajectoryDecoder):
             # [B, A, D]
             preds = TensorUtils.time_distributed(inputs, self.mlp)
             if cond_traj is not None:
-                EC_feat = TensorUtils.time_distributed(cond_traj, self.traj_encoder)
-                EC_feat = torch.cat((inputs,EC_feat),dim=-1)
+                assert cond_traj.ndim==5
+                bs,A,Na,T,D= cond_traj.shape
+                EC_feat = self.traj_encoder(cond_traj.reshape(-1,T,D)).reshape(bs,Na,-1)
+                inputs_tile = inputs.tile(1,Na,1)
+                EC_feat = torch.cat((inputs_tile,EC_feat),dim=-1)
                 EC_preds = TensorUtils.time_distributed(EC_feat, self.offsetmlp)
+                EC_preds = reshape_dimensions(EC_preds,1,2,(A,Na))
+                EC_preds["trajectories"] = EC_preds["trajectories"] + preds["trajectories"].unsqueeze(2)
             else:
                 EC_preds = None
         else:
@@ -1210,13 +1218,12 @@ class MLPECTrajectoryDecoder(TrajectoryDecoder):
                 "Expecting inputs to have ndim == 2 or 3, got {}".format(inputs.ndim))
         return preds, EC_preds
     
-    def _forward_dynamics(self, current_states, actions, EC_actions=None):
+    def _forward_dynamics(self, current_states, actions):
         assert self.dyn is not None
         assert current_states.shape[-1] == self.dyn.xdim
         assert actions.shape[-1] == self.dyn.udim
         assert isinstance(self.step_time, float) and self.step_time > 0
-        import pdb
-        pdb.set_trace()
+
         _, pos, yaw = dynamics.forward_dynamics(
             self.dyn,
             initial_states=current_states,
@@ -1230,10 +1237,24 @@ class MLPECTrajectoryDecoder(TrajectoryDecoder):
             inputs, cond_traj, current_states=current_states, num_steps=num_steps)
         if self.dyn is not None:
             preds["controls"] = preds["trajectories"]
-            preds["trajectories"] = self._forward_dynamics(
-                current_states=current_states,
-                actions=preds["trajectories"]
-            )
+            if EC_preds is None:
+                preds["trajectories"] = self._forward_dynamics(
+                    current_states=current_states,
+                    actions=preds["trajectories"]
+                )
+            else:
+                total_actions = torch.cat((preds["trajectories"].unsqueeze(1),EC_preds["trajectories"]),1)
+                bs,A,T,D = total_actions.shape
+                current_states_tiled = current_states.unsqueeze(1).repeat(1,total_actions.size(1),1)
+                total_trajectories = self._forward_dynamics(
+                    current_states=current_states_tiled.reshape(bs*A,-1),
+                    actions=total_actions.reshape(bs*A,T,D)
+                ).reshape(*total_actions.shape[:-1],-1)
+                preds["trajectories"] = total_trajectories[:,0]
+                preds["EC_trajectories"] = total_trajectories[:,1:]
+        else:
+            preds["EC_trajectories"] = EC_preds["trajectories"]
+                
         return preds
 
 

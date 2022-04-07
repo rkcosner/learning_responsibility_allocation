@@ -14,6 +14,7 @@ class L5KitTrainConfig(TrainConfig):
         self.dataset_train_key = "scenes/train.zarr"
         self.dataset_meta_key = "meta.json"
         self.datamodule_class = "L5RasterizedDataModule"
+        self.dataset_mode = "ego"
 
         self.rollout.enabled = False
         self.rollout.every_n_steps = 500
@@ -27,6 +28,7 @@ class L5KitTrainConfig(TrainConfig):
         self.training.num_data_workers = 8
 
         self.save.every_n_steps = 1000
+        self.save.best_k = 10
 
         # validation config
         self.validation.enabled = True
@@ -65,7 +67,7 @@ class L5KitEnvConfig(EnvConfig):
 
         # e.g. 0.0 include every obstacle, 0.5 show those obstacles with >0.5 probability of being
         # one of the classes we care about (cars, bikes, peds, etc.), >=1.0 filter all other agents.
-        self.rasterizer.filter_agents_threshold = 0.8
+        self.rasterizer.filter_agents_threshold = 0.5
 
         # whether to completely disable traffic light faces in the semantic rasterizer
         self.rasterizer.disable_traffic_light_faces = False
@@ -121,6 +123,7 @@ class L5KitMixedEnvConfig(EnvConfig):
         self.data_generation_params.lane_params.max_retrieval_distance_m = 35
         self.data_generation_params.lane_params.max_num_crosswalks = 20
         self.data_generation_params.rasterize_agents = False
+        self.data_generation_params.vectorize_agents = True
 
         # step size of lane interpolation
         self.data_generation_params.lane_params.lane_interp_step_size = 5.0
@@ -182,8 +185,8 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.history_num_frames = 5
         self.history_num_frames_ego = 5
         self.history_num_frames_agents = 5
-        self.future_num_frames = 25
-        self.step_time = 0.2
+        self.future_num_frames = 50
+        self.step_time = 0.1
         self.render_ego_history = False
 
         self.decoder.layer_dims = ()
@@ -202,11 +205,9 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.spatial_softmax.kwargs.learnable_temperature = False
 
         self.loss_weights.prediction_loss = 1.0
-        self.loss_weights.goal_loss = 0.5
+        self.loss_weights.goal_loss = 0.0
         self.loss_weights.collision_loss = 0.0
-        self.loss_weights.yaw_reg_loss = 0.5
-        self.loss_weights.lane_reg_loss = 0.5
-        self.loss_weights.GAN_loss = 0.5
+        self.loss_weights.yaw_reg_loss = 0.1
 
         self.optim_params.policy.learning_rate.initial = 1e-3  # policy learning rate
         self.optim_params.policy.learning_rate.decay_factor = (
@@ -217,14 +218,6 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         )  # epochs where LR decay occurs
         self.optim_params.policy.regularization.L2 = 0.00  # L2 regularization strength
 
-        self.optim_params.GAN.learning_rate.initial = 3e-4  # policy learning rate
-        self.optim_params.GAN.learning_rate.decay_factor = (
-            0.1  # factor to decay LR by (if epoch schedule non-empty)
-        )
-        self.optim_params.GAN.learning_rate.epoch_schedule = (
-            []
-        )  # epochs where LR decay occurs
-        self.optim_params.GAN.regularization.L2 = 0.00  # L2 regularization strength
 
 
 class SpatialPlannerConfig(L5RasterizedPlanningConfig):
@@ -249,9 +242,21 @@ class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
         self.decoder.layer_dims = (128, 128)
 
         self.use_rotated_roi = False
-        self.use_transformer = True
-        self.roi_layer_key = "layer4"
+        self.use_transformer = False
+        self.roi_layer_key = "layer2"
         self.use_GAN = False
+
+        self.loss_weights.lane_reg_loss = 0.5
+        self.loss_weights.GAN_loss = 0.5
+
+        self.optim_params.GAN.learning_rate.initial = 3e-4  # policy learning rate
+        self.optim_params.GAN.learning_rate.decay_factor = (
+            0.1  # factor to decay LR by (if epoch schedule non-empty)
+        )
+        self.optim_params.GAN.learning_rate.epoch_schedule = (
+            []
+        )  # epochs where LR decay occurs
+        self.optim_params.GAN.regularization.L2 = 0.00  # L2 regularization strength
 
 
 class L5RasterizedGCConfig(L5RasterizedPlanningConfig):
@@ -279,7 +284,7 @@ class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
         super(L5RasterizedVAEConfig, self).__init__()
         self.name = "l5_rasterized_vae"
         self.map_feature_dim = 256
-        self.goal_conditional = True
+        self.goal_conditional = False
         self.goal_feature_dim = 32
 
         self.vae.latent_dim = 4
@@ -291,6 +296,7 @@ class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
         self.vae.decoder.mlp_layer_dims = (128, 128)
 
         self.loss_weights.kl_loss = 1e-4
+
 
 class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
     def __init__(self):
@@ -308,21 +314,64 @@ class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
         self.vae.decoder.rnn_hidden_size = 100
         self.vae.decoder.mlp_layer_dims = (128, 128)
         self.vae.decoder.Gaussian_var = True
-        self.vae.recon_loss_type = "NLL"
+        self.vae.recon_loss_type = "MSE"
+        self.vae.logpi_clamp = -8.0
 
-        self.loss_weights.kl_loss = 1e-4
+        self.loss_weights.kl_loss = 1
+
+        self.min_std = 0.1
 
 class L5RasterizedECConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(L5RasterizedECConfig, self).__init__()
-        self.name = "l5_rasterized_EC"
+        self.name = "l5_rasterized_ec"
         self.map_feature_dim = 256
         self.goal_conditional = True
         self.goal_feature_dim = 32
 
         self.EC.feature_dim = 64
         self.EC.RNN_hidden_size = 32
+        self.loss_weights.prediction_loss = 1.0
+        self.loss_weights.yaw_reg_loss = 0.05
+        self.loss_weights.goal_loss = 0.0
+        self.loss_weights.collision_loss = 4
+        self.loss_weights.EC_collision_loss = 5
+        self.loss_weights.deviation_loss = 0.2
 
+class L5RasterizedGANConfig(L5RasterizedPlanningConfig):
+    def __init__(self):
+        super(L5RasterizedGANConfig, self).__init__()
+        self.name = "gan"
+
+        self.dynamics.type = "Unicycle"
+
+        self.map_feature_dim = 256
+        self.optim_params.disc.learning_rate.initial = 3e-4  # policy learning rate
+        self.optim_params.policy.learning_rate.initial = 1e-4  # generator learning rate
+
+        self.decoder.layer_dims = (128, 128)
+
+        self.traj_encoder.rnn_hidden_size = 100
+        self.traj_encoder.feature_dim = 32
+        self.traj_encoder.mlp_layer_dims = (128, 128)
+
+        self.gan.latent_dim = 4
+        self.gan.loss_type = "lsgan"
+        self.gan.disc_layer_dims = (128, 128)
+        self.gan.num_eval_samples = 10
+
+        self.loss_weights.prediction_loss = 0.0
+        self.loss_weights.yaw_reg_loss = 0.0
+        self.loss_weights.gan_gen_loss = 1.0
+        self.loss_weights.gan_disc_loss = 1.0
+
+        self.optim_params.disc.learning_rate.decay_factor = (
+            0.1  # factor to decay LR by (if epoch schedule non-empty)
+        )
+        self.optim_params.disc.learning_rate.epoch_schedule = (
+            []
+        )  # epochs where LR decay occurs
+        self.optim_params.disc.regularization.L2 = 0.00  # L2 regularization strength
 
 
 class L5TransformerPredConfig(AlgoConfig):
