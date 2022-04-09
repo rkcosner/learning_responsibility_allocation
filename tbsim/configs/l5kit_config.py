@@ -314,12 +314,29 @@ class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
         self.vae.decoder.rnn_hidden_size = 100
         self.vae.decoder.mlp_layer_dims = (128, 128)
         self.vae.decoder.Gaussian_var = True
-        self.vae.recon_loss_type = "NLL"
+        self.vae.recon_loss_type = "MSE"
+        self.vae.logpi_clamp = -8.0
 
-        self.loss_weights.kl_loss = 1e-4
+        self.loss_weights.kl_loss = 1
 
         self.min_std = 0.1
 
+class L5RasterizedECConfig(L5RasterizedPlanningConfig):
+    def __init__(self):
+        super(L5RasterizedECConfig, self).__init__()
+        self.name = "l5_rasterized_ec"
+        self.map_feature_dim = 256
+        self.goal_conditional = True
+        self.goal_feature_dim = 32
+
+        self.EC.feature_dim = 64
+        self.EC.RNN_hidden_size = 32
+        self.loss_weights.prediction_loss = 1.0
+        self.loss_weights.yaw_reg_loss = 0.05
+        self.loss_weights.goal_loss = 0.0
+        self.loss_weights.collision_loss = 4
+        self.loss_weights.EC_collision_loss = 5
+        self.loss_weights.deviation_loss = 0.2
 
 class L5RasterizedGANConfig(L5RasterizedPlanningConfig):
     def __init__(self):

@@ -14,6 +14,7 @@ from tbsim.models.rasterized_models import (
     RasterizedGCModel,
     RasterizedGANModel,
     RasterizedDiscreteVAEModel,
+    RasterizedECModel,
 )
 from tbsim.models.base_models import (
     MLPTrajectoryDecoder,
@@ -645,32 +646,35 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
 
         gt = TensorUtils.to_numpy(data_batch["target_positions"])
         avail = TensorUtils.to_numpy(data_batch["target_availabilities"])
-
+        z1 = TensorUtils.to_numpy(torch.argmax(pred_batch["z"],dim=-1))
+        prob = np.take_along_axis(TensorUtils.to_numpy(pred_batch["q"]),z1,1)
         # compute ADE & FDE based on posterior params
-        recon_preds = TensorUtils.to_numpy(pred_batch["predictions"]["positions"])
-        max_idx = TensorUtils.to_numpy(pred_batch["q"]).argmax(axis=-1)
-        recon_preds_max = recon_preds[np.arange(max_idx.shape[0]),max_idx]
-        prob = TensorUtils.to_numpy(pred_batch["q"])
+        sample_preds = TensorUtils.to_numpy(sample_batch["predictions"]["positions"])
+
         metrics["ego_ADE"] = Metrics.single_mode_metrics(
-            Metrics.batch_average_displacement_error, gt, recon_preds_max, avail
+            Metrics.batch_average_displacement_error, gt, sample_preds[:,0], avail
         ).mean()
         metrics["ego_FDE"] = Metrics.single_mode_metrics(
-            Metrics.batch_final_displacement_error, gt, recon_preds_max, avail
+            Metrics.batch_final_displacement_error, gt, sample_preds[:,0], avail
         ).mean()
 
         # compute ADE & FDE based on trajectory samples
-        sample_preds = TensorUtils.to_numpy(sample_batch["predictions"]["positions"])
-
-        metrics["ego_avg_ADE"] = Metrics.batch_average_displacement_error(gt, sample_preds, prob, avail, "mean").mean()
-        metrics["ego_min_ADE"] = Metrics.batch_average_displacement_error(gt, sample_preds, prob, avail, "oracle").mean()
-        metrics["ego_avg_FDE"] = Metrics.batch_final_displacement_error(gt, sample_preds, prob, avail, "mean").mean()
-        metrics["ego_min_FDE"] = Metrics.batch_final_displacement_error(gt, sample_preds, prob, avail, "oracle").mean()
+        
+        fake_prob = np.ones_like(prob)/prob.shape[1]
+        
+        metrics["ego_avg_ADE"] = Metrics.batch_average_displacement_error(gt, sample_preds, fake_prob, avail, "mean").mean()
+        metrics["ego_min_ADE"] = Metrics.batch_average_displacement_error(gt, sample_preds, fake_prob, avail, "oracle").mean()
+        metrics["ego_avg_FDE"] = Metrics.batch_final_displacement_error(gt, sample_preds, fake_prob, avail, "mean").mean()
+        metrics["ego_min_FDE"] = Metrics.batch_final_displacement_error(gt, sample_preds, fake_prob, avail, "oracle").mean()
 
         # compute diversity scores based on trajectory samples
-        metrics["ego_avg_ATD"] = Metrics.batch_average_diversity(gt, sample_preds, prob, avail, "mean").mean()
-        metrics["ego_max_ATD"] = Metrics.batch_average_diversity(gt, sample_preds, prob, avail, "max").mean()
-        metrics["ego_avg_FTD"] = Metrics.batch_final_diversity(gt, sample_preds, prob, avail, "mean").mean()
-        metrics["ego_max_FTD"] = Metrics.batch_final_diversity(gt, sample_preds, prob, avail, "max").mean()
+        metrics["ego_avg_ATD"] = Metrics.batch_average_diversity(gt, sample_preds, fake_prob, avail, "mean").mean()
+        metrics["ego_max_ATD"] = Metrics.batch_average_diversity(gt, sample_preds, fake_prob, avail, "max").mean()
+        metrics["ego_avg_FTD"] = Metrics.batch_final_diversity(gt, sample_preds, fake_prob, avail, "mean").mean()
+        metrics["ego_max_FTD"] = Metrics.batch_final_diversity(gt, sample_preds, fake_prob, avail, "max").mean()
+        
+        metrics["mode_max"] = prob.max(1).mean()-1/prob.shape[1]
+
         return metrics
 
     def get_action(self, obs_dict, sample=True, num_action_samples=1, plan=None, **kwargs):
@@ -702,6 +706,147 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
         )
         return action, info
 
+class L5ECTrafficModel(L5TrafficModel):
+    def __init__(self, algo_config, modality_shapes):
+        super(L5ECTrafficModel, self).__init__(algo_config, modality_shapes)
+        assert modality_shapes["image"][0] == 15
+
+        self.algo_config = algo_config
+        self.nets = nn.ModuleDict()
+        self.nets["policy"] = RasterizedECModel(
+            algo_config=algo_config,
+            modality_shapes=modality_shapes,
+            weights_scaling=[1.0, 1.0, 1.0],
+        )
+    @property
+    def checkpoint_monitor_keys(self):
+        return {"valLoss": "val/losses_prediction_loss"}
+
+    def forward(self, obs_dict):
+        return self.nets["policy"](obs_dict)["predictions"]
+
+
+    def training_step(self, batch, batch_idx):
+        """
+        Training on a single batch of data.
+
+        Args:
+            batch (dict): dictionary with torch.Tensors sampled
+                from a data loader and filtered by @process_batch_for_training
+
+            batch_idx (int): training step number - required by some Algos that need
+                to perform staged training and early stopping
+
+        Returns:
+            info (dict): dictionary of relevant inputs, outputs, and losses
+                that might be relevant for logging
+        """
+        pout = self.nets["policy"](batch)
+        losses = self.nets["policy"].compute_losses(pout, batch)
+        total_loss = 0.0
+        for lk, l in losses.items():
+            losses[lk] = l * self.algo_config.loss_weights[lk]
+            total_loss += losses[lk]
+
+        metrics = self._compute_metrics(pout, batch)
+
+        for lk, l in losses.items():
+            self.log("train/losses_" + lk, l)
+        for mk, m in metrics.items():
+            self.log("train/metrics_" + mk, m)
+
+        return {
+            "loss": total_loss,
+            "all_losses": losses,
+            "all_metrics": metrics
+        }
+
+    def validation_step(self, batch, batch_idx):
+        pout = self.nets["policy"](batch)
+        batch["goal"] = AlgoUtils.get_spatial_goal_supervision(batch)
+        losses = TensorUtils.detach(self.nets["policy"].compute_losses(pout, batch))
+        metrics = self._compute_metrics(pout, batch)
+        return {"losses": losses, "metrics": metrics}
+
+    def validation_epoch_end(self, outputs) -> None:
+        for k in outputs[0]["losses"]:
+            m = torch.stack([o["losses"][k] for o in outputs]).mean()
+            self.log("val/losses_" + k, m)
+
+        for k in outputs[0]["metrics"]:
+            m = np.stack([o["metrics"][k] for o in outputs]).mean()
+            self.log("val/metrics_" + k, m)
+
+    def configure_optimizers(self):
+        optim_params = self.algo_config.optim_params["policy"]
+        return optim.Adam(
+            params=self.parameters(),
+            lr=optim_params["learning_rate"]["initial"],
+            weight_decay=optim_params["regularization"]["L2"],
+        )
+
+    def _compute_metrics(self, pred_batch, data_batch):
+        metrics = {}
+        predictions = pred_batch["predictions"]
+        preds = TensorUtils.to_numpy(predictions["positions"])
+        gt = TensorUtils.to_numpy(data_batch["target_positions"])
+        avail = TensorUtils.to_numpy(data_batch["target_availabilities"])
+
+        ade = Metrics.single_mode_metrics(
+            Metrics.batch_average_displacement_error, gt, preds, avail
+        )
+        fde = Metrics.single_mode_metrics(
+            Metrics.batch_final_displacement_error, gt, preds, avail
+        )
+
+        metrics["ego_ADE"] = np.mean(ade)
+        metrics["ego_FDE"] = np.mean(fde)
+
+        targets_all = L5Utils.batch_to_target_all_agents(data_batch)
+        raw_type = torch.cat(
+            (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
+            dim=1,
+        ).type(torch.int64)
+        pred_edges = L5Utils.generate_edges(
+            raw_type,
+            targets_all["extents"],
+            pos_pred=targets_all["target_positions"],
+            yaw_pred=targets_all["target_yaws"],
+        )
+
+        coll_rates = TensorUtils.to_numpy(
+            Metrics.batch_pairwise_collision_rate(pred_edges))
+
+        EC_edges,type_mask = L5Utils.gen_EC_edges(
+            pred_batch["EC_trajectories"],
+            pred_batch["cond_traj"],
+            data_batch["extent"][...,:2],
+            data_batch["all_other_agents_future_extents"][...,:2].max(dim=2)[0],
+            data_batch["all_other_agents_types"]
+        )
+        EC_coll_rate = TensorUtils.to_numpy(Metrics.batch_pairwise_collision_rate_masked(EC_edges,type_mask))
+        sample_preds = TensorUtils.to_numpy(pred_batch["EC_trajectories"][...,:2])
+        conf = np.ones(sample_preds.shape[0:2]) / float(sample_preds.shape[1])
+        EC_ade = Metrics.batch_average_displacement_error(gt, sample_preds, conf, avail, "mean").mean()
+
+        EC_fde = metrics["ego_avg_FDE"] = Metrics.batch_final_displacement_error(gt, sample_preds, conf, avail, "mean").mean()
+        metrics["EC_ADE"] = EC_ade
+        metrics["EC_FDE"] = EC_fde
+        for c in coll_rates:
+            metrics["coll_" + c] = float(coll_rates[c])
+        for c in EC_coll_rate:
+            metrics["EC_coll_" + c] = float(EC_coll_rate[c])
+
+        return metrics
+
+
+    def get_action(self, obs_dict, sample=True, num_action_samples=1, plan=None, **kwargs):
+        preds = self(obs_dict)
+        action = Action(
+            positions=preds["positions"],
+            yaws=preds["yaws"]
+        )
+        return action, {}
 
 class GANTrafficModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):

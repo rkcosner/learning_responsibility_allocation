@@ -421,6 +421,7 @@ class DiscreteCVAE(nn.Module):
             decoder: nn.Module,
             K: int,
             recon_loss_fun=None,
+            logpi_clamp = None,
     ):
         """
         A basic Conditional Variational Autoencoder Network (C-VAE)
@@ -432,6 +433,7 @@ class DiscreteCVAE(nn.Module):
             decoder (nn.Module): a model that decodes latent (z) and condition feature (c) to data (x')
             K (int): cardinality of the discrete latent
             recon_loss: loss function handle for reconstruction loss
+            logpi_clamp (float): lower bound of the logpis, for numerical stability
         """
         super(DiscreteCVAE, self).__init__()
         self.q_net = q_net
@@ -439,6 +441,7 @@ class DiscreteCVAE(nn.Module):
         self.c_net = c_net
         self.decoder = decoder
         self.K = K
+        self.logpi_clamp= logpi_clamp
         if recon_loss_fun is None:
             self.recon_loss_fun = nn.MSELoss(reduction="none")
         else:
@@ -458,18 +461,21 @@ class DiscreteCVAE(nn.Module):
             dictionary of batched samples (x') of size [B, n, ...]
         """
         assert n<=self.K
+        
         if condition_feature is not None:
             c = condition_feature
         else:
             c = self.c_net(condition_inputs)  # [B, ...]
         logp = self.p_net(c)["logp"]
-        # p = torch.exp(logp)
-        # p = p/p.sum(dim=-1,keepdim=True)
+        p = torch.exp(logp)
+        p = p/p.sum(dim=-1,keepdim=True)
         # z = (-logp).argsort()[...,:n]
         # z = F.one_hot(z,self.K)
-
-        dis_p = Categorical(probs=torch.exp(logp))  # [n_sample, batch] -> [batch, n_sample]
-        z = dis_p.sample((n,)).permute(1, 0)
+        if n==self.K:
+            z = torch.arange(self.K).tile(p.shape[0],1).to(p.device)
+        else:
+            dis_p = Categorical(probs=p)  # [n_sample, batch] -> [batch, n_sample]
+            z = dis_p.sample((n,)).permute(1, 0)
         z = F.one_hot(z, self.K)
 
         z_samples = TensorUtils.join_dimensions(z, begin_axis=0, end_axis=2)  # [B * N, ...]
@@ -520,9 +526,13 @@ class DiscreteCVAE(nn.Module):
             n = self.K
         c = self.c_net(condition_inputs)  # [B, ...]
         logq = self.q_net(inputs=inputs, condition_features=c)["logq"]
+        logp = self.p_net(c)["logp"]
+        if self.logpi_clamp is not None:
+            logq = logq.clamp(min=self.logpi_clamp)
+            logp = logp.clamp(min=self.logpi_clamp)
         q = torch.exp(logq)
         q = q/q.sum(dim=-1,keepdim=True)
-        logp = self.p_net(c)["logp"]
+        
         p = torch.exp(logp)
         p = p/p.sum(dim=-1,keepdim=True)
         z = (-logq).argsort()[...,:n]

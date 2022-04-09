@@ -15,10 +15,11 @@ from tbsim.utils.loss_utils import (
     MultiModal_trajectory_loss,
     goal_reaching_loss,
     collision_loss,
+    collision_loss_masked,
     log_normal_mixture,
-    NLL_GMM_loss
+    NLL_GMM_loss,
 )
-
+import pdb
 
 class RasterizedPlanningModel(nn.Module):
     """Raster-based model for planning.
@@ -522,7 +523,8 @@ class RasterizedDiscreteVAEModel(nn.Module):
             use_spatial_softmax=algo_config.spatial_softmax.enabled,
             spatial_softmax_kwargs=algo_config.spatial_softmax.kwargs,
         )
-
+        if algo_config.vae.recon_loss_type=="MSE":
+            algo_config.vae.decoder.Gaussian_var=False
         traj_decoder = base_models.MLPTrajectoryDecoder(
             feature_dim=algo_config.vae.condition_dim + goal_dim + algo_config.vae.latent_dim,
             state_dim=trajectory_shape[-1],
@@ -565,13 +567,17 @@ class RasterizedDiscreteVAEModel(nn.Module):
             output_shapes=OrderedDict(logp=(algo_config.vae.latent_dim,))
         )
         decoder = base_models.ConditionDecoder(traj_decoder)
-
+        if "logpi_clamp" in algo_config.vae:
+            logpi_clamp = algo_config.vae.logpi_clamp
+        else:
+            logpi_clamp=None
         self.vae = vaes.DiscreteCVAE(
             q_net=q_encoder,
             p_net=p_encoder,
             c_net=c_encoder,
             decoder=decoder,
             K=algo_config.vae.latent_dim,
+            logpi_clamp=logpi_clamp
         )
 
         self.dyn = traj_decoder.dyn
@@ -636,26 +642,30 @@ class RasterizedDiscreteVAEModel(nn.Module):
     def compute_losses(self, pred_batch, data_batch):
         kl_loss = self.vae.compute_kl_loss(pred_batch)
         target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=2)
-        
+        z1 = torch.argmax(pred_batch["z"],dim=-1)
+        prob = torch.gather(pred_batch["q"],1,z1)
         if self.recon_loss_type=="NLL":
             assert "logvar" in pred_batch["x_recons"]
             bs, M, T, D = pred_batch["trajectories"].shape
             var = torch.exp(pred_batch["x_recons"]["logvar"]).reshape(bs,M,-1)
+            var = torch.gather(var,1,z1.unsqueeze(-1).repeat(1,1,var.size(-1)))
             avails = data_batch["target_availabilities"].unsqueeze(-1).repeat(1, 1, target_traj.shape[-1]).reshape(bs, -1)
             pred_loss = NLL_GMM_loss(
                 x=target_traj.reshape(bs,-1),
                 m=pred_batch["trajectories"].reshape(bs,M,-1),
                 v=var,
-                logpi=pred_batch["q"].log(),
+                pi=prob,
                 avails=avails
-            ).clip(-1e5,1e5)
+            )
             pred_loss = pred_loss.mean()
         elif self.recon_loss_type=="NLL_torch":
+            
             bs, num_modes, _, _ = pred_batch["trajectories"].shape
             # Use torch distribution family to calculate likelihood
             means = pred_batch["trajectories"].reshape(bs, num_modes, -1)
             scales = torch.exp(pred_batch["x_recons"]["logvar"]).reshape(bs, num_modes, -1)
-            mode_probs = pred_batch["q"].reshape(bs, num_modes)
+            scales = torch.gather(scales,1,z1.unsqueeze(-1).repeat(1,1,scales.size(-1)))
+            mode_probs = prob
             # Calculate scale
             # post-process the scale accordingly
             scales = scales + self.algo_config.min_std
@@ -677,11 +687,12 @@ class RasterizedDiscreteVAEModel(nn.Module):
             # TODO: support detach mode and masking
 
         elif self.recon_loss_type=="MSE":
+            
             pred_loss = MultiModal_trajectory_loss(
                 predictions=pred_batch["trajectories"],
                 targets=target_traj,
                 availabilities=data_batch["target_availabilities"],
-                prob = pred_batch["q"],
+                prob = prob,
                 weights_scaling=self.weights_scaling,
             )
         else:
@@ -689,5 +700,140 @@ class RasterizedDiscreteVAEModel(nn.Module):
         losses = OrderedDict(prediction_loss=pred_loss, kl_loss=kl_loss)
         if self.dyn is not None:
             losses["yaw_reg_loss"] = torch.mean(pred_batch["controls"][..., 1] ** 2)
+        for k,v in losses.items():
+            if v.isnan():
+                pdb.set_trace()
         return losses
 
+
+class RasterizedECModel(nn.Module):
+    """Raster-based model for planning with ego conditioning.
+    """
+
+    def __init__(self,algo_config, modality_shapes, weights_scaling):
+
+        super().__init__()
+        
+        self.map_encoder = base_models.RasterizedMapEncoder(
+            model_arch=algo_config.model_architecture,
+            input_image_shape=modality_shapes["image"],
+            feature_dim=algo_config.map_feature_dim,
+            use_spatial_softmax=algo_config.spatial_softmax.enabled,
+            spatial_softmax_kwargs=algo_config.spatial_softmax.kwargs,
+        )
+        trajectory_shape = (algo_config.future_num_frames, 3)
+        goal_dim = 0 if not algo_config.goal_conditional else algo_config.goal_feature_dim
+        self.traj_decoder = base_models.MLPECTrajectoryDecoder(
+            feature_dim=algo_config.map_feature_dim + goal_dim,
+            state_dim=trajectory_shape[-1],
+            num_steps=algo_config.future_num_frames,
+            dynamics_type=algo_config.dynamics.type,
+            dynamics_kwargs=algo_config.dynamics,
+            EC_RNN_dim = algo_config.EC.RNN_hidden_size,
+            EC_feature_dim = algo_config.EC.feature_dim,
+            network_kwargs=algo_config.decoder,
+            step_time=algo_config.step_time,
+        )
+        self.GC = algo_config.goal_conditional
+        if self.GC:
+            self.goal_encoder = base_models.MLP(
+            input_dim=self.traj_decoder.state_dim,
+            output_dim=algo_config.goal_feature_dim,
+            output_activation=nn.ReLU
+        )
+        
+
+        self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
+
+    def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        image_batch = data_batch["image"]
+        map_feat = self.map_encoder(image_batch)
+        target_traj = torch.cat((data_batch["target_positions"],data_batch["target_yaws"]),-1)
+        if self.GC:
+            goal_inds = L5Utils.get_last_available_index(data_batch["target_availabilities"])
+            goal_state = torch.gather(
+                target_traj,  # [B, T, 3]
+                dim=1,
+                index=goal_inds[:, None, None].expand(-1, 1, target_traj.shape[-1])
+            ).squeeze(1)  # -> [B, 3]
+            goal_feat = self.goal_encoder(goal_state) # -> [B, D]
+            input_feat = torch.cat((map_feat, goal_feat), dim=-1)
+        else:
+            input_feat = map_feat
+        if self.traj_decoder.dyn is not None:
+            curr_states = L5Utils.get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
+        else:
+            curr_states = None
+
+        cond_traj = torch.cat((data_batch["all_other_agents_future_positions"],data_batch["all_other_agents_future_yaws"]),-1)
+        dec_output = self.traj_decoder.forward(inputs=input_feat, current_states=curr_states, cond_traj=cond_traj)
+        
+        traj = dec_output["trajectories"]
+
+        pred_positions = traj[:, :, :2]
+        pred_yaws = traj[:, :, 2:3]
+        out_dict = {
+            "trajectories": traj,
+            "predictions": {"positions": pred_positions, "yaws": pred_yaws},
+            "cond_traj":cond_traj,
+            "cond_availability": data_batch["all_other_agents_future_availability"],
+            "EC_trajectories":dec_output["EC_trajectories"]
+        }
+        if self.traj_decoder.dyn is not None:
+            out_dict["controls"] = dec_output["controls"]
+            out_dict["curr_states"] = curr_states
+        return out_dict
+
+    def compute_losses(self, pred_batch, data_batch):
+        
+        target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=2)
+        pred_loss = trajectory_loss(
+            predictions=pred_batch["trajectories"],
+            targets=target_traj,
+            availabilities=data_batch["target_availabilities"],
+            weights_scaling=self.weights_scaling
+        )
+        # if pred_loss<40:
+        #     import pdb
+        #     pdb.set_trace()
+        goal_loss = goal_reaching_loss(
+            predictions=pred_batch["trajectories"],
+            targets=target_traj,
+            availabilities=data_batch["target_availabilities"],
+            weights_scaling=self.weights_scaling
+        )
+        EC_edges,type_mask = L5Utils.gen_EC_edges(
+            pred_batch["EC_trajectories"],
+            pred_batch["cond_traj"],
+            data_batch["extent"][...,:2],
+            data_batch["all_other_agents_future_extents"][...,:2].max(dim=2)[0],
+            data_batch["all_other_agents_types"]
+        )
+        EC_coll_loss = collision_loss_masked(EC_edges,type_mask)
+
+        A = pred_batch["EC_trajectories"].shape[1]
+        deviation_loss = trajectory_loss(
+            predictions=pred_batch["EC_trajectories"],
+            targets=target_traj.unsqueeze(1).repeat(1,A,1,1),
+            availabilities=data_batch["all_other_agents_future_availability"],
+            weights_scaling=self.weights_scaling
+        )
+        
+        # compute collision loss
+        pred_edges = L5Utils.get_edges_from_batch(
+            data_batch=data_batch,
+            ego_predictions=pred_batch["predictions"]
+        )
+
+        coll_loss = collision_loss(pred_edges=pred_edges)
+        losses = OrderedDict(
+            prediction_loss=pred_loss,
+            goal_loss=goal_loss,
+            collision_loss=coll_loss,
+            EC_collision_loss = EC_coll_loss,
+            deviation_loss = deviation_loss
+        )
+
+        if self.traj_decoder.dyn is not None:
+            losses["yaw_reg_loss"] = torch.mean(pred_batch["controls"][..., 1] ** 2)
+        return losses

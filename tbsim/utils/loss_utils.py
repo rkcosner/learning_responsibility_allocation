@@ -133,7 +133,7 @@ def log_normal_mixture(x, m, v, w=None, log_w=None):
         log_prob = log_mean_exp(log_prob , dim=1) # mean accounts for uniform weights
     return log_prob
 
-def NLL_GMM_loss(x, m, v, logpi, avails=None, detach=True):
+def NLL_GMM_loss(x, m, v, pi, avails=None, detach=True):
     """
     Log probability of tensor x under a uniform mixture of Gaussians.
     Adapted from CS 236 at Stanford.
@@ -160,13 +160,14 @@ def NLL_GMM_loss(x, m, v, logpi, avails=None, detach=True):
         max_flag = (log_prob==log_prob.max(dim=1,keepdim=True)[0])
         nonmax_flag = torch.logical_not(max_flag)
         log_prob_detach = log_prob.detach()
-        log_prob_mean = log_mean_exp(log_prob*max_flag+log_prob_detach*nonmax_flag, dim=1, logpi=logpi)
+        ll = log_prob*max_flag+log_prob_detach*nonmax_flag
     else:
-        log_prob_mean = log_mean_exp(log_prob, dim=1, logpi=logpi)
+        ll = log_prob
+    NLL_loss = (-pi*ll).sum(1).mean()
+    return NLL_loss
 
-    return -log_prob_mean
 
-def log_mean_exp(x, dim,logpi=None):
+def log_mean_exp(x, dim):
     """
     Compute the log(mean(exp(x), dim)) in a numerically stable manner.
     Adapted from CS 236 at Stanford.
@@ -176,10 +177,10 @@ def log_mean_exp(x, dim,logpi=None):
     Returns:
         y (torch.Tensor): log(mean(exp(x), dim))
     """
-    return log_sum_exp(x, dim, logpi) - np.log(x.size(dim))
+    return log_sum_exp(x, dim) - np.log(x.size(dim))
 
 
-def log_sum_exp(x, dim=0,logpi=None):
+def log_sum_exp(x, dim=0):
     """
     Compute the log(sum(exp(x), dim)) in a numerically stable manner.
     Adapted from CS 236 at Stanford.
@@ -189,8 +190,7 @@ def log_sum_exp(x, dim=0,logpi=None):
     Returns:
         y (torch.Tensor): log(sum(exp(x), dim))
     """
-    if logpi is not None:
-        x+=logpi
+
     max_x = torch.max(x, dim)[0]
     new_x = x - max_x.unsqueeze(dim).expand_as(x)
 
@@ -300,7 +300,6 @@ def MultiModal_trajectory_loss(predictions, targets, availabilities, prob, weigh
     min_weight = (min_flag*prob)[...,None,None]*target_weights
     nonmin_weight = (nonmin_flag*prob)[...,None,None]*target_weights
     loss = ((loss_v*min_weight)+(loss_v_detached*nonmin_weight)).sum()/availabilities.sum()
-    
     return loss
 
         
@@ -507,7 +506,7 @@ def collision_loss(pred_edges: Dict[str, torch.Tensor], col_funcs=None):
             "PP": PED_PED_collision,
         }
 
-    coll_loss = 0
+    coll_loss = 0.0
     for et, fun in col_funcs.items():
         if et not in pred_edges:
             continue
@@ -525,6 +524,27 @@ def collision_loss(pred_edges: Dict[str, torch.Tensor], col_funcs=None):
         coll_loss += torch.mean(torch.sigmoid(-dis - 4.0))  # smooth collision loss
     return coll_loss
 
+def collision_loss_masked(edges, type_mask, col_funcs=None):
+    if col_funcs is None:
+        col_funcs = {
+            "VV": VEH_VEH_collision,
+            "VP": VEH_PED_collision,
+            "PV": PED_VEH_collision,
+            "PP": PED_PED_collision,
+        }
+
+    coll_loss = 0.0
+    for k,v in type_mask.items():
+        if edges.shape[0] == 0:
+            continue
+        dis = col_funcs[k](
+            edges[..., 0:3],
+            edges[..., 3:6],
+            edges[..., 6:8],
+            edges[..., 8:],
+        ).min(dim=-1)[0]
+        coll_loss += torch.sum(torch.sigmoid(-dis - 4.0)*v)/(v.sum()+1e-3)
+    return coll_loss
 
 def discriminator_loss(likelihood_pred,likelihood_GT):
     label = torch.cat((torch.zeros_like(likelihood_pred),torch.ones_like(likelihood_GT)),0)
