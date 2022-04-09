@@ -6,8 +6,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tbsim.utils.loss_utils import KLD_0_1_loss, KLD_gaussian_loss, KLD_discrete
 from tbsim.utils.torch_utils import reparameterize
+from tbsim.models.base_models import MLP, SplitMLP
 import tbsim.utils.tensor_utils as TensorUtils
-from torch.distributions import Categorical
+from torch.distributions import Categorical, kl_divergence
+
 
 class Prior(nn.Module):
     def __init__(self, latent_dim, input_dim=None, device=None):
@@ -181,6 +183,95 @@ class FixedGaussianPrior(Prior):
     @property
     def posterior_param_shapes(self) -> OrderedDict:
         return OrderedDict(mu=(self._latent_dim,), logvar=(self._latent_dim,))
+
+
+class ConditionalCategoricalPrior(Prior):
+    """
+    A class that holds functionality for learning categorical priors for use
+    in VAEs.
+    """
+    def __init__(self, latent_dim, input_dim=None, device=None):
+        """
+        Args:
+            latent_dim (int): size of latent dimension for the prior
+            device (torch.Device): where the module should live (i.e. cpu, gpu)
+        """
+        super(ConditionalCategoricalPrior, self).__init__(latent_dim=latent_dim, input_dim=input_dim, device=device)
+        assert isinstance(input_dim, int) and input_dim > 0
+        self.device = device
+        self._latent_dim = latent_dim
+        self._prior_net = MLP(input_dim=input_dim, output_dim=latent_dim)
+
+    def sample(self, n: int, inputs: torch.Tensor = None):
+        """
+        Returns a batch of samples from the prior distribution.
+        Args:
+            n (int): this argument is used to specify the number
+                of samples to generate from the prior.
+            inputs (torch.Tensor): conditioning feature for prior
+        Returns:
+            z (torch.Tensor): batch of sampled latent vectors.
+        """
+
+        # check consistency between n and obs_dict
+        if self.learnable:
+
+            # forward to get parameters
+            out = self.forward(batch_size=n, obs_dict=obs_dict, goal_dict=goal_dict)
+            prior_logits = out["logit"]
+
+            # sample one-hot latents from categorical distribution
+            dist = Categorical(logits=prior_logits)
+            z = TensorUtils.to_one_hot(dist.sample(), num_class=self.categorical_dim)
+
+        else:
+            # try to include a categorical sample for each class if possible (ensuring rough uniformity)
+            if (self.latent_dim == 1) and (self.categorical_dim <= n):
+                # include samples [0, 1, ..., C - 1] and then repeat until batch is filled
+                dist_samples = torch.arange(n).remainder(self.categorical_dim).unsqueeze(-1).to(self.device)
+            else:
+                # sample one-hot latents from uniform categorical distribution for each latent dimension
+                probs = torch.ones(n, self.latent_dim, self.categorical_dim).float().to(self.device)
+                dist_samples = Categorical(probs=probs).sample()
+            z = TensorUtils.to_one_hot(dist_samples, num_class=self.categorical_dim)
+
+        # reshape [B, D, C] to [B, D * C] to be consistent with other priors that return flat latents
+        z = z.reshape(*z.shape[:-2], -1)
+        return z
+
+    def kl_loss(self, posterior_params, inputs = None):
+        """
+        Computes KL divergence loss between the Categorical distribution
+        given by the unnormalized logits @logits and the prior distribution.
+        Args:
+            posterior_params (dict): dictionary with key "logits" corresponding
+                to torch.Tensor batch of unnormalized logits of shape [B, D * C]
+                that corresponds to the posterior categorical distribution
+        Returns:
+            kl_loss (torch.Tensor): KL divergence loss
+        """
+        prior_logits = self._prior_net(inputs)
+
+        prior_dist = Categorical(logits=prior_logits)
+        posterior_dist = Categorical(logits=posterior_params["logits"])
+
+        # sum over latent dimensions, but average over batch dimension
+        kl_loss = kl_divergence(posterior_dist, prior_dist)
+        assert len(kl_loss.shape) == 2
+        return kl_loss.sum(-1).mean()
+
+    def forward(self, inputs: torch.Tensor = None):
+        """
+        Get a batch of prior parameters.
+
+        Args:
+            inputs (torch.Tensor): (Optional) A feature vector for priors that are input-conditional.
+
+        Returns:
+            params (dict): A dictionary of prior parameters with the same batch size as the inputs (1 if inputs is None)
+        """
+        prior_logits = self._prior_net(inputs)
+        return prior_logits
 
 
 class LearnedGaussianPrior(FixedGaussianPrior):

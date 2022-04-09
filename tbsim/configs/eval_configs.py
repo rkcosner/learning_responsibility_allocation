@@ -21,6 +21,6 @@ class EvaluationConfig(Dict):
         self.results_dir = "results/"
 
         self.policy.mask_drivable = True
-        self.policy.num_plan_samples = 10
+        self.policy.num_plan_samples = 50
 
         self.perturb.std = [5.0, 5.0, np.pi / 2]

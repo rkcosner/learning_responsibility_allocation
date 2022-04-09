@@ -539,6 +539,8 @@ class L5VAETrafficModel(pl.LightningModule):
             obs_dict["target_positions"] = plan.positions
             obs_dict["target_yaws"] = plan.yaws
             obs_dict["target_availabilities"] = plan.availabilities
+        else:
+            assert not self.algo_config.goal_conditional
 
         if sample:
             preds = self.nets["policy"].sample(obs_dict, n=num_action_samples)["predictions"]  # [B, N, T, 3]
@@ -547,7 +549,7 @@ class L5VAETrafficModel(pl.LightningModule):
                 action_samples=Action(
                     positions=preds["positions"],
                     yaws=preds["yaws"]
-                )
+                ).to_dict()
             )
         else:
             # otherwise, sample action from posterior

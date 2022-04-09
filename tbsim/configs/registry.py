@@ -103,6 +103,13 @@ EXP_CONFIG_REGISTRY["l5_ebm"] = ExperimentConfig(
     registered_name="l5_ebm",
 )
 
+EXP_CONFIG_REGISTRY["l5_rasterized_ebm"] = ExperimentConfig(
+    train_config=L5KitTrainConfig(),
+    env_config=L5KitEnvConfig(),
+    algo_config=EBMMetricConfig(),
+    registered_name="l5_rasterized_ebm",
+)
+
 
 
 def get_registered_experiment_config(registered_name):
