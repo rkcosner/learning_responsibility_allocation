@@ -9,7 +9,7 @@ class L5KitTrainConfig(TrainConfig):
     def __init__(self):
         super(L5KitTrainConfig, self).__init__()
 
-        self.dataset_path = "/home/yuxiaoc/repos/l5kit/prediction-dataset"
+        self.dataset_path = "SET-THIS-THROUGH-TRAIN-SCRIPT-ARGS"
         self.dataset_valid_key = "scenes/validate.zarr"
         self.dataset_train_key = "scenes/train.zarr"
         self.dataset_meta_key = "meta.json"

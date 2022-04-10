@@ -20,10 +20,11 @@ from tbsim.configs.l5kit_config import (
     L5RasterizedDiscreteVAEConfig
 )
 
-from tbsim.configs.l5kit_online_config import (
-    L5KitOnlineTrainConfig,
-    SelfPlayHierarchicalConfig
+from tbsim.configs.nusc_config import (
+    NuscTrainConfig,
+    NuscEnvConfig
 )
+
 
 EXP_CONFIG_REGISTRY = dict()
 
@@ -118,7 +119,12 @@ EXP_CONFIG_REGISTRY["l5_rasterized_ebm"] = ExperimentConfig(
     registered_name="l5_rasterized_ebm",
 )
 
-
+EXP_CONFIG_REGISTRY["nusc_rasterized_plan"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=L5RasterizedPlanningConfig(),
+    registered_name="nusc_rasterized_plan"
+)
 
 def get_registered_experiment_config(registered_name):
     if registered_name not in EXP_CONFIG_REGISTRY.keys():

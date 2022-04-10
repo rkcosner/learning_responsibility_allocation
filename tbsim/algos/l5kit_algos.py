@@ -25,6 +25,7 @@ from tbsim.models.transformer_model import TransformerModel
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.metrics as Metrics
 import tbsim.utils.l5_utils as L5Utils
+import tbsim.utils.avdata_utils as AVUtils
 from tbsim.policies.common import Plan, Action
 import tbsim.algos.algo_utils as AlgoUtils
 from tbsim.utils.geometry_utils import transform_points_tensor
@@ -39,7 +40,7 @@ class L5TrafficModel(pl.LightningModule):
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
         self._do_log = do_log
-        assert modality_shapes["image"][0] == 15
+        # assert modality_shapes["image"][0] == 15
 
         traj_decoder = MLPTrajectoryDecoder(
             feature_dim=algo_config.map_feature_dim,
@@ -121,6 +122,8 @@ class L5TrafficModel(pl.LightningModule):
             info (dict): dictionary of relevant inputs, outputs, and losses
                 that might be relevant for logging
         """
+        batch = AVUtils.maybe_parse_batch(batch)
+        batch = TensorUtils.to_device(batch, self.device)
         pout = self.nets["policy"](batch)
         losses = self.nets["policy"].compute_losses(pout, batch)
         total_loss = 0.0
@@ -142,6 +145,8 @@ class L5TrafficModel(pl.LightningModule):
         }
 
     def validation_step(self, batch, batch_idx):
+        batch = AVUtils.maybe_parse_batch(batch)
+        batch = TensorUtils.to_device(batch, self.device)
         pout = self.nets["policy"](batch)
         losses = TensorUtils.detach(self.nets["policy"].compute_losses(pout, batch))
         metrics = self._compute_metrics(pout, batch)
