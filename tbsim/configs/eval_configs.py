@@ -9,6 +9,8 @@ class EvaluationConfig(Dict):
         self.dataset_path = None
         self.eval_class = "HierAgentAware"
         self.seed = 0
+        self.parallel_simulation = False
+        self.num_parallel = 3
         self.num_scenes_per_batch = 5
         self.num_scenes_to_evaluate = 100
         self.num_simulation_steps = 200

@@ -98,14 +98,15 @@ def draw_agent_boxes(image, pos, yaw, extent, raster_from_agent, outline_color, 
 
 
 def get_state_image_with_boxes(ego_obs, agents_obs, rasterizer):
+    yaw = 0  # ego_obs["yaw"]
     state_im = rasterizer.rasterize(
         ego_obs["centroid"],
-        ego_obs["yaw"]
+        yaw
     )
 
     raster_from_world = rasterizer.render_context.raster_from_world(
         ego_obs["centroid"],
-        ego_obs["yaw"]
+        yaw
     )
     raster_from_agent = raster_from_world @ ego_obs["world_from_agent"]
     state_im = draw_agent_boxes(

@@ -70,6 +70,67 @@ class GroundTruth(PolicyComposer):
         return GTPolicy(device=self.device)
 
 
+class BC(PolicyComposer):
+    def get_policy(self, **kwargs):
+        policy_ckpt_path, policy_config_path = get_checkpoint(
+            ngc_job_id="2775586",
+            ckpt_key="iter73000",
+            ckpt_root_dir=self.ckpt_dir,
+        )
+        policy_cfg = get_experiment_config_from_file(policy_config_path)
+        policy = L5TrafficModel.load_from_checkpoint(
+            policy_ckpt_path,
+            algo_config=policy_cfg.algo,
+            modality_shapes=self.modality_shapes,
+        ).to(self.device).eval()
+        return policy
+
+
+class TrafficSim(PolicyComposer):
+    def get_policy(self, **kwargs):
+        policy_ckpt_path, policy_config_path = get_checkpoint(
+            ngc_job_id="",
+            ckpt_key="",
+            ckpt_root_dir=self.ckpt_dir,
+        )
+        policy_cfg = get_experiment_config_from_file(policy_config_path)
+        policy = L5VAETrafficModel.load_from_checkpoint(
+            policy_ckpt_path,
+            algo_config=policy_cfg.algo,
+            modality_shapes=self.modality_shapes,
+        ).to(self.device).eval()
+        return policy
+
+
+class TPP(PolicyComposer):
+    def get_policy(self, **kwargs):
+        policy_ckpt_path, policy_config_path = get_checkpoint(
+            ngc_job_id="",
+            ckpt_key="",
+            ckpt_root_dir=self.ckpt_dir,
+        )
+        policy_cfg = get_experiment_config_from_file(policy_config_path)
+        policy = L5DiscreteVAETrafficModel.load_from_checkpoint(
+            policy_ckpt_path,
+            algo_config=policy_cfg.algo,
+            modality_shapes=self.modality_shapes,
+        ).to(self.device).eval()
+        return policy
+
+
+class GAN(PolicyComposer):
+    def get_policy(self, **kwargs):
+        policy_ckpt_path = "/home/danfeix/workspace/tbsim/gan_trained_models/test/run0/checkpoints/iter11999_ep0_egoADE1.41.ckpt"
+        policy_config_path = "/home/danfeix/workspace/tbsim/gan_trained_models/test/run0/config.json"
+        policy_cfg = get_experiment_config_from_file(policy_config_path)
+        policy = GANTrafficModel.load_from_checkpoint(
+            policy_ckpt_path,
+            algo_config=policy_cfg.algo,
+            modality_shapes=self.modality_shapes,
+        ).to(self.device).eval()
+        return policy
+
+
 class Hierarchical(PolicyComposer):
     def _get_planner(self):
         planner_ckpt_path, planner_config_path = get_checkpoint(
@@ -94,6 +155,8 @@ class Hierarchical(PolicyComposer):
             ckpt_root_dir=self.ckpt_dir
         )
         policy_cfg = get_experiment_config_from_file(policy_config_path)
+        policy_cfg.lock()
+        assert policy_cfg.algo.goal_conditional
 
         controller = MATrafficModel.load_from_checkpoint(
             policy_ckpt_path,
@@ -258,6 +321,7 @@ def create_env(
     l5_config = deepcopy(l5_config)
     l5_config["raster_params"]["raster_size"] = (1000, 1000)
     l5_config["raster_params"]["pixel_size"] = (0.1, 0.1)
+    l5_config["raster_params"]["ego_center"] = (0.5, 0.5)
     render_rasterizer = build_visualization_rasterizer_l5kit(l5_config, LocalDataManager(None))
     sim_cfg.env.simulation.num_simulation_steps = num_simulation_steps
     sim_cfg.env.simulation.distance_th_far = 1e+5  # keep controlling everything
@@ -277,13 +341,14 @@ def create_env(
         ).eval().to(device)
 
         base_noise = np.array(eval_cfg.perturb.std)
-        perturbations = {
-            "p=0.0": RandomPerturbation(std=base_noise * 0.0),
-            "p=0.1": RandomPerturbation(std=base_noise * 0.1),
-            "p=0.2": RandomPerturbation(std=base_noise * 0.2),
-            "p=0.5": RandomPerturbation(std=base_noise * 0.5),
-            "p=1.0": RandomPerturbation(std=base_noise * 1.0)
-        }
+        perturbations = dict()
+        # perturbations = {
+        #     "p=0.0": RandomPerturbation(std=base_noise * 0.0),
+        #     "p=0.1": RandomPerturbation(std=base_noise * 0.1),
+        #     "p=0.2": RandomPerturbation(std=base_noise * 0.2),
+        #     "p=0.5": RandomPerturbation(std=base_noise * 0.5),
+        #     "p=1.0": RandomPerturbation(std=base_noise * 1.0)
+        # }
 
         metrics = dict(
             all_off_road_rate=EnvMetrics.OffRoadRate(),
@@ -308,7 +373,7 @@ def create_env(
     )
 
     eval_scenes = [9058, 5232, 14153, 8173, 10314, 7027, 9812, 1090, 9453, 978, 10263, 874, 5563, 9613, 261, 2826, 2175, 9977, 6423, 1069, 1836, 8198, 5034, 6016, 2525, 927, 3634, 11806, 4911, 6192, 11641, 461, 142, 15493, 4919, 8494, 14572, 2402, 308, 1952, 13287, 15614, 6529, 12, 11543, 4558, 489, 6876, 15279, 6095, 5877, 8928, 10599, 16150, 11296, 9382, 13352, 1794, 16122, 12429, 15321, 8614, 12447, 4502, 13235, 2919, 15893, 12960, 7043, 9278, 952, 4699, 768, 13146, 8827, 16212, 10777, 15885, 11319, 9417, 14092, 14873, 6740, 11847, 15331, 15639, 11361, 14784, 13448, 10124, 4872, 3567, 5543, 2214, 7624, 10193, 7297, 1308, 3951, 14001]
-    return env, modality_shapes, eval_scenes
+    return env, modality_shapes, eval_scenes, sim_cfg
 
 
 def dump_episode_buffer(buffer, scene_index, h5_path):
@@ -371,7 +436,19 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
     obs_to_torch = eval_cfg.eval_class not in ["GroundTruth", "ReplayAction"]
 
     result_stats = None
+    scene_i = 0
+    parallel_count = 0
+
     while scene_i < eval_cfg.num_scenes_to_evaluate:
+        scene_indices = eval_scenes[scene_i: scene_i + eval_cfg.num_scenes_per_batch]
+        if eval_cfg.parallel_simulation:
+            parallel_count += 1
+            if parallel_count == eval_cfg.num_parallel:
+                parallel_count = 0
+                scene_i += eval_cfg.num_scenes_per_batch
+        else:
+            scene_i += eval_cfg.num_scenes_per_batch
+
         stats, info, renderings = rollout_episodes(
             env,
             rollout_policy,
@@ -379,10 +456,9 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
             n_step_action=eval_cfg.n_step_action,
             render=render_to_video,
             skip_first_n=1,
-            scene_indices=eval_scenes[scene_i: scene_i + eval_cfg.num_scenes_per_batch],
+            scene_indices=scene_indices,
             obs_to_torch=obs_to_torch
         )
-        scene_i += eval_cfg.num_scenes_per_batch
 
         print(info["scene_index"])
         print(stats)
@@ -483,6 +559,12 @@ if __name__ == "__main__":
         default=None
     )
 
+    parser.add_argument(
+        "--prefix",
+        type=str,
+        default=None,
+    )
+
     args = parser.parse_args()
 
     cfg = EvaluationConfig()
@@ -505,6 +587,9 @@ if __name__ == "__main__":
 
     if cfg.name is None:
         cfg.name = cfg.eval_class
+
+    if args.prefix is not None:
+        cfg.name = args.prefix + cfg.name
 
     if args.seed is not None:
         cfg.seed = args.seed

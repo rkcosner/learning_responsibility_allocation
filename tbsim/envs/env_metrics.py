@@ -286,21 +286,35 @@ class LearnedMetric(EnvMetrics):
         agent_traj_pos = transform_points(points=traj_pos, transf_matrix=agent_from_world)
         agent_traj_yaw = angular_distance(traj_yaw, yaw_current[:, None])
 
-        state["target_positions"] = agent_traj_pos
-        state["target_yaws"] = agent_traj_yaw[:, :, None]
+        traj_to_eval = dict()
+        traj_to_eval["target_positions"] = agent_traj_pos
+        traj_to_eval["target_yaws"] = agent_traj_yaw[:, :, None]
 
+        state_torch = TensorUtils.to_torch(state, self.metric_algo.device)
         metrics = dict()
-        if self.perturbations is None:
-            state_torch = TensorUtils.to_torch(state, self.metric_algo.device)
-            with torch.no_grad():
-                metrics = self.metric_algo.get_metrics(state_torch)
-        else:
-            for k, v in self.perturbations.items():
-                state_perturbed = v.perturb(state)
-                state_torch = TensorUtils.to_torch(state_perturbed, self.metric_algo.device)
-                m = self.metric_algo.get_metrics(state_torch)
-                for mk in m:
-                    metrics["{}_{}".format(k, mk)] = m[mk]
+
+        # evaluate score of the ground truth state
+        m = self.metric_algo.get_metrics(state_torch)
+        for mk in m:
+            metrics["gt_{}".format(mk)] = m[mk]
+
+        with torch.no_grad():
+            traj_torch = TensorUtils.to_torch(traj_to_eval, self.metric_algo.device)
+            state_to_eval = dict(state_torch)
+            state_to_eval.update(traj_torch)
+            m = self.metric_algo.get_metrics(state_to_eval)
+            for mk in m:
+                metrics["comp_{}".format(mk)] = (metrics["gt_{}".format(mk)] < m[mk]).float()
+            metrics.update(m)
+
+        for k, v in self.perturbations.items():
+            traj_perturbed = TensorUtils.to_torch(v.perturb(traj_to_eval), self.metric_algo.device)
+            state_perturbed = dict(state_torch)
+            state_perturbed.update(traj_perturbed)
+            m = self.metric_algo.get_metrics(state_perturbed)
+            for mk in m:
+                metrics["{}_{}".format(k, mk)] = m[mk]
+
         metrics= TensorUtils.to_numpy(metrics)
 
         step_metrics = dict()
