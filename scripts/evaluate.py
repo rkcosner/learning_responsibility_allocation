@@ -6,6 +6,7 @@ import numpy as np
 import json
 import h5py
 import random
+from collections import defaultdict
 
 from collections import OrderedDict
 import os
@@ -31,10 +32,12 @@ from tbsim.algos.multiagent_algos import MATrafficModel
 from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.configs.eval_configs import EvaluationConfig
 from tbsim.envs.env_l5kit import EnvL5KitSimulation, BatchedEnv
-from tbsim.utils.config_utils import translate_l5kit_cfg, get_experiment_config_from_file
+from tbsim.envs.env_avdata import EnvUnifiedSimulation
+from tbsim.utils.config_utils import translate_l5kit_cfg, get_experiment_config_from_file, translate_avdata_cfg
 from tbsim.utils.env_utils import rollout_episodes
 import tbsim.envs.env_metrics as EnvMetrics
 from tbsim.policies.hardcoded import ReplayPolicy, GTPolicy
+from avdata import AgentBatch, AgentType, UnifiedDataset
 
 from tbsim.policies.wrappers import (
     PolicyWrapper,
@@ -58,10 +61,9 @@ class PolicyComposer(object):
         self.device = device
         self.ckpt_dir = ckpt_dir
         self.eval_config = eval_config
-        self.policy = None
 
     def get_policy(self):
-        return self.policy
+        raise NotImplementedError
 
 
 class ReplayAction(PolicyComposer):
@@ -121,6 +123,7 @@ class TPP(PolicyComposer):
             algo_config=policy_cfg.algo,
             modality_shapes=self.modality_shapes,
         ).to(self.device).eval()
+        policy = PolicyWrapper.wrap_controller(policy, sample=True)
         return policy
 
 
@@ -228,8 +231,7 @@ class RandomPerturbation(object):
         return obs
 
 
-def create_env(
-        sim_cfg,
+def create_env_l5kit(
         eval_cfg,
         num_scenes_per_batch,
         device,
@@ -238,6 +240,11 @@ def create_env(
         compute_metrics=True,
         seed=1
 ):
+    os.environ["L5KIT_DATA_FOLDER"] = eval_cfg.dataset_path
+    sim_cfg = get_registered_experiment_config("l5_mixed_plan")
+    # sim_cfg.algo.step_time = 0.2
+    # sim_cfg.algo.future_num_frames = 20
+
     dm = LocalDataManager(None)
     l5_config = translate_l5kit_cfg(sim_cfg)
     rasterizer = build_rasterizer(l5_config, dm)
@@ -284,11 +291,6 @@ def create_env(
             all_collision_rate=EnvMetrics.CollisionRate(),
             all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations)
         )
-        # metrics = dict(
-        #     all_off_road_rate=EnvMetrics.OffRoadRate(),
-        #     ego_collision_rate=EnvMetrics.CollisionRate(),
-        #     all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo)
-        # )
 
     env = EnvL5KitSimulation(
         sim_cfg.env,
@@ -305,16 +307,59 @@ def create_env(
     return env, modality_shapes, eval_scenes, sim_cfg
 
 
-def dump_episode_buffer(buffer, scene_index, h5_path):
-    h5_file = h5py.File(h5_path, "a")
+def create_env_nusc(
+        eval_cfg,
+        num_scenes_per_batch,
+        device,
+        num_simulation_steps=200,
+        skimp_rollout=False,
+        compute_metrics=True,
+        seed=1
+):
+    sim_cfg = get_registered_experiment_config("nusc_rasterized_plan")
+    sim_cfg.algo.step_time = 0.5
+    sim_cfg.algo.future_num_frames = 10
+    sim_cfg.simulation.num_simulation_steps = num_simulation_steps
 
-    for si, scene_buffer in zip(scene_index, buffer):
-        for mk in scene_buffer:
-            for k in scene_buffer[mk]:
-                h5key = "/{}/{}/{}".format(si, mk, k)
-                h5_file.create_dataset(h5key, data=scene_buffer[mk][k])
-    h5_file.close()
-    print("scene {} written to {}".format(scene_index, h5_path))
+    data_cfg = translate_avdata_cfg(sim_cfg)
+
+    future_sec = data_cfg.future_num_frames * data_cfg.step_time
+    history_sec = data_cfg.history_num_frames * data_cfg.step_time
+    neighbor_distance = data_cfg.max_agents_distance
+    kwargs = dict(
+        desired_data=[data_cfg.avdata_source_valid],
+        rebuild_cache=data_cfg.build_cache,
+        rebuild_maps=data_cfg.build_cache,
+        future_sec=(future_sec, future_sec),
+        history_sec=(history_sec, history_sec),
+        data_dirs={
+            data_cfg.avdata_source_root: data_cfg.dataset_path,
+        },
+        only_types=[AgentType.VEHICLE],
+        agent_interaction_distances=defaultdict(lambda: neighbor_distance),
+        incl_map=True,
+        map_params={
+            "px_per_m": int(1 / data_cfg.pixel_size),
+            "map_size_px": data_cfg.raster_size,
+        },
+        verbose=True,
+        num_workers=os.cpu_count(),
+    )
+
+    env_dataset = UnifiedDataset(**kwargs)
+
+    env = EnvUnifiedSimulation(
+        sim_cfg.env,
+        dataset=env_dataset,
+        seed=seed,
+        num_scenes=num_scenes_per_batch,
+        prediction_only=False
+    )
+
+    modality_shapes = dict(image=(7, data_cfg.pixel_size, data_cfg.pixel_size))
+    eval_scenes = [0, 1, 2]
+
+    return env, modality_shapes, eval_scenes, sim_cfg
 
 
 def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_disk, render_to_video):
@@ -326,6 +371,7 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
     torch.manual_seed(eval_cfg.seed)
     torch.cuda.manual_seed(eval_cfg.seed)
 
+    # basic setup
     print('saving results to {}'.format(eval_cfg.results_dir))
     os.makedirs(eval_cfg.results_dir, exist_ok=True)
     os.makedirs(os.path.join(eval_cfg.results_dir, "videos/"), exist_ok=True)
@@ -335,13 +381,17 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
     if data_to_disk and os.path.exists(eval_cfg.experience_hdf5_path):
         os.remove(eval_cfg.experience_hdf5_path)
 
-    os.environ["L5KIT_DATA_FOLDER"] = eval_cfg.dataset_path
-
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    sim_cfg = get_registered_experiment_config("l5_mixed_plan")
 
-    env, modality_shapes, eval_scenes, sim_cfg = create_env(
-        sim_cfg,
+    # create env
+    if eval_cfg.env == "nusc":
+        env_func = create_env_nusc
+    elif eval_cfg.env == 'l5kit':
+        env_func = create_env_l5kit
+    else:
+        raise NotImplementedError("{} is not a valid env".format(eval_cfg.env))
+
+    env, modality_shapes, eval_scenes, sim_cfg = env_func(
         eval_cfg,
         device=device,
         num_scenes_per_batch=eval_cfg.num_scenes_per_batch,
@@ -351,15 +401,18 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
         seed=eval_cfg.seed
     )
 
+    # create policy and rollout wrapper
     evaluation = eval(eval_cfg.eval_class)(eval_cfg, modality_shapes, device, ckpt_dir=eval_cfg.ckpt_dir)
     policy = evaluation.get_policy(**eval_cfg.policy)
 
-    if eval_cfg.ego_only:
+    if eval_cfg.env == "nusc":
+        rollout_policy = RolloutWrapper(agents_policy=policy)
+    elif eval_cfg.ego_only:
         rollout_policy = RolloutWrapper(ego_policy=policy)
     else:
         rollout_policy = RolloutWrapper(ego_policy=policy, agents_policy=policy)
 
-    scene_i = 0
+    # eval loop
     obs_to_torch = eval_cfg.eval_class not in ["GroundTruth", "ReplayAction"]
 
     result_stats = None
@@ -382,7 +435,7 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
             num_episodes=1,
             n_step_action=eval_cfg.n_step_action,
             render=render_to_video,
-            skip_first_n=1,
+            skip_first_n=eval_cfg.skip_first_n if eval_cfg.env != "nusc" else 0,
             scene_indices=scene_indices,
             obs_to_torch=obs_to_torch
         )
@@ -418,6 +471,17 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
                 h5_path=eval_cfg.experience_hdf5_path
             )
 
+
+def dump_episode_buffer(buffer, scene_index, h5_path):
+    h5_file = h5py.File(h5_path, "a")
+
+    for si, scene_buffer in zip(scene_index, buffer):
+        for mk in scene_buffer:
+            for k in scene_buffer[mk]:
+                h5key = "/{}/{}/{}".format(si, mk, k)
+                h5_file.create_dataset(h5key, data=scene_buffer[mk][k])
+    h5_file.close()
+    print("scene {} written to {}".format(scene_index, h5_path))
 
 
 if __name__ == "__main__":

@@ -36,7 +36,9 @@ def translate_avdata_cfg(cfg: ExperimentConfig):
     rcfg = Dict()
     assert cfg.algo.step_time == 0.5  # TODO: support interpolation
     rcfg.step_time = cfg.algo.step_time
-    rcfg.avdata_source = cfg.train.avdata_source
+    rcfg.avdata_source_root = cfg.train.avdata_source_root
+    rcfg.avdata_source_train = cfg.train.avdata_source_train
+    rcfg.avdata_source_valid = cfg.train.avdata_source_valid
     rcfg.dataset_path = cfg.train.dataset_path
     rcfg.history_num_frames = cfg.algo.history_num_frames
     rcfg.future_num_frames = cfg.algo.future_num_frames

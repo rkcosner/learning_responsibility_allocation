@@ -6,6 +6,7 @@ class EvaluationConfig(Dict):
     def __init__(self):
         super(EvaluationConfig, self).__init__()
         self.name = None
+        self.env = "nusc"  # [l5kit, nusc]
         self.dataset_path = None
         self.eval_class = "HierAgentAware"
         self.seed = 0
@@ -19,6 +20,7 @@ class EvaluationConfig(Dict):
         self.ckpt_dir = "checkpoints/"
         self.experience_hdf5_path = None
         self.results_dir = "results/"
+        self.skip_first_n = 1
 
         self.policy.mask_drivable = True
         self.policy.num_plan_samples = 50

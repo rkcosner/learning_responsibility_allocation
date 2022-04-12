@@ -159,7 +159,7 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         logger.watch(model=model)
     else:
         print("WARNING: not logging training stats")
-        
+
     # Train
     trainer = pl.Trainer(
         default_root_dir=root_dir,

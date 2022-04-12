@@ -123,7 +123,6 @@ class L5TrafficModel(pl.LightningModule):
                 that might be relevant for logging
         """
         batch = AVUtils.maybe_parse_batch(batch)
-        batch = TensorUtils.to_device(batch, self.device)
         pout = self.nets["policy"](batch)
         losses = self.nets["policy"].compute_losses(pout, batch)
         total_loss = 0.0
@@ -146,7 +145,6 @@ class L5TrafficModel(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         batch = AVUtils.maybe_parse_batch(batch)
-        batch = TensorUtils.to_device(batch, self.device)
         pout = self.nets["policy"](batch)
         losses = TensorUtils.detach(self.nets["policy"].compute_losses(pout, batch))
         metrics = self._compute_metrics(pout, batch)

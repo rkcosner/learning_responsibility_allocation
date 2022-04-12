@@ -9,7 +9,10 @@ class NuscTrainConfig(TrainConfig):
     def __init__(self):
         super(NuscTrainConfig, self).__init__()
 
-        self.avdata_source = "nusc_mini"  # [nusc_mini, nusc, lyft_sample, lyft]
+        self.avdata_source_train = "nusc-train"
+        self.avdata_source_valid = "nusc-val"
+        self.avdata_source_root = "nusc"
+
         self.dataset_path = "SET-THIS-THROUGH-TRAIN-SCRIPT-ARGS"
         self.datamodule_class = "UnifiedDataModule"
 
@@ -53,9 +56,6 @@ class NuscEnvConfig(EnvConfig):
         self.data_generation_params.max_agents_distance = 30
 
         self.simulation.distance_th_close = 30
-
-        #  whether to disable agents that are not returned at start_frame_index
-        self.simulation.disable_new_agents = False
 
         # maximum number of simulation steps to run (0.1sec / step)
         self.simulation.num_simulation_steps = 50

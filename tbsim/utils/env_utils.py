@@ -55,7 +55,7 @@ def rollout_episodes(
             with timers.timed("to_torch"):
                 if obs_to_torch:
                     device = policy.device if device is None else device
-                    obs_torch = TensorUtils.to_torch(obs, device=device)
+                    obs_torch = TensorUtils.to_torch(obs, device=device, ignore_if_unspecified=True)
                 else:
                     obs_torch = obs
 
