@@ -8,7 +8,11 @@ from tbsim.l5kit.vis_rasterizer import VisualizationRasterizer, cv2_subpixel, CV
 from tbsim.utils.geometry_utils import get_box_world_coords_np
 from l5kit.rasterization.render_context import RenderContext
 from l5kit.configs.config import load_metadata
+import tbsim.utils.tensor_utils as TensorUtils
 from PIL import Image, ImageDraw
+from avdata.data_structures.map import Map
+
+
 
 COLORS = {
     "agent_contour": "#247BA0",
@@ -97,7 +101,59 @@ def draw_agent_boxes(image, pos, yaw, extent, raster_from_agent, outline_color, 
     return im
 
 
-def get_state_image_with_boxes(ego_obs, agents_obs, rasterizer):
+def render_state_avdata(
+        batch: dict,
+        batch_idx: int,
+        action,
+) -> np.ndarray:
+    pos = batch["history_positions"][batch_idx, -1]
+    yaw = batch["history_yaws"][batch_idx, -1]
+
+    neigh_pos = batch["neigh_hist"][batch_idx, :, -1, :2]
+    neigh_yaw = np.arctan2(batch["neigh_hist"][batch_idx, :, -1, -2], batch["neigh_hist"][batch_idx, :, -1, -1])
+    nan_mask = np.any(np.isnan(neigh_pos), axis=-1)
+    neigh_pos = neigh_pos[nan_mask]
+    neigh_yaw = neigh_yaw[nan_mask]
+    neigh_yaw = neigh_yaw[:, None]
+
+    map_res = batch["maps_resolution"][batch_idx]
+    b, c, h, w = batch["maps"].shape
+
+    trans_mat = np.array(
+        [[map_res, 0, 0.5 * h], [0, map_res, 0.5 * w], [0, 0, 1]]
+    )
+    image = Map.to_img(
+        TensorUtils.to_tensor(batch["maps"][batch_idx]),
+        [[0, 1, 2], [3, 4], [5, 6]],
+    )
+
+    image = draw_agent_boxes(
+        image,
+        pos=pos[None, :],
+        yaw=yaw[None, :],
+        extent=np.array([[4.0, 2.0]]),
+        raster_from_agent=trans_mat,
+        outline_color=COLORS["ego_contour"],
+        fill_color=COLORS["ego_fill"]
+    )
+
+    if neigh_pos.shape[0] > 0:
+        image = draw_agent_boxes(
+            image,
+            pos=neigh_pos,
+            yaw=neigh_yaw,
+            extent=np.array([[4.0, 2.0]]),
+            raster_from_agent=trans_mat,
+            outline_color=COLORS["agent_contour"],
+            fill_color=COLORS["agent_fill"]
+        )
+
+    vis_action = TensorUtils.map_ndarray(action.agents.to_dict(), lambda x: x[batch_idx])
+    image = draw_actions(image, trans_mat=trans_mat, pred_action=vis_action)
+    return image
+
+
+def get_state_image_with_boxes_l5kit(ego_obs, agents_obs, rasterizer):
     yaw = 0  # ego_obs["yaw"]
     state_im = rasterizer.rasterize(
         ego_obs["centroid"],
@@ -166,7 +222,7 @@ def render_state_l5kit_ego_view(
         pred_plan_info = map_ndarray(
             pred_plan_info, lambda x:  x[ego_scene_index])
 
-    state_im, raster_from_agent, _ = get_state_image_with_boxes(
+    state_im, raster_from_agent, _ = get_state_image_with_boxes_l5kit(
         ego_obs, agents_obs, rasterizer)
     im = draw_actions(
         state_image=state_im,
@@ -234,7 +290,7 @@ def render_state_l5kit_agents_view(
     all_ims = []
     for i in range(num_agents):
         agents_inds = np.arange(all_obs["centroid"].shape[0]) != i
-        state_im, raster_from_agent, raster_from_world = get_state_image_with_boxes(
+        state_im, raster_from_agent, raster_from_world = get_state_image_with_boxes_l5kit(
             ego_obs=map_ndarray(all_obs, lambda x: x[i]),
             agents_obs=map_ndarray(all_obs, lambda x: x[agents_inds]),
             rasterizer=rasterizer

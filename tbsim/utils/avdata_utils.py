@@ -8,7 +8,7 @@ from typing import List
 def avdata2posyawspeed(state):
     assert state.shape[-1] == 8  # x, y, vx, vy, ax, ay, sin(heading), cos(heading)
     pos = state[..., :2]
-    yaw = torch.arccos(state[..., [-1]])
+    yaw = torch.atan2(state[..., [-2]], state[..., [-1]])
     speed = torch.norm(state[..., 2:4], dim=-1)
     return pos, yaw, speed
 
@@ -30,9 +30,9 @@ def parse_avdata_batch(batch: dict):
         curr_speed=curr_speed,
         centroid=curr_state[..., :2],
         yaw=curr_state[..., -1],
-        curr_agent_state=curr_state,
     )
-    return d
+    batch.update(d)
+    return batch
 
 
 def maybe_parse_batch(batch):

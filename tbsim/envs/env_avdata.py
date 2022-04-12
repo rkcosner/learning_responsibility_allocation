@@ -3,13 +3,14 @@ from copy import deepcopy
 from typing import List, Dict
 from torch.utils.data.dataloader import default_collate
 from collections import OrderedDict
+from l5kit.geometry import transform_points, transform_point
 
 from avdata import AgentBatch, AgentType, UnifiedDataset
 from avdata.simulation import SimulationScene
 from avdata.visualization.vis import plot_agent_batch
 
 import tbsim.utils.tensor_utils as TensorUtils
-from tbsim.utils.vis_utils import render_state_l5kit_agents_view, render_state_l5kit_ego_view
+from tbsim.utils.vis_utils import render_state_avdata
 from tbsim.envs.base import BaseEnv, BatchedEnv, SimulationException
 from tbsim.policies.common import RolloutAction, Action
 import tbsim.envs.env_metrics as EnvMetrics
@@ -37,6 +38,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
             dataset (UnifiedDataset): a UnifiedDataset instance that contains scene data for simulation
             prediction_only (bool): if set to True, ignore the input action command and only record the predictions
         """
+        print(env_config)
         self._npr = np.random.RandomState(seed=seed)
         self.dataset = dataset
         self._env_config = env_config
@@ -61,7 +63,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
     @property
     def current_scene_names(self):
-        return deepcopy([scene.scene_info for scene in self._current_scenes])
+        return deepcopy([scene.scene_info.name for scene in self._current_scenes])
 
     @property
     def current_num_agents(self):
@@ -144,7 +146,16 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
             self.episode_buffer.append(dict(ego_obs=dict(), ego_action=dict(), agents_obs=dict(), agents_action=dict()))
 
     def render(self, actions_to_take):
-        pass
+        scene_ims = []
+        ego_inds = [i for i, name in enumerate(self.current_agent_names) if name == "ego"]
+        for i in ego_inds:
+            im = render_state_avdata(
+                batch=self.get_observation()["agents"],
+                batch_idx=i,
+                action=actions_to_take
+            )
+            scene_ims.append(im)
+        return np.stack(scene_ims)
 
     def get_random_action(self):
         ac = self._npr.randn(self.current_num_agents, 1, 3)
@@ -162,9 +173,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                     scene_buffer[mk][k] = np.stack(scene_buffer[mk][k])
 
         return {
-            "buffer": self.episode_buffer,
             "scene_index": self.current_scene_names,
-            "experience": self.get_episode_experience()
         }
 
     def get_metrics(self):
@@ -187,27 +196,23 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         return metrics
 
     def get_observation(self):
-        if self._done:
-            return None
-
         if self._cached_observation is not None:
-            return self._cached_observation
+            return self._cached_observation[0]
 
         self.timers.tic("get_obs")
 
-        agent_obs = []
+        raw_obs = []
         for scene in self._current_scenes:
-            agent_obs.extend(scene.get_obs(collate=False))
-
-        agent_obs = self.dataset.get_collate_fn(return_dict=True)(agent_obs)
+            raw_obs.extend(scene.get_obs(collate=False))
+        agent_obs = self.dataset.get_collate_fn(return_dict=True)(raw_obs)
         agent_obs = parse_avdata_batch(agent_obs)
-        agent_obs = TensorUtils.to_numpy(agent_obs)
+        agent_obs = TensorUtils.to_numpy(agent_obs, ignore_if_unspecified=True)
 
         # cache observations
-        self._cached_observation = dict(agents=agent_obs)
+        self._cached_observation = (dict(agents=agent_obs), raw_obs)
         self.timers.toc("get_obs")
 
-        return self._cached_observation
+        return self._cached_observation[0]
 
     def _add_per_step_metrics(self, obs):
         for k, v in self._metrics.items():
@@ -222,16 +227,30 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         # record metrics
         self._add_per_step_metrics(obs)
 
-        action = TensorUtils.to_numpy(step_actions.agents.to_dict())
+        action = step_actions.agents.to_dict()
         assert action["positions"].shape[0] == obs["centroid"].shape[0]
         idx = 0
+        # print(action["positions"])
         for scene in self._current_scenes:
             scene_action = dict()
             for agent in scene.agents:
-                next_state = np.zeros(3, dtype=obs["centroid"].dtype)
-                next_state[:2] = obs["centroid"][idx] + action["positions"][idx, 0]
-                next_state[2] = obs["yaw"][idx] + action["yaws"][idx, 0, 0]
+                curr_yaw = obs["curr_agent_state"][idx, -1]
+                curr_pos = obs["curr_agent_state"][idx, :2]
+                world_from_agent = np.array(
+                    [
+                        [np.cos(curr_yaw), np.sin(curr_yaw)],
+                        [-np.sin(curr_yaw), np.cos(curr_yaw)],
+                    ]
+                )
+                next_state = np.zeros(3, dtype=obs["agent_fut"].dtype)
+                if not np.any(np.isnan(action["positions"][idx, 0])):
+                    next_state[:2] = action["positions"][idx, 0] @ world_from_agent + curr_pos
+                    next_state[2] = curr_yaw + action["yaws"][idx, 0, 0]
+                    # next_state[:2] = obs["agent_fut"][idx, 0, :2] @ world_from_agent + curr_pos
+                    # yaw_ac = np.arctan2(obs["agent_fut"][idx, 0, -2], obs["agent_fut"][idx, 0, -1])
+                    # next_state[2] = curr_yaw + yaw_ac
                 scene_action[agent.name] = next_state
+                idx += 1
             scene.step(scene_action)
 
         self._cached_observation = None
@@ -250,6 +269,10 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
             num_steps_to_take (int): how many env steps to take. Must be less or equal to length of the input actions
             render (bool): whether to render state and actions and return renderings
         """
+        actions = actions.to_numpy()
         assert num_steps_to_take == 1
+        renderings = []
+        if render:
+            renderings.append(self.render(actions))
         self._step(step_actions=actions)
-        return []
+        return renderings

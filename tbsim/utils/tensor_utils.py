@@ -334,7 +334,7 @@ def to_tensor(x, ignore_if_unspecified=False):
     )
 
 
-def to_numpy(x):
+def to_numpy(x, ignore_if_unspecified=False):
     """
     Converts all torch tensors in nested dictionary or list or tuple to
     numpy (and leaves existing numpy arrays as-is), and returns
@@ -342,6 +342,7 @@ def to_numpy(x):
 
     Args:
         x (dict or list or tuple): a possibly nested dictionary or list or tuple
+        ignore_if_unspecified (bool): ignore an item if its type is unspecified by the type_func_dict
 
     Returns:
         y (dict or list or tuple): new nested dict-list-tuple
@@ -360,6 +361,7 @@ def to_numpy(x):
             np.ndarray: lambda x: x,
             type(None): lambda x: x,
         },
+        ignore_if_unspecified=ignore_if_unspecified
     )
 
 
