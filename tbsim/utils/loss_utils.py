@@ -409,8 +409,6 @@ def weighted_multimodal_trajectory_loss(
     max_mask = torch.zeros([*err.shape[:2], 1, 1, 1], dtype=torch.bool).to(err.device)
     max_mask[torch.arange(0, err.size(0)), max_idx] = True
     nonmax_mask = ~max_mask
-    import pdb
-    pdb.set_trace()
     loss = (
         torch.sum((err * max_mask)) + torch.sum((err * nonmax_mask).detach())
     ) / total_count

@@ -19,7 +19,7 @@ from tbsim.utils.loss_utils import (
     log_normal_mixture,
     NLL_GMM_loss,
 )
-import pdb
+
 
 class RasterizedPlanningModel(nn.Module):
     """Raster-based model for planning.
@@ -699,9 +699,7 @@ class RasterizedDiscreteVAEModel(nn.Module):
         losses = OrderedDict(prediction_loss=pred_loss, kl_loss=kl_loss)
         if self.dyn is not None:
             losses["yaw_reg_loss"] = torch.mean(pred_batch["controls"][..., 1] ** 2)
-        for k,v in losses.items():
-            if v.isnan():
-                pdb.set_trace()
+
         return losses
 
 
@@ -834,9 +832,7 @@ class RasterizedECModel(nn.Module):
             availabilities=data_batch["target_availabilities"],
             weights_scaling=self.weights_scaling
         )
-        # if pred_loss<40:
-        #     import pdb
-        #     pdb.set_trace()
+
         goal_loss = goal_reaching_loss(
             predictions=pred_batch["trajectories"],
             targets=target_traj,

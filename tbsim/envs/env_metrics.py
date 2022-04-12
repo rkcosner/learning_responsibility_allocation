@@ -9,7 +9,7 @@ import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.l5_utils as L5Utils
 from tbsim.utils.geometry_utils import transform_points_tensor, detect_collision, CollisionType
 import tbsim.utils.metrics as Metrics
-import pdb
+
 
 class EnvMetrics(abc.ABC):
     def __init__(self):

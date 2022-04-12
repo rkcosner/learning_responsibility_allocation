@@ -14,7 +14,6 @@ from tbsim.utils.geometry_utils import (
     PED_PED_collision,
     get_box_world_coords,
 )
-import pdb
 
 metric_signature = Callable[
     [np.ndarray, np.ndarray, np.ndarray, np.ndarray], np.ndarray

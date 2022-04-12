@@ -10,7 +10,6 @@ from tbsim.utils.geometry_utils import (
     PED_VEH_collision,
     PED_PED_collision,
 )
-import pdb
 
 
 def get_collision_loss(
@@ -97,6 +96,5 @@ def ego_sample_planning(
             - weights["collision_weight"] * col_loss
             - weights["lane_weight"] * lane_loss
         )
-    # if total_score.shape[0] == 1 and total_score.min() < -0.5:
-    #     pdb.set_trace()
+
     return torch.argmax(total_score, dim=1)

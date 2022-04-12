@@ -201,13 +201,15 @@ class EC_sampling_controller(Policy):
             x0 = TrajTree(traj0, None, 0)
             x0.grow_tree(expand_func, 1)
             leaves = x0.get_all_leaves()
+            
             if len(leaves) > 0:
                 ego_trajs_i = torch.stack([leaf.total_traj for leaf in leaves], 0)
                 ego_trajs_i = ego_trajs_i[...,1:,[0,1,4]]
             else:
                 ego_trajs_i = torch.cat((obs["target_positions"][i],obs["target_yaws"][i]),-1).unsqueeze(0)
             ego_trajs.append(ego_trajs_i)
-
+            import pdb
+            pdb.set_trace()
         self.timer.toc("sampling")
         self.timer.tic("prediction")
         N = max(ego_trajs_i.shape[0] for ego_trajs_i in ego_trajs)

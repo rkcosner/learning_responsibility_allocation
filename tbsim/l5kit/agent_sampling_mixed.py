@@ -20,7 +20,7 @@ from l5kit.rasterization import (
     RenderContext,
 )
 
-import pdb
+
 from l5kit.data.map_api import InterpolationMethod, MapAPI
 from l5kit.rasterization.semantic_rasterizer import indices_in_bounds
 from l5kit.geometry import transform_points

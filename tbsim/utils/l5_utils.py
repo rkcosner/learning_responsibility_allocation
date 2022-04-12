@@ -607,8 +607,6 @@ def gen_EC_edges(ego_trajectories,agent_trajectories,ego_extents, agent_extents,
         edges (torch.Tensor): [B,N,A,T,10]
         type_mask (dict)
     """
-    import pdb
-    pdb.set_trace()
     B,A,T = ego_trajectories.shape[:3]
 
     veh_mask = (raw_types >= 3) & (raw_types <= 13)

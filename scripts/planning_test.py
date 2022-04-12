@@ -180,7 +180,7 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
         # scene_indices=[150, 1652, 2258, 3496, 14962, 15756]
     )
     print(stats)
-    import pdb
+
     for i, scene_images in enumerate(renderings[0]):
         writer = get_writer(os.path.join(
             video_dir, "{}.mp4".format(info["scene_index"][i])), fps=10)

@@ -7,7 +7,7 @@ from tbsim.utils import l5_utils as L5Utils
 from tbsim.utils.geometry_utils import transform_points_tensor, calc_distance_map
 from tbsim.utils.l5_utils import get_last_available_index
 from tbsim.utils.loss_utils import goal_reaching_loss, trajectory_loss, collision_loss
-import pdb
+
 
 
 def generate_proxy_mask(orig_loc, radius,mode="L1"):
