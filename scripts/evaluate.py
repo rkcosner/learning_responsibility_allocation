@@ -18,7 +18,7 @@ from l5kit.rasterization import build_rasterizer
 from l5kit.kinematic import Perturbation
 
 from tbsim.l5kit.vectorizer import build_vectorizer
-from tbsim.algos.l5kit_algos import L5TrafficModel, L5VAETrafficModel, L5TrafficModelGC, SpatialPlanner
+from tbsim.algos.l5kit_algos import L5DiscreteVAETrafficModel, L5TrafficModel, L5VAETrafficModel, L5TrafficModelGC, SpatialPlanner, L5ECTrafficModel
 from tbsim.algos.metric_algos import EBMMetric
 from tbsim.algos.multiagent_algos import MATrafficModel
 from tbsim.configs.registry import get_registered_experiment_config
@@ -27,14 +27,14 @@ from tbsim.envs.env_l5kit import EnvL5KitSimulation, BatchedEnv
 from tbsim.utils.config_utils import translate_l5kit_cfg, get_experiment_config_from_file
 from tbsim.utils.env_utils import rollout_episodes
 import tbsim.envs.env_metrics as EnvMetrics
-from tbsim.policies.hardcoded import ReplayPolicy, GTPolicy
+from tbsim.policies.hardcoded import ReplayPolicy, GTPolicy, EC_sampling_controller
 
 from tbsim.policies.wrappers import (
     PolicyWrapper,
     HierarchicalWrapper,
     HierarchicalSamplerWrapper,
     RolloutWrapper,
-    SamplingPolicyWrapper
+    SamplingPolicyWrapper,
 )
 
 from tbsim.utils.tensor_utils import to_torch, to_numpy, map_ndarray
@@ -44,7 +44,8 @@ from tbsim.utils.vis_utils import build_visualization_rasterizer_l5kit
 from imageio import get_writer
 from tbsim.utils.timer import Timers
 
-
+from Pplan.spline_planner import SplinePlanner
+from Pplan.trajectory_tree import TrajTree
 class PolicyComposer(object):
     def __init__(self, eval_config, modality_shapes, device, ckpt_dir="checkpoints/"):
         self.modality_shapes = modality_shapes
@@ -125,7 +126,9 @@ class HierAgentAware(Hierarchical):
         ).to(self.device).eval()
         return predictor
 
+
     def get_policy(self, **kwargs):
+
         planner = self._get_planner()
         predictor = self._get_predictor()
         controller = predictor
@@ -139,6 +142,81 @@ class HierAgentAware(Hierarchical):
         sampler = HierarchicalSamplerWrapper(plan_sampler, controller)
 
         self.policy = SamplingPolicyWrapper(ego_action_sampler=sampler, agent_traj_predictor=predictor)
+        return self.policy
+
+class HierAgentAwareCVAE(Hierarchical):
+
+    def _get_controller(self):
+        controller_ckpt_path, controller_config_path = get_checkpoint(
+            ngc_job_id="2792906",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
+            ckpt_key="iter13000",
+            ckpt_root_dir=self.ckpt_dir
+        )
+        controller_cfg = get_experiment_config_from_file(controller_config_path)
+
+        controller = L5DiscreteVAETrafficModel.load_from_checkpoint(
+            controller_ckpt_path,
+            algo_config=controller_cfg.algo,
+            modality_shapes=self.modality_shapes
+        ).to(self.device).eval()
+        return controller
+    def _get_predictor(self):
+        predictor_ckpt_path, predictor_config_path = get_checkpoint(
+            ngc_job_id="2732861",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
+            ckpt_key="iter20999",
+            ckpt_root_dir=self.ckpt_dir
+        )
+        predictor_cfg = get_experiment_config_from_file(predictor_config_path)
+
+        predictor = MATrafficModel.load_from_checkpoint(
+            predictor_ckpt_path,
+            algo_config=predictor_cfg.algo,
+            modality_shapes=self.modality_shapes
+        ).to(self.device).eval()
+        return predictor
+
+
+    def get_policy(self, **kwargs):
+        planner = self._get_planner()
+        controller = self._get_controller()
+        predictor = self._get_predictor()
+        controller = PolicyWrapper.wrap_controller(
+            controller,
+            sample=True,
+            num_action_samples=kwargs.get("num_action_samples")
+        )
+
+        sampler = HierarchicalWrapper(planner, controller)
+
+        self.policy = SamplingPolicyWrapper(ego_action_sampler=sampler, agent_traj_predictor=predictor)
+        return self.policy
+
+class AgentAwareEC(Hierarchical):
+    
+    def _get_EC_predictor(self):
+        EC_ckpt_path, EC_config_path = get_checkpoint(
+            # ngc_job_id="2596419",  # gc_clip_regyaw_dynUnicycle_decmlp128,128_decstateTrue_yrl1.0
+            # ckpt_key="iter120999_",
+            ngc_job_id="2783997",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
+            ckpt_key="iter33000",
+            ckpt_root_dir=self.ckpt_dir
+        )
+        EC_cfg = get_experiment_config_from_file(EC_config_path)
+        
+
+        EC_model = L5ECTrafficModel.load_from_checkpoint(
+            EC_ckpt_path,
+            algo_config=EC_cfg.algo,
+            modality_shapes=self.modality_shapes
+        ).to(self.device).eval()
+        return EC_model
+
+    def get_policy(self, **kwargs):
+        planner = self._get_planner()
+        EC_model = self._get_EC_predictor()
+        ego_sampler = SplinePlanner(self.device, N_seg=planner.algo_config.future_num_frames+1)
+        agent_planner = planner
+        self.policy = EC_sampling_controller(ego_sampler=ego_sampler,EC_model=EC_model, agent_planner=agent_planner,device=self.device)
         return self.policy
 
 
@@ -210,7 +288,7 @@ def create_env(
         metrics = dict(
             all_off_road_rate=EnvMetrics.OffRoadRate(),
             all_collision_rate=EnvMetrics.CollisionRate(),
-            all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations)
+            # all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations)
         )
         # metrics = dict(
         #     all_off_road_rate=EnvMetrics.OffRoadRate(),
@@ -267,7 +345,9 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     sim_cfg = get_registered_experiment_config("l5_mixed_plan")
-
+    if eval_cfg.eval_class =="AgentAwareEC":
+        sim_cfg.env.data_generation_params.vectorize_lane = True
+        eval_cfg.ego_only= True
     env, modality_shapes, eval_scenes = create_env(
         sim_cfg,
         eval_cfg,

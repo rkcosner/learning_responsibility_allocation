@@ -408,13 +408,13 @@ def get_lane_info(
                         dx_curr[i] = -delta_x
                         len_curr[i] = len_cand
 
-                elif min_dy <= -1.5 and min_dy > -5 and abs(dpsi) < np.pi / 2:
+                elif min_dy <= -1.5 and min_dy > -8 and abs(dpsi) < 0.75*np.pi:
                     if right_lane[i] is None or len_right[i] < len_cand:
                         right_lane[i] = lane
                         dx_right[i] = -delta_x
                         len_right[i] = len_cand
 
-                elif min_dy >= 1.5 and min_dy < 5 and abs(dpsi) < np.pi / 2:
+                elif min_dy >= 1.5 and min_dy < 8 and abs(dpsi) < 0.75*np.pi:
                     if left_lane[i] is None or len_left[i] < len_cand:
                         left_lane[i] = lane
                         dx_left[i] = -delta_x

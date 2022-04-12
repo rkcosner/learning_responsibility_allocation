@@ -160,10 +160,9 @@ def NLL_GMM_loss(x, m, v, pi, avails=None, detach=True):
         max_flag = (log_prob==log_prob.max(dim=1,keepdim=True)[0])
         nonmax_flag = torch.logical_not(max_flag)
         log_prob_detach = log_prob.detach()
-        ll = log_prob*max_flag+log_prob_detach*nonmax_flag
+        NLL_loss = (-pi*log_prob*max_flag).sum(1).mean()+(-pi*log_prob_detach*nonmax_flag).sum(1).mean()
     else:
-        ll = log_prob
-    NLL_loss = (-pi*ll).sum(1).mean()
+        NLL_loss = (-pi*log_prob).sum(1).mean()
     return NLL_loss
 
 
@@ -299,7 +298,7 @@ def MultiModal_trajectory_loss(predictions, targets, availabilities, prob, weigh
     nonmin_flag = torch.logical_not(min_flag)
     min_weight = (min_flag*prob)[...,None,None]*target_weights
     nonmin_weight = (nonmin_flag*prob)[...,None,None]*target_weights
-    loss = ((loss_v*min_weight)+(loss_v_detached*nonmin_weight)).sum()/availabilities.sum()
+    loss = ((loss_v*min_weight).sum()+(loss_v_detached*nonmin_weight).sum())/availabilities.sum()
     return loss
 
         

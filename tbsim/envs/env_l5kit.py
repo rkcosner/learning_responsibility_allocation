@@ -427,7 +427,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         # TODO: accumulate sim trajectories
         self._cached_observation = None
-
         if self._frame_index + 1 == self.horizon:
             self._done = True
         else:

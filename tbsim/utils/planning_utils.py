@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from tbsim.models.cnn_roi_encoder import obtain_lane_flag
 from tbsim.utils.loss_utils import collision_loss
-from tbsim.utils.l5_utils import gen_ego_edges
+from tbsim.utils.l5_utils import gen_ego_edges, gen_EC_edges
 from tbsim.utils.geometry_utils import (
     VEH_VEH_collision,
     VEH_PED_collision,
@@ -39,9 +39,10 @@ def get_collision_loss(
                 ego_edges[..., 6:8],
                 ego_edges[..., 8:],
             ).min(dim=-1)[0]
-            col_loss += torch.max(
-                torch.sigmoid(-dis - 4.0) * type_mask[et].unsqueeze(1), dim=2
-            )[0]
+            if dis.nelement()>0:
+                col_loss += torch.max(
+                    torch.sigmoid(-dis - 4.0) * type_mask[et].unsqueeze(1), dim=2
+                )[0]
     return col_loss
 
 

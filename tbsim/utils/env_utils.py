@@ -67,7 +67,6 @@ def rollout_episodes(
             else:
                 with timers.timed("network"):
                     action = policy.get_action(obs_torch, step_index = counter)
-
                 with timers.timed("env_step"):
                     ims = env.step(
                         action, num_steps_to_take=n_step_action, render=render
@@ -76,10 +75,9 @@ def rollout_episodes(
                     frames.extend(ims)
             timers.toc("step")
             print(timers)
-
+            
             done = env.is_done()
             counter += 1
-
         metrics = env.get_metrics()
         for k, v in metrics.items():
             if k not in stats:
