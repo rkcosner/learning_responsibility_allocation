@@ -20,7 +20,11 @@ class UnifiedDataModule(pl.LightningDataModule):
     @property
     def modality_shapes(self):
         # TODO: better way to figure out channel size?
-        return dict(image=(7, self._data_config.pixel_size, self._data_config.pixel_size))
+        return dict(
+            image=(7 + self._data_config.history_num_frames + 1,  # semantic map + num_history + current
+                   self._data_config.pixel_size,
+                   self._data_config.pixel_size)
+        )
 
     def setup(self, stage = None):
         data_cfg = self._data_config
@@ -29,8 +33,6 @@ class UnifiedDataModule(pl.LightningDataModule):
         neighbor_distance = data_cfg.max_agents_distance
         kwargs = dict(
             desired_data=[data_cfg.avdata_source_train],
-            rebuild_cache=data_cfg.build_cache,
-            rebuild_maps=data_cfg.build_cache,
             future_sec=(future_sec, future_sec),
             history_sec=(history_sec, history_sec),
             data_dirs={

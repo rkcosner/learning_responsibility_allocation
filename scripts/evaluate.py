@@ -233,9 +233,7 @@ class RandomPerturbation(object):
 
 def create_env_l5kit(
         eval_cfg,
-        num_scenes_per_batch,
         device,
-        num_simulation_steps=200,
         skimp_rollout=False,
         compute_metrics=True,
         seed=1
@@ -259,7 +257,6 @@ def create_env_l5kit(
     l5_config["raster_params"]["pixel_size"] = (0.1, 0.1)
     l5_config["raster_params"]["ego_center"] = (0.5, 0.5)
     render_rasterizer = build_visualization_rasterizer_l5kit(l5_config, LocalDataManager(None))
-    sim_cfg.env.simulation.num_simulation_steps = num_simulation_steps
     sim_cfg.env.simulation.distance_th_far = 1e+5  # keep controlling everything
     sim_cfg.env.simulation.disable_new_agents = True
     sim_cfg.env.generate_agent_obs = True
@@ -296,7 +293,7 @@ def create_env_l5kit(
         sim_cfg.env,
         dataset=env_dataset,
         seed=seed,
-        num_scenes=num_scenes_per_batch,
+        num_scenes=eval_cfg.num_scenes_per_batch,
         prediction_only=False,
         renderer=render_rasterizer,
         metrics=metrics,
@@ -309,9 +306,7 @@ def create_env_l5kit(
 
 def create_env_nusc(
         eval_cfg,
-        num_scenes_per_batch,
         device,
-        num_simulation_steps=200,
         skimp_rollout=False,
         compute_metrics=True,
         seed=1
@@ -319,7 +314,10 @@ def create_env_nusc(
     sim_cfg = get_registered_experiment_config("nusc_rasterized_plan")
     sim_cfg.algo.step_time = 0.5
     sim_cfg.algo.future_num_frames = 10
-    sim_cfg.simulation.num_simulation_steps = num_simulation_steps
+    sim_cfg.train.dataset_path = eval_cfg.dataset_path
+    sim_cfg.env.simulation.num_simulation_steps = eval_cfg.num_simulation_steps
+    sim_cfg.env.simulation.start_frame_index = sim_cfg.algo.history_num_frames + 1
+    sim_cfg.lock()
 
     data_cfg = translate_avdata_cfg(sim_cfg)
 
@@ -327,13 +325,12 @@ def create_env_nusc(
     history_sec = data_cfg.history_num_frames * data_cfg.step_time
     neighbor_distance = data_cfg.max_agents_distance
     kwargs = dict(
-        desired_data=[data_cfg.avdata_source_valid],
-        rebuild_cache=data_cfg.build_cache,
-        rebuild_maps=data_cfg.build_cache,
+        desired_data=["nusc-val"],
         future_sec=(future_sec, future_sec),
         history_sec=(history_sec, history_sec),
         data_dirs={
-            data_cfg.avdata_source_root: data_cfg.dataset_path,
+            "nusc": data_cfg.dataset_path,
+            "nusc_mini": data_cfg.dataset_path,
         },
         only_types=[AgentType.VEHICLE],
         agent_interaction_distances=defaultdict(lambda: neighbor_distance),
@@ -345,6 +342,7 @@ def create_env_nusc(
         verbose=True,
         num_workers=os.cpu_count(),
     )
+    print(kwargs)
 
     env_dataset = UnifiedDataset(**kwargs)
 
@@ -352,12 +350,12 @@ def create_env_nusc(
         sim_cfg.env,
         dataset=env_dataset,
         seed=seed,
-        num_scenes=num_scenes_per_batch,
+        num_scenes=eval_cfg.num_scenes_per_batch,
         prediction_only=False
     )
 
-    modality_shapes = dict(image=(7, data_cfg.pixel_size, data_cfg.pixel_size))
-    eval_scenes = [0, 1, 2]
+    modality_shapes = dict(image=(7 + data_cfg.history_num_frames + 1, data_cfg.pixel_size, data_cfg.pixel_size))
+    eval_scenes = [0, 1, 2, 3, 4]
 
     return env, modality_shapes, eval_scenes, sim_cfg
 
@@ -394,8 +392,6 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
     env, modality_shapes, eval_scenes, sim_cfg = env_func(
         eval_cfg,
         device=device,
-        num_scenes_per_batch=eval_cfg.num_scenes_per_batch,
-        num_simulation_steps=eval_cfg.num_simulation_steps,
         skimp_rollout=skimp_rollout,
         compute_metrics=compute_metrics,
         seed=eval_cfg.seed
@@ -460,6 +456,8 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
                 video_dir = os.path.join(eval_cfg.results_dir, "videos/")
                 writer = get_writer(os.path.join(
                     video_dir, "{}.mp4".format(info["scene_index"][i])), fps=10)
+                print("video to {}".format(os.path.join(
+                    video_dir, "{}.mp4".format(info["scene_index"][i]))))
                 for im in scene_images:
                     writer.append_data(im)
                 writer.close()

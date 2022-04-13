@@ -108,12 +108,15 @@ def render_state_avdata(
 ) -> np.ndarray:
     pos = batch["history_positions"][batch_idx, -1]
     yaw = batch["history_yaws"][batch_idx, -1]
+    extent = batch["agent_hist_extent"][batch_idx, -1][:2]
 
     neigh_pos = batch["neigh_hist"][batch_idx, :, -1, :2]
     neigh_yaw = np.arctan2(batch["neigh_hist"][batch_idx, :, -1, -2], batch["neigh_hist"][batch_idx, :, -1, -1])
-    nan_mask = np.any(np.isnan(neigh_pos), axis=-1)
-    neigh_pos = neigh_pos[nan_mask]
-    neigh_yaw = neigh_yaw[nan_mask]
+    neigh_extent = batch["neigh_hist_extents"][batch_idx, :, -1, :2]
+    valid_mask = np.bitwise_not(np.any(np.isnan(neigh_pos), axis=-1))
+    neigh_pos = neigh_pos[valid_mask]
+    neigh_yaw = neigh_yaw[valid_mask]
+    neigh_extent = neigh_extent[valid_mask]
     neigh_yaw = neigh_yaw[:, None]
 
     map_res = batch["maps_resolution"][batch_idx]
@@ -131,7 +134,7 @@ def render_state_avdata(
         image,
         pos=pos[None, :],
         yaw=yaw[None, :],
-        extent=np.array([[4.0, 2.0]]),
+        extent=extent[None, :],
         raster_from_agent=trans_mat,
         outline_color=COLORS["ego_contour"],
         fill_color=COLORS["ego_fill"]
@@ -142,7 +145,7 @@ def render_state_avdata(
             image,
             pos=neigh_pos,
             yaw=neigh_yaw,
-            extent=np.array([[4.0, 2.0]]),
+            extent=neigh_extent,
             raster_from_agent=trans_mat,
             outline_color=COLORS["agent_contour"],
             fill_color=COLORS["agent_fill"]

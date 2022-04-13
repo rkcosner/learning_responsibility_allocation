@@ -47,6 +47,5 @@ def translate_avdata_cfg(cfg: ExperimentConfig):
     rcfg.max_agents_distance_simulation = cfg.env.simulation.distance_th_close
     rcfg.pixel_size = cfg.env.rasterizer.pixel_size
     rcfg.raster_size = int(cfg.env.rasterizer.raster_size)
-    rcfg.build_cache = cfg.train.on_ngc
     rcfg.lock()
     return rcfg

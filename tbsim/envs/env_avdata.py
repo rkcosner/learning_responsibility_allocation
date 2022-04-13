@@ -70,6 +70,13 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         return sum(len(scene.agents) for scene in self._current_scenes)
 
     @property
+    def obs_scene_index(self):
+        si = []
+        for i, scene in enumerate(self._current_scenes):
+            si.extend([i] * len(scene.agents))
+        return np.array(si, dtype=np.int64)
+
+    @property
     def current_agent_names(self):
         names = []
         for scene in self._current_scenes:
@@ -195,24 +202,32 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 metrics[met_name] = met_vals
         return metrics
 
+    def get_observation_by_scene(self):
+        obs = self.get_observation()["agents"]
+        obs_by_scene = []
+        obs_scene_index = self.obs_scene_index
+        for i in range(self.num_instances):
+            obs_by_scene.append(TensorUtils.map_ndarray(obs, lambda x: x[obs_scene_index == i]))
+        return obs_by_scene
+
     def get_observation(self):
         if self._cached_observation is not None:
-            return self._cached_observation[0]
+            return self._cached_observation
 
         self.timers.tic("get_obs")
 
         raw_obs = []
-        for scene in self._current_scenes:
+        for si, scene in enumerate(self._current_scenes):
             raw_obs.extend(scene.get_obs(collate=False))
         agent_obs = self.dataset.get_collate_fn(return_dict=True)(raw_obs)
         agent_obs = parse_avdata_batch(agent_obs)
-        agent_obs = TensorUtils.to_numpy(agent_obs, ignore_if_unspecified=True)
+        agent_obs = TensorUtils.to_numpy(agent_obs)
 
         # cache observations
-        self._cached_observation = (dict(agents=agent_obs), raw_obs)
+        self._cached_observation = dict(agents=agent_obs)
         self.timers.toc("get_obs")
 
-        return self._cached_observation[0]
+        return self._cached_observation
 
     def _add_per_step_metrics(self, obs):
         for k, v in self._metrics.items():
@@ -230,7 +245,6 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         action = step_actions.agents.to_dict()
         assert action["positions"].shape[0] == obs["centroid"].shape[0]
         idx = 0
-        # print(action["positions"])
         for scene in self._current_scenes:
             scene_action = dict()
             for agent in scene.agents:
@@ -243,12 +257,9 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                     ]
                 )
                 next_state = np.zeros(3, dtype=obs["agent_fut"].dtype)
-                if not np.any(np.isnan(action["positions"][idx, 0])):
+                if not np.any(np.isnan(action["positions"][idx, 0])):  # ground truth action may be NaN
                     next_state[:2] = action["positions"][idx, 0] @ world_from_agent + curr_pos
                     next_state[2] = curr_yaw + action["yaws"][idx, 0, 0]
-                    # next_state[:2] = obs["agent_fut"][idx, 0, :2] @ world_from_agent + curr_pos
-                    # yaw_ac = np.arctan2(obs["agent_fut"][idx, 0, -2], obs["agent_fut"][idx, 0, -1])
-                    # next_state[2] = curr_yaw + yaw_ac
                 scene_action[agent.name] = next_state
                 idx += 1
             scene.step(scene_action)
