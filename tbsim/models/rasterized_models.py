@@ -19,7 +19,7 @@ from tbsim.utils.loss_utils import (
     log_normal_mixture,
     NLL_GMM_loss,
 )
-import pdb
+
 
 class RasterizedPlanningModel(nn.Module):
     """Raster-based model for planning.
@@ -618,7 +618,6 @@ class RasterizedDiscreteVAEModel(nn.Module):
         return outs
 
     def sample(self, batch_inputs: dict, n: int):
-        assert n<=self.vae.K
         condition_inputs = OrderedDict(image=batch_inputs["image"], goal=self._get_goal_states(batch_inputs))
 
         decoder_kwargs = dict()
@@ -700,9 +699,7 @@ class RasterizedDiscreteVAEModel(nn.Module):
         losses = OrderedDict(prediction_loss=pred_loss, kl_loss=kl_loss)
         if self.dyn is not None:
             losses["yaw_reg_loss"] = torch.mean(pred_batch["controls"][..., 1] ** 2)
-        for k,v in losses.items():
-            if v.isnan():
-                pdb.set_trace()
+
         return losses
 
 
@@ -783,6 +780,48 @@ class RasterizedECModel(nn.Module):
             out_dict["controls"] = dec_output["controls"]
             out_dict["curr_states"] = curr_states
         return out_dict
+    
+    def EC_predict(self,obs,cond_traj,goal_state=None):
+        image_batch = obs["image"]
+        map_feat = self.map_encoder(image_batch)
+        if self.GC:
+            if goal_state is None:
+                goal_inds = L5Utils.get_last_available_index(obs["target_availabilities"])
+                target_traj = torch.cat((obs["target_positions"],obs["target_yaws"]),-1)
+                goal_state = torch.gather(
+                    target_traj,  # [B, T, 3]
+                    dim=1,
+                    index=goal_inds[:, None, None].expand(-1, 1, target_traj.shape[-1])
+                ).squeeze(1)  # -> [B, 3]
+            else:
+                if goal_state.ndim==3:
+                    goal_state = goal_state[...,-1,:]
+            goal_feat = self.goal_encoder(goal_state) # -> [B, D]
+
+            input_feat = torch.cat((map_feat, goal_feat), dim=-1)
+        else:
+            input_feat = map_feat
+        if self.traj_decoder.dyn is not None:
+            curr_states = L5Utils.get_current_states(obs, dyn_type=self.traj_decoder.dyn.type())
+        else:
+            curr_states = None
+        dec_output = self.traj_decoder.forward(inputs=input_feat, current_states=curr_states, cond_traj=cond_traj)
+        
+        traj = dec_output["trajectories"]
+
+        pred_positions = traj[:, :, :2]
+        pred_yaws = traj[:, :, 2:3]
+        out_dict = {
+            "trajectories": traj,
+            "predictions": {"positions": pred_positions, "yaws": pred_yaws},
+            "cond_traj":cond_traj,
+            "cond_availability": torch.ones(cond_traj.shape[:3]).to(cond_traj.device),
+            "EC_trajectories":dec_output["EC_trajectories"]
+        }
+        if self.traj_decoder.dyn is not None:
+            out_dict["controls"] = dec_output["controls"]
+            out_dict["curr_states"] = curr_states
+        return out_dict
 
     def compute_losses(self, pred_batch, data_batch):
         
@@ -793,9 +832,7 @@ class RasterizedECModel(nn.Module):
             availabilities=data_batch["target_availabilities"],
             weights_scaling=self.weights_scaling
         )
-        # if pred_loss<40:
-        #     import pdb
-        #     pdb.set_trace()
+
         goal_loss = goal_reaching_loss(
             predictions=pred_batch["trajectories"],
             targets=target_traj,

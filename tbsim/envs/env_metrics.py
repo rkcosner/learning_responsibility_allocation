@@ -9,7 +9,7 @@ import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.l5_utils as L5Utils
 from tbsim.utils.geometry_utils import transform_points_tensor, detect_collision, CollisionType
 import tbsim.utils.metrics as Metrics
-import pdb
+
 
 class EnvMetrics(abc.ABC):
     def __init__(self):
@@ -277,7 +277,9 @@ class LearnedMetric(EnvMetrics):
         traj_inds = range(1, self.traj_len + 1)
         traj_pos = [state_buffer[traj_i]["centroid"] for traj_i in traj_inds]
         traj_yaw = [state_buffer[traj_i]["yaw"] for traj_i in traj_inds]
+
         traj_pos = np.stack(traj_pos, axis=1)  # [B, T, 2]
+
         traj_yaw = np.stack(traj_yaw, axis=1)  # [B, T]
         assert traj_pos.shape[0] == traj_yaw.shape[0]
 

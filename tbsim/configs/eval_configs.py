@@ -23,6 +23,7 @@ class EvaluationConfig(Dict):
         self.skip_first_n = 1
 
         self.policy.mask_drivable = True
-        self.policy.num_plan_samples = 50
+        self.policy.num_plan_samples = 10
+        self.policy.num_action_samples = 10
 
         self.perturb.std = [5.0, 5.0, np.pi / 2]

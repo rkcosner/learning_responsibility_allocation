@@ -3,14 +3,13 @@ import torch
 import torch.nn as nn
 from tbsim.models.cnn_roi_encoder import obtain_lane_flag
 from tbsim.utils.loss_utils import collision_loss
-from tbsim.utils.l5_utils import gen_ego_edges
+from tbsim.utils.l5_utils import gen_ego_edges, gen_EC_edges
 from tbsim.utils.geometry_utils import (
     VEH_VEH_collision,
     VEH_PED_collision,
     PED_VEH_collision,
     PED_PED_collision,
 )
-import pdb
 
 
 def get_collision_loss(
@@ -39,9 +38,10 @@ def get_collision_loss(
                 ego_edges[..., 6:8],
                 ego_edges[..., 8:],
             ).min(dim=-1)[0]
-            col_loss += torch.max(
-                torch.sigmoid(-dis - 4.0) * type_mask[et].unsqueeze(1), dim=2
-            )[0]
+            if dis.nelement()>0:
+                col_loss += torch.max(
+                    torch.sigmoid(-dis - 4.0) * type_mask[et].unsqueeze(1), dim=2
+                )[0]
     return col_loss
 
 
@@ -96,6 +96,5 @@ def ego_sample_planning(
             - weights["collision_weight"] * col_loss
             - weights["lane_weight"] * lane_loss
         )
-    # if total_score.shape[0] == 1 and total_score.min() < -0.5:
-    #     pdb.set_trace()
+
     return torch.argmax(total_score, dim=1)

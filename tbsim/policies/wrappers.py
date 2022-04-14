@@ -112,7 +112,6 @@ class SamplingPolicyWrapper(object):
         action_info["action_samples"] = action_samples.to_dict()
         if "plan_samples" in action_info:
             action_info["plan_samples"] = action_info["plan_samples"].to_dict()
-
         return ego_actions, action_info
 
 
@@ -146,10 +145,11 @@ class PolicyWrapper(object):
 class RolloutWrapper(object):
     """A wrapper policy that can (optionally) control both ego and other agents in a scene"""
 
-    def __init__(self, ego_policy=None, agents_policy=None):
+    def __init__(self, ego_policy=None, agents_policy=None,pass_agent_obs = True):
         self.device = ego_policy.device if agents_policy is None else agents_policy.device
         self.ego_policy = ego_policy
         self.agents_policy = agents_policy
+        self.pass_agent_obs = pass_agent_obs
 
     def eval(self):
         self.ego_policy.eval()
@@ -163,8 +163,12 @@ class RolloutWrapper(object):
         if self.ego_policy is not None:
             assert obs["ego"] is not None
             with torch.no_grad():
-                ego_action, ego_action_info = self.ego_policy.get_action(
-                    obs["ego"], step_index = step_index)
+                if self.pass_agent_obs:
+                    ego_action, ego_action_info = self.ego_policy.get_action(
+                        obs["ego"], step_index = step_index,agent_obs = obs["agents"])
+                else:
+                    ego_action, ego_action_info = self.ego_policy.get_action(
+                        obs["ego"], step_index = step_index)
         if self.agents_policy is not None:
             assert obs["agents"] is not None
             with torch.no_grad():

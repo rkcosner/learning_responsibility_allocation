@@ -680,16 +680,15 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
 
         return metrics
 
-    def get_action(self, obs_dict, sample=True, num_action_samples=1, plan=None, **kwargs):
+    def get_action(self, obs_dict, sample=True, num_action_samples=1, plan_samples=None, **kwargs):
         obs_dict = dict(obs_dict)
-        if plan is not None and self.algo_config.goal_conditional:
-            assert isinstance(plan, Plan)
-            obs_dict["target_positions"] = plan.positions
-            obs_dict["target_yaws"] = plan.yaws
-            obs_dict["target_availabilities"] = plan.availabilities
+        if plan_samples is not None and self.algo_config.goal_conditional:
+            assert isinstance(plan_samples, Plan)
+            obs_dict["target_positions"] = plan_samples.positions
+            obs_dict["target_yaws"] = plan_samples.yaws
+            obs_dict["target_availabilities"] = plan_samples.availabilities
 
         if sample:
-            assert num_action_samples<=self.nets["policy"].vae.K
             preds = self.nets["policy"].sample(obs_dict, n=num_action_samples)["predictions"]  # [B, N, T, 3]
             action_preds = TensorUtils.map_tensor(preds, lambda x: x[:, 0])  # use the first sample as the action
             info = dict(
@@ -708,6 +707,7 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
             yaws=action_preds["yaws"]
         )
         return action, info
+
 
 class L5ECTrafficModel(L5TrafficModel):
     def __init__(self, algo_config, modality_shapes):
@@ -850,6 +850,8 @@ class L5ECTrafficModel(L5TrafficModel):
             yaws=preds["yaws"]
         )
         return action, {}
+    def get_EC_pred(self,obs,cond_traj,goal_state=None):
+        return self.nets["policy"].EC_predict(obs,cond_traj,goal_state)
 
 class GANTrafficModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):

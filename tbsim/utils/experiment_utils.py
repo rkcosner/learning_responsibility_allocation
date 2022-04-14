@@ -8,7 +8,6 @@ from glob import glob
 import subprocess
 import shutil
 from pathlib import Path
-import pdb
 
 import tbsim
 from tbsim.configs.registry import get_registered_experiment_config
