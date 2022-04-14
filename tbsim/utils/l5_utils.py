@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import tbsim.dynamics as dynamics
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim import dynamics as dynamics
+from tbsim.configs.base import ExperimentConfig
 
 
 def get_agent_masks(raw_type):
@@ -695,3 +696,10 @@ def get_current_states_all_agents(batch: dict, step_time, dyn_type: dynamics.Dyn
 def get_drivable_region_map(rasterized_map):
     assert rasterized_map.shape[-3] in [3, 15]
     return rasterized_map[..., -3, :, :] < 1.
+
+
+def get_modality_shapes(cfg: ExperimentConfig):
+    assert cfg.env.rasterizer.map_type == "py_semantic"
+    num_channels = (cfg.algo.history_num_frames + 1) * 2 + 3
+    h, w = cfg.env.rasterizer.raster_size
+    return dict(image=(num_channels, h, w))

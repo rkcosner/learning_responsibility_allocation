@@ -17,11 +17,16 @@ from tbsim.utils.planning_utils import ego_sample_planning
 from tbsim.policies.common import Action, Plan
 from tbsim.policies.base import Policy
 
-from Pplan.spline_planner import SplinePlanner
-from Pplan.trajectory_tree import TrajTree
+try:
+    from Pplan.spline_planner import SplinePlanner
+    from Pplan.trajectory_tree import TrajTree
+except ImportError:
+    print("Cannot import Pplan")
+
 import tbsim.utils.planning_utils as PlanUtils
 import tbsim.utils.geometry_utils as GeoUtils
 from tbsim.utils.timer import Timers
+
 
 class OptimController(Policy):
     """An optimization-based controller"""

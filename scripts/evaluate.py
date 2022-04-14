@@ -1,6 +1,5 @@
 """A script for evaluating closed-loop simulation"""
 import argparse
-import shutil
 from copy import deepcopy
 import numpy as np
 import json
@@ -8,15 +7,11 @@ import h5py
 import random
 from collections import defaultdict
 
-from collections import OrderedDict
 import os
 import torch
-from torch.utils.data import DataLoader
 
 from l5kit.data import LocalDataManager, ChunkedDataset
-from l5kit.dataset import EgoDataset
 from l5kit.rasterization import build_rasterizer
-from l5kit.kinematic import Perturbation
 
 from tbsim.l5kit.vectorizer import build_vectorizer
 from tbsim.algos.l5kit_algos import (
@@ -30,15 +25,17 @@ from tbsim.algos.l5kit_algos import (
 )
 from tbsim.algos.metric_algos import EBMMetric
 from tbsim.algos.multiagent_algos import MATrafficModel
-from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.configs.eval_configs import EvaluationConfig
-from tbsim.envs.env_l5kit import EnvL5KitSimulation, BatchedEnv
+from tbsim.envs.env_l5kit import EnvL5KitSimulation
 from tbsim.envs.env_avdata import EnvUnifiedSimulation
 from tbsim.utils.config_utils import translate_l5kit_cfg, get_experiment_config_from_file, translate_avdata_cfg
 from tbsim.utils.env_utils import rollout_episodes
 import tbsim.envs.env_metrics as EnvMetrics
 from tbsim.policies.hardcoded import ReplayPolicy, GTPolicy, EC_sampling_controller
-from avdata import AgentBatch, AgentType, UnifiedDataset
+import tbsim.utils.l5_utils as L5Utils
+import tbsim.utils.avdata_utils as AVUtils
+from avdata import AgentType, UnifiedDataset
+from tbsim.configs.base import ExperimentConfig
 
 from tbsim.policies.wrappers import (
     PolicyWrapper,
@@ -48,21 +45,33 @@ from tbsim.policies.wrappers import (
     SamplingPolicyWrapper,
 )
 
-from tbsim.utils.tensor_utils import to_torch, to_numpy, map_ndarray
-from tbsim.l5kit.l5_ego_dataset import EgoDatasetMixed, EgoReplayBufferMixed, ExperienceIterableWrapper
+from tbsim.utils.tensor_utils import map_ndarray
+from tbsim.l5kit.l5_ego_dataset import EgoDatasetMixed
 from tbsim.utils.experiment_utils import get_checkpoint
 from tbsim.utils.vis_utils import build_visualization_rasterizer_l5kit
 from imageio import get_writer
-from tbsim.utils.timer import Timers
 
-from Pplan.spline_planner import SplinePlanner
-from Pplan.trajectory_tree import TrajTree
+try:
+    from Pplan.spline_planner import SplinePlanner
+    from Pplan.trajectory_tree import TrajTree
+except ImportError:
+    print("Cannot import Pplan")
+
+
 class PolicyComposer(object):
-    def __init__(self, eval_config, modality_shapes, device, ckpt_dir="checkpoints/"):
-        self.modality_shapes = modality_shapes
+    def __init__(self, eval_config, device, ckpt_dir="checkpoints/"):
         self.device = device
         self.ckpt_dir = ckpt_dir
         self.eval_config = eval_config
+        self._exp_config = None
+
+    def get_modality_shapes(self, exp_cfg: ExperimentConfig):
+        if self.eval_config.env == "nusc":
+            return AVUtils.get_modality_shapes(exp_cfg)
+        elif self.eval_config.env == "l5kit":
+            return L5Utils.get_modality_shapes(exp_cfg)
+        else:
+            raise NotImplementedError("{} is not a valid env".format(self.eval_config.env))
 
     def get_policy(self):
         raise NotImplementedError
@@ -72,12 +81,24 @@ class ReplayAction(PolicyComposer):
     def get_policy(self, **kwargs):
         print("Loading action log from {}".format(self.eval_config.experience_hdf5_path))
         h5 = h5py.File(self.eval_config.experience_hdf5_path, "r")
-        return ReplayPolicy(h5, self.device)
+        if self.eval_config.env == "nusc":
+            exp_cfg = get_experiment_config_from_file("nusc_rasterized_plan")
+        elif self.eval_config.env == "l5kit":
+            exp_cfg = get_experiment_config_from_file("l5_mixed_plan")
+        else:
+            raise NotImplementedError("invalid env {}".format(self.eval_config.env))
+        return ReplayPolicy(h5, self.device), exp_cfg
 
 
 class GroundTruth(PolicyComposer):
     def get_policy(self, **kwargs):
-        return GTPolicy(device=self.device)
+        if self.eval_config.env == "nusc":
+            exp_cfg = get_experiment_config_from_file("nusc_rasterized_plan")
+        elif self.eval_config.env == "l5kit":
+            exp_cfg = get_experiment_config_from_file("l5_mixed_plan")
+        else:
+            raise NotImplementedError("invalid env {}".format(self.eval_config.env))
+        return GTPolicy(device=self.device), exp_cfg
 
 
 class BC(PolicyComposer):
@@ -91,9 +112,9 @@ class BC(PolicyComposer):
         policy = L5TrafficModel.load_from_checkpoint(
             policy_ckpt_path,
             algo_config=policy_cfg.algo,
-            modality_shapes=self.modality_shapes,
+            modality_shapes=self.get_modality_shapes(policy_cfg),
         ).to(self.device).eval()
-        return policy
+        return policy, policy_cfg.clone()
 
 
 class TrafficSim(PolicyComposer):
@@ -107,9 +128,9 @@ class TrafficSim(PolicyComposer):
         policy = L5VAETrafficModel.load_from_checkpoint(
             policy_ckpt_path,
             algo_config=policy_cfg.algo,
-            modality_shapes=self.modality_shapes,
+            modality_shapes=self.get_modality_shapes(policy_cfg),
         ).to(self.device).eval()
-        return policy
+        return policy, policy_cfg.clone()
 
 
 class TPP(PolicyComposer):
@@ -123,10 +144,10 @@ class TPP(PolicyComposer):
         policy = L5DiscreteVAETrafficModel.load_from_checkpoint(
             policy_ckpt_path,
             algo_config=policy_cfg.algo,
-            modality_shapes=self.modality_shapes,
+            modality_shapes=self.get_modality_shapes(policy_cfg),
         ).to(self.device).eval()
         policy = PolicyWrapper.wrap_controller(policy, sample=True)
-        return policy
+        return policy, policy_cfg.clone()
 
 
 class GAN(PolicyComposer):
@@ -137,9 +158,9 @@ class GAN(PolicyComposer):
         policy = GANTrafficModel.load_from_checkpoint(
             policy_ckpt_path,
             algo_config=policy_cfg.algo,
-            modality_shapes=self.modality_shapes,
+            modality_shapes=self.get_modality_shapes(policy_cfg),
         ).to(self.device).eval()
-        return policy
+        return policy, policy_cfg.clone()
 
 
 class Hierarchical(PolicyComposer):
@@ -153,9 +174,9 @@ class Hierarchical(PolicyComposer):
         planner = SpatialPlanner.load_from_checkpoint(
             planner_ckpt_path,
             algo_config=planner_cfg.algo,
-            modality_shapes=self.modality_shapes,
+            modality_shapes=self.get_modality_shapes(planner_cfg),
         ).to(self.device).eval()
-        return planner
+        return planner, planner_cfg.clone()
 
     def _get_controller(self):
         policy_ckpt_path, policy_config_path = get_checkpoint(
@@ -172,16 +193,16 @@ class Hierarchical(PolicyComposer):
         controller = MATrafficModel.load_from_checkpoint(
             policy_ckpt_path,
             algo_config=policy_cfg.algo,
-            modality_shapes=self.modality_shapes
+            modality_shapes=self.get_modality_shapes(policy_cfg),
         ).to(self.device).eval()
-        return controller
+        return controller, policy_cfg.clone()
 
     def get_policy(self, **kwargs):
-        planner = self._get_planner()
-        controller = self._get_controller()
+        planner, _ = self._get_planner()
+        controller, exp_cfg = self._get_controller()
         planner = PolicyWrapper.wrap_planner(planner, mask_drivable=kwargs.get("mask_drivable"), sample=False)
-        self.policy = HierarchicalWrapper(planner, controller)
-        return self.policy
+        policy = HierarchicalWrapper(planner, controller)
+        return policy, exp_cfg
 
 
 class HierAgentAware(Hierarchical):
@@ -196,13 +217,13 @@ class HierAgentAware(Hierarchical):
         predictor = MATrafficModel.load_from_checkpoint(
             predictor_ckpt_path,
             algo_config=predictor_cfg.algo,
-            modality_shapes=self.modality_shapes
+            modality_shapes=self.get_modality_shapes(predictor_cfg),
         ).to(self.device).eval()
-        return predictor
+        return predictor, predictor_cfg.clone()
 
     def get_policy(self, **kwargs):
-        planner = self._get_planner()
-        predictor = self._get_predictor()
+        planner, _ = self._get_planner()
+        predictor, exp_cfg = self._get_predictor()
         controller = predictor
         plan_sampler = PolicyWrapper.wrap_planner(
             planner,
@@ -213,8 +234,8 @@ class HierAgentAware(Hierarchical):
         )
         sampler = HierarchicalSamplerWrapper(plan_sampler, controller)
 
-        self.policy = SamplingPolicyWrapper(ego_action_sampler=sampler, agent_traj_predictor=predictor)
-        return self.policy
+        policy = SamplingPolicyWrapper(ego_action_sampler=sampler, agent_traj_predictor=predictor)
+        return policy, exp_cfg
 
 
 class HierAgentAwareCVAE(Hierarchical):
@@ -229,9 +250,10 @@ class HierAgentAwareCVAE(Hierarchical):
         controller = L5DiscreteVAETrafficModel.load_from_checkpoint(
             controller_ckpt_path,
             algo_config=controller_cfg.algo,
-            modality_shapes=self.modality_shapes
+            modality_shapes=self.get_modality_shapes(controller_cfg),
         ).to(self.device).eval()
-        return controller
+        return controller, controller_cfg.clone()
+
     def _get_predictor(self):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
             ngc_job_id="2732861",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
@@ -243,15 +265,14 @@ class HierAgentAwareCVAE(Hierarchical):
         predictor = MATrafficModel.load_from_checkpoint(
             predictor_ckpt_path,
             algo_config=predictor_cfg.algo,
-            modality_shapes=self.modality_shapes
+            modality_shapes=self.get_modality_shapes(predictor_cfg),
         ).to(self.device).eval()
-        return predictor
-
+        return predictor, predictor_cfg.clone()
 
     def get_policy(self, **kwargs):
-        planner = self._get_planner()
-        controller = self._get_controller()
-        predictor = self._get_predictor()
+        planner, _ = self._get_planner()
+        predictor, _ = self._get_predictor()
+        controller, exp_cfg = self._get_controller()
         controller = PolicyWrapper.wrap_controller(
             controller,
             sample=True,
@@ -260,11 +281,11 @@ class HierAgentAwareCVAE(Hierarchical):
 
         sampler = HierarchicalWrapper(planner, controller)
 
-        self.policy = SamplingPolicyWrapper(ego_action_sampler=sampler, agent_traj_predictor=predictor)
-        return self.policy
+        policy = SamplingPolicyWrapper(ego_action_sampler=sampler, agent_traj_predictor=predictor)
+        return policy, exp_cfg
+
 
 class AgentAwareEC(Hierarchical):
-
     def _get_EC_predictor(self):
         EC_ckpt_path, EC_config_path = get_checkpoint(
             # ngc_job_id="2596419",  # gc_clip_regyaw_dynUnicycle_decmlp128,128_decstateTrue_yrl1.0
@@ -275,21 +296,21 @@ class AgentAwareEC(Hierarchical):
         )
         EC_cfg = get_experiment_config_from_file(EC_config_path)
 
-
         EC_model = L5ECTrafficModel.load_from_checkpoint(
             EC_ckpt_path,
             algo_config=EC_cfg.algo,
-            modality_shapes=self.modality_shapes
+            modality_shapes=self.get_modality_shapes(EC_cfg),
         ).to(self.device).eval()
-        return EC_model
+        return EC_model, EC_cfg.clone()
 
     def get_policy(self, **kwargs):
-        planner = self._get_planner()
-        EC_model = self._get_EC_predictor()
+        planner, _ = self._get_planner()
+        EC_model, exp_cfg = self._get_EC_predictor()
         ego_sampler = SplinePlanner(self.device, N_seg=planner.algo_config.future_num_frames+1)
         agent_planner = planner
-        self.policy = EC_sampling_controller(ego_sampler=ego_sampler,EC_model=EC_model, agent_planner=agent_planner,device=self.device)
-        return self.policy
+        policy = EC_sampling_controller(
+            ego_sampler=ego_sampler,EC_model=EC_model, agent_planner=agent_planner, device=self.device)
+        return policy, exp_cfg
 
 
 class RandomPerturbation(object):
@@ -309,6 +330,7 @@ class RandomPerturbation(object):
 
 
 def create_env_l5kit(
+        exp_cfg,
         eval_cfg,
         device,
         skimp_rollout=False,
@@ -316,32 +338,26 @@ def create_env_l5kit(
         seed=1
 ):
     os.environ["L5KIT_DATA_FOLDER"] = eval_cfg.dataset_path
-    sim_cfg = get_registered_experiment_config("l5_mixed_plan")
-    # sim_cfg.algo.step_time = 0.2
-    # sim_cfg.algo.future_num_frames = 20
-    if eval_cfg.eval_class =="AgentAwareEC":
-        sim_cfg.env.data_generation_params.vectorize_lane = True
-        eval_cfg.ego_only= True
 
     dm = LocalDataManager(None)
-    l5_config = translate_l5kit_cfg(sim_cfg)
+    l5_config = translate_l5kit_cfg(exp_cfg)
     rasterizer = build_rasterizer(l5_config, dm)
     vectorizer = build_vectorizer(l5_config, dm)
-    eval_zarr = ChunkedDataset(dm.require(sim_cfg.train.dataset_valid_key)).open()
+    eval_zarr = ChunkedDataset(dm.require(exp_cfg.train.dataset_valid_key)).open()
 
     env_dataset = EgoDatasetMixed(l5_config, eval_zarr, vectorizer, rasterizer)
-    modality_shapes = OrderedDict(image=[rasterizer.num_channels()] + list(sim_cfg.env.rasterizer.raster_size))
+    modality_shapes = L5Utils.get_modality_shapes(exp_cfg)
 
     l5_config = deepcopy(l5_config)
     l5_config["raster_params"]["raster_size"] = (1000, 1000)
     l5_config["raster_params"]["pixel_size"] = (0.1, 0.1)
     l5_config["raster_params"]["ego_center"] = (0.5, 0.5)
     render_rasterizer = build_visualization_rasterizer_l5kit(l5_config, LocalDataManager(None))
-    sim_cfg.env.simulation.distance_th_far = 1e+5  # keep controlling everything
-    sim_cfg.env.simulation.disable_new_agents = True
-    sim_cfg.env.generate_agent_obs = True
-    sim_cfg.env.simulation.distance_th_close = 30  # control everything within this bound
-    sim_cfg.env.rasterizer.filter_agents_threshold = 0.8  # control everything that's above this confidence threshold
+    exp_cfg.env.simulation.distance_th_far = 1e+5  # keep controlling everything
+    exp_cfg.env.simulation.disable_new_agents = True
+    exp_cfg.env.generate_agent_obs = True
+    exp_cfg.env.simulation.distance_th_close = 30  # control everything within this bound
+    exp_cfg.env.rasterizer.filter_agents_threshold = 0.8  # control everything that's above this confidence threshold
 
     metrics = dict()
     if compute_metrics:
@@ -353,16 +369,6 @@ def create_env_l5kit(
             modality_shapes=modality_shapes
         ).eval().to(device)
 
-        base_noise = np.array(eval_cfg.perturb.std)
-        perturbations = dict()
-        # perturbations = {
-        #     "p=0.0": RandomPerturbation(std=base_noise * 0.0),
-        #     "p=0.1": RandomPerturbation(std=base_noise * 0.1),
-        #     "p=0.2": RandomPerturbation(std=base_noise * 0.2),
-        #     "p=0.5": RandomPerturbation(std=base_noise * 0.5),
-        #     "p=1.0": RandomPerturbation(std=base_noise * 1.0)
-        # }
-
         metrics = dict(
             all_off_road_rate=EnvMetrics.OffRoadRate(),
             all_collision_rate=EnvMetrics.CollisionRate(),
@@ -370,7 +376,7 @@ def create_env_l5kit(
         )
 
     env = EnvL5KitSimulation(
-        sim_cfg.env,
+        exp_cfg.env,
         dataset=env_dataset,
         seed=seed,
         num_scenes=eval_cfg.num_scenes_per_batch,
@@ -380,26 +386,24 @@ def create_env_l5kit(
         skimp_rollout=skimp_rollout,
     )
 
-    eval_scenes = [9058, 5232, 14153, 8173, 10314, 7027, 9812, 1090, 9453, 978, 10263, 874, 5563, 9613, 261, 2826, 2175, 9977, 6423, 1069, 1836, 8198, 5034, 6016, 2525, 927, 3634, 11806, 4911, 6192, 11641, 461, 142, 15493, 4919, 8494, 14572, 2402, 308, 1952, 13287, 15614, 6529, 12, 11543, 4558, 489, 6876, 15279, 6095, 5877, 8928, 10599, 16150, 11296, 9382, 13352, 1794, 16122, 12429, 15321, 8614, 12447, 4502, 13235, 2919, 15893, 12960, 7043, 9278, 952, 4699, 768, 13146, 8827, 16212, 10777, 15885, 11319, 9417, 14092, 14873, 6740, 11847, 15331, 15639, 11361, 14784, 13448, 10124, 4872, 3567, 5543, 2214, 7624, 10193, 7297, 1308, 3951, 14001]
-    return env, modality_shapes, eval_scenes, sim_cfg
+    return env
 
 
 def create_env_nusc(
+        exp_cfg,
         eval_cfg,
         device,
         skimp_rollout=False,
         compute_metrics=True,
         seed=1
 ):
-    sim_cfg = get_registered_experiment_config("nusc_rasterized_plan")
-    sim_cfg.algo.step_time = 0.5
-    sim_cfg.algo.future_num_frames = 10
-    sim_cfg.train.dataset_path = eval_cfg.dataset_path
-    sim_cfg.env.simulation.num_simulation_steps = eval_cfg.num_simulation_steps
-    sim_cfg.env.simulation.start_frame_index = sim_cfg.algo.history_num_frames + 1
-    sim_cfg.lock()
+    exp_cfg.unlock()
+    exp_cfg.train.dataset_path = eval_cfg.dataset_path
+    exp_cfg.env.simulation.num_simulation_steps = eval_cfg.num_simulation_steps
+    exp_cfg.env.simulation.start_frame_index = exp_cfg.algo.history_num_frames + 1
+    exp_cfg.lock()
 
-    data_cfg = translate_avdata_cfg(sim_cfg)
+    data_cfg = translate_avdata_cfg(exp_cfg)
 
     future_sec = data_cfg.future_num_frames * data_cfg.step_time
     history_sec = data_cfg.history_num_frames * data_cfg.step_time
@@ -427,17 +431,14 @@ def create_env_nusc(
     env_dataset = UnifiedDataset(**kwargs)
 
     env = EnvUnifiedSimulation(
-        sim_cfg.env,
+        exp_cfg.env,
         dataset=env_dataset,
         seed=seed,
         num_scenes=eval_cfg.num_scenes_per_batch,
         prediction_only=False
     )
 
-    modality_shapes = dict(image=(7 + data_cfg.history_num_frames + 1, data_cfg.pixel_size, data_cfg.pixel_size))
-    eval_scenes = [0, 1, 2, 3, 4]
-
-    return env, modality_shapes, eval_scenes, sim_cfg
+    return env
 
 
 def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_disk, render_to_video):
@@ -460,7 +461,6 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
         os.remove(eval_cfg.experience_hdf5_path)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
     # create env
     if eval_cfg.env == "nusc":
         env_func = create_env_nusc
@@ -469,18 +469,11 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
     else:
         raise NotImplementedError("{} is not a valid env".format(eval_cfg.env))
 
-
-    env, modality_shapes, eval_scenes, sim_cfg = env_func(
-        eval_cfg,
-        device=device,
-        skimp_rollout=skimp_rollout,
-        compute_metrics=compute_metrics,
-        seed=eval_cfg.seed
-    )
-
     # create policy and rollout wrapper
-    evaluation = eval(eval_cfg.eval_class)(eval_cfg, modality_shapes, device, ckpt_dir=eval_cfg.ckpt_dir)
-    policy = evaluation.get_policy(**eval_cfg.policy)
+    evaluation = eval(eval_cfg.eval_class)(eval_cfg, device, ckpt_dir=eval_cfg.ckpt_dir)
+    policy, exp_config = evaluation.get_policy(**eval_cfg.policy)
+
+    print(exp_config.algo)
 
     if eval_cfg.env == "nusc":
         rollout_policy = RolloutWrapper(agents_policy=policy)
@@ -489,22 +482,25 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
     else:
         rollout_policy = RolloutWrapper(ego_policy=policy, agents_policy=policy)
 
+    env = env_func(
+        exp_config,
+        eval_cfg,
+        device=device,
+        skimp_rollout=skimp_rollout,
+        compute_metrics=compute_metrics,
+        seed=eval_cfg.seed
+    )
+
     # eval loop
     obs_to_torch = eval_cfg.eval_class not in ["GroundTruth", "ReplayAction"]
 
     result_stats = None
     scene_i = 0
-    parallel_count = 0
+    eval_scenes = eval_cfg[eval_cfg.env].eval_scenes
 
     while scene_i < eval_cfg.num_scenes_to_evaluate:
         scene_indices = eval_scenes[scene_i: scene_i + eval_cfg.num_scenes_per_batch]
-        if eval_cfg.parallel_simulation:
-            parallel_count += 1
-            if parallel_count == eval_cfg.num_parallel:
-                parallel_count = 0
-                scene_i += eval_cfg.num_scenes_per_batch
-        else:
-            scene_i += eval_cfg.num_scenes_per_batch
+        scene_i += eval_cfg.num_scenes_per_batch
 
         stats, info, renderings = rollout_episodes(
             env,

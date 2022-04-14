@@ -2,6 +2,7 @@ import torch
 
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.utils.geometry_utils import transform_points_tensor
+from tbsim.configs.base import ExperimentConfig
 
 
 def avdata2posyawspeed(state):
@@ -90,3 +91,9 @@ def maybe_parse_batch(batch):
         return parse_avdata_batch(batch)
     else:
         return batch
+
+
+def get_modality_shapes(cfg: ExperimentConfig):
+    num_channels = (cfg.algo.history_num_frames + 1) + 7
+    h = cfg.env.rasterizer.raster_size
+    return dict(image=(num_channels, h, h))
