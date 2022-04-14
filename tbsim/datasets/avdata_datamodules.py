@@ -33,6 +33,7 @@ class UnifiedDataModule(pl.LightningDataModule):
         neighbor_distance = data_cfg.max_agents_distance
         kwargs = dict(
             desired_data=[data_cfg.avdata_source_train],
+            desired_dt=data_cfg.step_time,
             future_sec=(future_sec, future_sec),
             history_sec=(history_sec, history_sec),
             data_dirs={

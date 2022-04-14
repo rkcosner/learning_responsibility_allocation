@@ -339,8 +339,8 @@ def create_env_nusc(
             "px_per_m": int(1 / data_cfg.pixel_size),
             "map_size_px": data_cfg.raster_size,
         },
-        verbose=True,
         num_workers=os.cpu_count(),
+        desired_dt=data_cfg.step_time
     )
     print(kwargs)
 
