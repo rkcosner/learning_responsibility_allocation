@@ -62,6 +62,7 @@ def step_aggregate_per_scene(agent_met, agent_scene_index, all_scene_index, agg_
 
 
 def split_agents_by_scene(agent, agent_scene_index, all_scene_index):
+
     assert agent.shape[0] == agent_scene_index.shape[0]
     agent_split = []
     for si in all_scene_index:
@@ -268,16 +269,19 @@ class LearnedMetric(EnvMetrics):
         assert len(state_buffer) == self.traj_len + 1
 
         # assemble score function input
+        appearance_idx = obtain_active_agent_index(state_buffer)
+        agent_selected = np.where((appearance_idx>=0).all(axis=1))[0]
         state = dict(state_buffer[0])  # avoid changing the original state_dict
+        for k,v in state.items():
+            state[k]=v[agent_selected]
         state["image"] = (state["image"] / 255.).astype(np.float32)
         agent_from_world = state["agent_from_world"]
         yaw_current = state["yaw"]
 
         # transform traversed trajectories into the ego frame of a given state
         traj_inds = range(1, self.traj_len + 1)
-        traj_pos = [state_buffer[traj_i]["centroid"] for traj_i in traj_inds]
-        traj_yaw = [state_buffer[traj_i]["yaw"] for traj_i in traj_inds]
-
+        traj_pos = [state_buffer[traj_i]["centroid"][appearance_idx[agent_selected,traj_i]] for traj_i in traj_inds]
+        traj_yaw = [state_buffer[traj_i]["yaw"][appearance_idx[agent_selected,traj_i]] for traj_i in traj_inds]
         traj_pos = np.stack(traj_pos, axis=1)  # [B, T, 2]
 
         traj_yaw = np.stack(traj_yaw, axis=1)  # [B, T]
@@ -341,3 +345,127 @@ class LearnedMetric(EnvMetrics):
                 if met.shape[1] >= met_horizon:
                     ep_metrics_agg[k + "@{}".format(met_horizon)] = np.mean(met[:, :met_horizon], axis=1)
         return ep_metrics_agg
+
+
+class LearnedCVAENLL(EnvMetrics):
+    def __init__(self, metric_algo, perturbations=None):
+        super(LearnedCVAENLL, self).__init__()
+        self.metric_algo = metric_algo
+        self.traj_len = metric_algo.algo_config.future_num_frames
+        self.state_buffer = []
+        self.perturbations = dict() if perturbations is None else perturbations
+        self.total_steps = 0
+
+    def reset(self):
+        self.state_buffer = []
+        self._per_step = []
+        self._per_step_mask = []
+        self.total_steps = 0
+
+    def __len__(self):
+        return self.total_steps
+
+    def add_step(self, state_info: dict, all_scene_index: np.ndarray):
+        state_info = dict(state_info)
+        state_info["image"] = (state_info["image"] * 255.).astype(np.uint8)
+        self.state_buffer.append(state_info)
+        while len(self.state_buffer) > self.traj_len + 1:
+            self.state_buffer.pop(0)
+        if len(self.state_buffer) == self.traj_len + 1:
+            step_metrics = self.compute_per_step(self.state_buffer, all_scene_index)
+            self._per_step.append(step_metrics)
+
+        self.total_steps += 1
+
+    def compute_per_step(self, state_buffer, all_scene_index):
+        assert len(state_buffer) == self.traj_len + 1
+        appearance_idx = obtain_active_agent_index(state_buffer)
+        agent_selected = np.where((appearance_idx>=0).all(axis=1))[0]
+        # assemble score function input
+        state = dict(state_buffer[0])  # avoid changing the original state_dict
+        for k,v in state.items():
+            state[k]=v[agent_selected]
+        state["image"] = (state["image"] / 255.).astype(np.float32)
+        agent_from_world = state["agent_from_world"]
+        yaw_current = state["yaw"]
+
+        # transform traversed trajectories into the ego frame of a given state
+        traj_inds = range(1, self.traj_len + 1)
+        
+
+        traj_pos = [state_buffer[traj_i]["centroid"][appearance_idx[agent_selected,traj_i]] for traj_i in traj_inds]
+        traj_yaw = [state_buffer[traj_i]["yaw"][appearance_idx[agent_selected,traj_i]] for traj_i in traj_inds]
+        traj_pos = np.stack(traj_pos, axis=1)  # [B, T, 2]
+
+        traj_yaw = np.stack(traj_yaw, axis=1)  # [B, T]
+        assert traj_pos.shape[0] == traj_yaw.shape[0]
+        
+        agent_traj_pos = transform_points(points=traj_pos, transf_matrix=agent_from_world)
+        agent_traj_yaw = angular_distance(traj_yaw, yaw_current[:, None])
+
+        traj_to_eval = dict()
+        traj_to_eval["target_positions"] = agent_traj_pos
+        traj_to_eval["target_yaws"] = agent_traj_yaw[:, :, None]
+
+        state_torch = TensorUtils.to_torch(state, self.metric_algo.device)
+        metrics = dict()
+
+        # evaluate score of the ground truth state
+        m = self.metric_algo.get_metrics(state_torch)
+        for mk in m:
+            metrics["gt_{}".format(mk)] = m[mk]
+        traj_torch = TensorUtils.to_torch(traj_to_eval, self.metric_algo.device)
+        m = self.metric_algo.get_metrics(state_torch,traj_torch)
+        for mk in m:
+            metrics["pred_{}".format(mk)] = m[mk]
+        
+
+        # for k, v in self.perturbations.items():
+        #     traj_perturbed = TensorUtils.to_torch(v.perturb(traj_to_eval), self.metric_algo.device)
+        #     state_perturbed = dict(state_torch)
+        #     state_perturbed.update(traj_perturbed)
+        #     m = self.metric_algo.get_metrics(state_perturbed)
+        #     for mk in m:
+        #         metrics["{}_{}".format(k, mk)] = m[mk]
+
+        metrics= TensorUtils.to_numpy(metrics)
+        step_metrics = dict()
+        for k in metrics:
+            met, met_mask = step_aggregate_per_scene(metrics[k], state["scene_index"], all_scene_index)
+            assert np.all(met_mask > 0)  # since we will always use it for all agents
+            step_metrics[k] = met
+        
+        return step_metrics
+
+    def get_episode_metrics(self):
+        ep_metrics = dict()
+
+        for step_metrics in self._per_step:
+            for k in step_metrics:
+                if k not in ep_metrics:
+                    ep_metrics[k] = []
+                ep_metrics[k].append(step_metrics[k])
+
+        ep_metrics_agg = dict()
+        for k in ep_metrics:
+            met = np.stack(ep_metrics[k], axis=1)  # [num_scene, T, ...]
+            ep_metrics_agg[k] = np.mean(met, axis=1)
+            for met_horizon in [10, 50, 100, 150]:
+                if met.shape[1] >= met_horizon:
+                    ep_metrics_agg[k + "@{}".format(met_horizon)] = np.mean(met[:, :met_horizon], axis=1)
+        return ep_metrics_agg
+
+def obtain_active_agent_index(state_buffer):
+    agents_indices = dict()
+    appearance_idx = -np.ones([state_buffer[0]["scene_index"].shape[0],len(state_buffer)])
+    appearance_idx[:,0]=np.arange(appearance_idx.shape[0])
+    for i in range(state_buffer[0]["scene_index"].shape[0]):
+        agents_indices[(state_buffer[0]["scene_index"][i],state_buffer[0]["track_id"][i])]=i
+
+    for t in range(1,len(state_buffer)):
+        for i in range(state_buffer[t]["scene_index"].shape[0]):
+            agent_idx = (state_buffer[t]["scene_index"][i],state_buffer[t]["track_id"][i])
+            if agent_idx in agents_indices:
+                appearance_idx[agents_indices[agent_idx],t] = i
+
+    return appearance_idx.astype(np.int)

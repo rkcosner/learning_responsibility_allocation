@@ -87,7 +87,7 @@ class SimulationDataset:
                 disable_agents(dataset_zarr, allowlist=frame_agents["track_id"])
         else:
             raise Exception("TODO")
-
+        
         # keep track of original dataset
         self.recorded_scene_dataset_batch = deepcopy(self.scene_dataset_batch)
 

@@ -318,6 +318,7 @@ class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
         self.vae.logpi_clamp = -6.0
 
         self.loss_weights.kl_loss = 1
+        self.eval.mode = "sum"
 
         self.min_std = 0.1
 

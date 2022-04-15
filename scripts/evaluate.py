@@ -43,9 +43,11 @@ from tbsim.utils.experiment_utils import get_checkpoint
 from tbsim.utils.vis_utils import build_visualization_rasterizer_l5kit
 from imageio import get_writer
 from tbsim.utils.timer import Timers
-
-from Pplan.spline_planner import SplinePlanner
-from Pplan.trajectory_tree import TrajTree
+try:
+    from Pplan.spline_planner import SplinePlanner
+    from Pplan.trajectory_tree import TrajTree
+except:
+    print("Pplan not found")
 class PolicyComposer(object):
     def __init__(self, eval_config, modality_shapes, device, ckpt_dir="checkpoints/"):
         self.modality_shapes = modality_shapes
@@ -342,6 +344,18 @@ def create_env(
 
         base_noise = np.array(eval_cfg.perturb.std)
         perturbations = dict()
+        ckpt_path, config_path = get_checkpoint(
+            ngc_job_id="2780940",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
+            ckpt_key="iter43000",
+            ckpt_root_dir=eval_cfg.ckpt_dir
+        )
+        controller_cfg = get_experiment_config_from_file(config_path)
+
+        CVAE_model = L5DiscreteVAETrafficModel.load_from_checkpoint(
+            ckpt_path,
+            algo_config=controller_cfg.algo,
+            modality_shapes=modality_shapes
+        ).to(device).eval()
         # perturbations = {
         #     "p=0.0": RandomPerturbation(std=base_noise * 0.0),
         #     "p=0.1": RandomPerturbation(std=base_noise * 0.1),
@@ -353,7 +367,8 @@ def create_env(
         metrics = dict(
             all_off_road_rate=EnvMetrics.OffRoadRate(),
             all_collision_rate=EnvMetrics.CollisionRate(),
-            # all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations)
+            # all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations),
+            all_CVAE_score = EnvMetrics.LearnedCVAENLL(metric_algo=CVAE_model, perturbations=perturbations)
         )
         # metrics = dict(
         #     all_off_road_rate=EnvMetrics.OffRoadRate(),
@@ -372,8 +387,10 @@ def create_env(
         skimp_rollout=skimp_rollout,
     )
 
-    eval_scenes = [9058, 5232, 14153, 8173, 10314, 7027, 9812, 1090, 9453, 978, 10263, 874, 5563, 9613, 261, 2826, 2175, 9977, 6423, 1069, 1836, 8198, 5034, 6016, 2525, 927, 3634, 11806, 4911, 6192, 11641, 461, 142, 15493, 4919, 8494, 14572, 2402, 308, 1952, 13287, 15614, 6529, 12, 11543, 4558, 489, 6876, 15279, 6095, 5877, 8928, 10599, 16150, 11296, 9382, 13352, 1794, 16122, 12429, 15321, 8614, 12447, 4502, 13235, 2919, 15893, 12960, 7043, 9278, 952, 4699, 768, 13146, 8827, 16212, 10777, 15885, 11319, 9417, 14092, 14873, 6740, 11847, 15331, 15639, 11361, 14784, 13448, 10124, 4872, 3567, 5543, 2214, 7624, 10193, 7297, 1308, 3951, 14001]
-    return env, modality_shapes, eval_scenes, sim_cfg
+    # eval_scenes = [9058, 5232, 14153, 8173, 10314, 7027, 9812, 1090, 9453, 978, 10263, 874, 5563, 9613, 261, 2826, 2175, 9977, 6423, 1069, 1836, 8198, 5034, 6016, 2525, 927, 3634, 11806, 4911, 6192, 11641, 461, 142, 15493, 4919, 8494, 14572, 2402, 308, 1952, 13287, 15614, 6529, 12, 11543, 4558, 489, 6876, 15279, 6095, 5877, 8928, 10599, 16150, 11296, 9382, 13352, 1794, 16122, 12429, 15321, 8614, 12447, 4502, 13235, 2919, 15893, 12960, 7043, 9278, 952, 4699, 768, 13146, 8827, 16212, 10777, 15885, 11319, 9417, 14092, 14873, 6740, 11847, 15331, 15639, 11361, 14784, 13448, 10124, 4872, 3567, 5543, 2214, 7624, 10193, 7297, 1308, 3951, 14001]
+    eval_scenes=[489,1069, 1090, 2826, 4558]
+    adjustment_plan = {idx:{1:0,2:1,3:2,4:3,5:4} for idx in eval_scenes}
+    return env, modality_shapes, eval_scenes, adjustment_plan
 
 
 def dump_episode_buffer(buffer, scene_index, h5_path):
@@ -413,7 +430,7 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
     if eval_cfg.eval_class =="AgentAwareEC":
         sim_cfg.env.data_generation_params.vectorize_lane = True
         eval_cfg.ego_only= True
-    env, modality_shapes, eval_scenes = create_env(
+    env, modality_shapes, eval_scenes, adjustment_plan = create_env(
         sim_cfg,
         eval_cfg,
         device=device,
@@ -457,7 +474,8 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
             render=render_to_video,
             skip_first_n=1,
             scene_indices=scene_indices,
-            obs_to_torch=obs_to_torch
+            obs_to_torch=obs_to_torch,
+            adjustment_plan= adjustment_plan,
         )
 
         print(info["scene_index"])

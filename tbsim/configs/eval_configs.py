@@ -14,7 +14,7 @@ class EvaluationConfig(Dict):
         self.num_scenes_per_batch = 5
         self.num_scenes_to_evaluate = 100
         self.num_simulation_steps = 200
-        self.ego_only = False
+        self.ego_only = True
         self.n_step_action = 5
         self.ckpt_dir = "checkpoints/"
         self.experience_hdf5_path = None
