@@ -314,7 +314,7 @@ class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
         self.vae.decoder.rnn_hidden_size = 100
         self.vae.decoder.mlp_layer_dims = (128, 128)
         self.vae.decoder.Gaussian_var = True
-        self.vae.recon_loss_type = "MSE"
+        self.vae.recon_loss_type = "NLL"
         self.vae.logpi_clamp = -6.0
 
         self.loss_weights.kl_loss = 1

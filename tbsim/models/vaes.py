@@ -530,10 +530,12 @@ class DiscreteCVAE(nn.Module):
             logp = logp.clamp(min=self.logpi_clamp,max=2.0)
         
         q = torch.exp(logq)
-        q = q/q.sum(dim=-1,keepdim=True)
-        
         p = torch.exp(logp)
+        p = p.nan_to_num(nan=0.0, posinf=1.0, neginf=0.0)
+        q = q.nan_to_num(nan=0.0, posinf=1.0, neginf=0.0)
+        q = q/q.sum(dim=-1,keepdim=True)
         p = p/p.sum(dim=-1,keepdim=True)
+
         z = (-logq).argsort()[...,:n]
         z = F.one_hot(z,self.K)
         decoder_kwargs = dict() if decoder_kwargs is None else decoder_kwargs

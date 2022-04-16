@@ -420,13 +420,13 @@ class LearnedCVAENLL(EnvMetrics):
             metrics["pred_{}".format(mk)] = m[mk]
         
 
-        # for k, v in self.perturbations.items():
-        #     traj_perturbed = TensorUtils.to_torch(v.perturb(traj_to_eval), self.metric_algo.device)
-        #     state_perturbed = dict(state_torch)
-        #     state_perturbed.update(traj_perturbed)
-        #     m = self.metric_algo.get_metrics(state_perturbed)
-        #     for mk in m:
-        #         metrics["{}_{}".format(k, mk)] = m[mk]
+        for k, v in self.perturbations.items():
+            traj_perturbed = TensorUtils.to_torch(v.perturb(traj_to_eval), self.metric_algo.device)
+            state_perturbed = dict(state_torch)
+            state_perturbed.update(traj_perturbed)
+            m = self.metric_algo.get_metrics(state_perturbed)
+            for mk in m:
+                metrics["{}_{}".format(k, mk)] = m[mk]
 
         metrics= TensorUtils.to_numpy(metrics)
         step_metrics = dict()

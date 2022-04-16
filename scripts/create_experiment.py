@@ -62,11 +62,15 @@ def configs_to_search(base_cfg):
     plan.extend(plan.compose_cartesian([
         ParamRange("algo.model_architecture",
                    alias="arch", range=["resnet50"]),
-        ParamRange("algo.loss_weights.GAN_loss", alias="Gw", range=[0.1, 0.2]),
-        ParamRange("algo.use_transformer", alias="trans", range=[True, False]),
+        # ParamRange("algo.loss_weights.GAN_loss", alias="Gw", range=[0.1, 0.2]),
+        # ParamRange("algo.use_transformer", alias="trans", range=[True, False]),
         # ParamRange("algo.optim_params.policy.learning_rate.initial", alias="lr", range=[3e-4]),
-        ParamRange("algo.loss_weights.lane_reg_loss",
-                   alias="lreg", range=[0.5, 1.0]),
+        # ParamRange("algo.loss_weights.EC_collision_loss",alias="ec_coll_reg", range=[4,8]),
+        # ParamRange("algo.loss_weights.deviation_loss",alias="ec_dev_loss", range=[0.2,0.5,1.0]),
+        # ParamRange("algo.loss_weights.lane_reg_loss",alias="lreg", range=[0.5, 1.0]),
+        ParamRange("algo.loss_weights.yaw_reg_loss",alias="yreg", range=[0.03,0.08]),
+        ParamRange("algo.vae.recon_loss_type",alias="loss_type", range=["NLL"]),
+        ParamRange("algo.loss_weights.kl_loss",alias="KLw", range=[3,10]),
     ]))
 
     return plan.generate_configs(base_cfg=base_cfg)

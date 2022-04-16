@@ -838,6 +838,20 @@ class RNNTrajectoryEncoder(nn.Module):
         traj_feat = self.mlp(traj_feat)
         return traj_feat
 
+class RNNFeatureRoller(nn.Module):
+    def __init__(self, trajectory_dim, feature_dim):
+        super(RNNTrajectoryEncoder, self).__init__()
+        self.gru = nn.GRU(
+            trajectory_dim, hidden_size=feature_dim, batch_first=True)
+        self._feature_dim = feature_dim
+
+
+    def output_shape(self, input_shape=None):
+        return [self._feature_dim]
+
+    def forward(self, feature,input_trajectory):
+        _,hn = self.gru(input_trajectory,feature.unsqueeze(0))
+        return hn[0]+feature
 
 class PosteriorEncoder(nn.Module):
     """Posterior Encoder (x, x_c -> q) for CVAE"""

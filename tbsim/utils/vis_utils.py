@@ -109,6 +109,7 @@ def get_state_image_with_boxes(ego_obs, agents_obs, rasterizer):
         yaw
     )
     raster_from_agent = raster_from_world @ ego_obs["world_from_agent"]
+    
     state_im = draw_agent_boxes(
         state_im,
         agents_obs["centroid"],
@@ -141,6 +142,7 @@ def render_state_l5kit_ego_view(
         step_metrics=None,
 
 ):
+
     """Render ego-centric view, possibly with a location heatmap (if using SpatialPlanner)"""
     agent_scene_index = dataset_scene_index == state_obs["agents"]["scene_index"]
     agents_obs = map_ndarray(
