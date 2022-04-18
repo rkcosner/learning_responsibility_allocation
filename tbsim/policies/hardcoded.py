@@ -91,28 +91,9 @@ class OptimController(Policy):
         return action, {}
 
 
-class GTPlanner(Policy):
-    """A (fake) planner tha sets ground truth trajectory as (sub)goal"""
-
-    def __init__(self, device):
-        self.device = device
-
-    def eval(self):
-        pass
-
-    @staticmethod
-    def get_plan(obs, **kwargs) -> Tuple[Plan, Dict]:
-        plan = Plan(
-            positions=obs["target_positions"],
-            yaws=obs["target_yaws"],
-            availabilities=obs["target_availabilities"],
-        )
-        return plan, {}
-
-
 class GTPolicy(Policy):
     def __init__(self, device):
-        self.device = device
+        super(GTPolicy, self).__init__(device)
 
     def eval(self):
         pass
@@ -125,10 +106,19 @@ class GTPolicy(Policy):
         )
         return action, {}
 
+    @staticmethod
+    def get_plan(obs, **kwargs) -> Tuple[Plan, Dict]:
+        plan = Plan(
+            positions=obs["target_positions"],
+            yaws=obs["target_yaws"],
+            availabilities=obs["target_availabilities"],
+        )
+        return plan, {}
+
 
 class ReplayPolicy(Policy):
     def __init__(self, action_log, device):
-        self.device = device
+        super(ReplayPolicy, self).__init__(device)
         self.action_log = action_log
 
     def eval(self):

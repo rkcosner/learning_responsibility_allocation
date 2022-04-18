@@ -48,6 +48,11 @@ def rasterize_agents(
     return maps
 
 
+def get_drivable_region_map(maps: torch.Tensor):
+    drivable = torch.amax(maps, dim=-3).bool()
+    return drivable
+
+
 @torch.no_grad()
 def parse_avdata_batch(batch: dict):
     fut_pos, fut_yaw, _, fut_mask = avdata2posyawspeed(batch["agent_fut"])
@@ -74,9 +79,11 @@ def parse_avdata_batch(batch: dict):
     agent_hist_pos = torch.cat((hist_pos[:, None], neigh_hist_pos), dim=1)
     agent_hist_yaw = torch.cat((hist_yaw[:, None], neigh_hist_yaw), dim=1)
     maps = rasterize_agents(batch["maps"], agent_hist_pos, agent_hist_yaw, raster_from_agent, map_res)
+    drivable_map = get_drivable_region_map(batch["maps"])
 
     d = dict(
         image=maps,
+        drivable_map=drivable_map,
         target_positions=fut_pos,
         target_yaws=fut_yaw,
         target_availabilities=fut_mask,

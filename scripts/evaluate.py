@@ -179,6 +179,12 @@ class Hierarchical(PolicyComposer):
         ).to(self.device).eval()
         return planner, planner_cfg.clone()
 
+    def _get_gt_planner(self):
+        return GTPolicy(device=self.device), None
+
+    def _get_gt_controller(self):
+        return GTPolicy(device=self.device), None
+
     def _get_controller(self):
         policy_ckpt_path, policy_config_path = get_checkpoint(
             # ngc_job_id="2596419",  # gc_clip_regyaw_dynUnicycle_decmlp128,128_decstateTrue_yrl1.0

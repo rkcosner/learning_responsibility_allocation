@@ -266,7 +266,10 @@ class SpatialPlanner(pl.LightningModule):
 
         if mask_drivable:
             # At test time: optionally mask out undrivable regions
-            drivable_map = L5Utils.get_drivable_region_map(obs_dict["image"])
+            if "drivable_map" not in obs_dict:
+                drivable_map = L5Utils.get_drivable_region_map(obs_dict["image"])
+            else:
+                drivable_map = obs_dict["drivable_map"]
             for i, m in enumerate(drivable_map):
                 if m.sum() == 0:  # if nowhere is drivable, set it to all True's to avoid decoding problems
                     drivable_map[i] = True
