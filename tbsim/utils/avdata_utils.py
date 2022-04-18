@@ -28,15 +28,18 @@ def rasterize_agents(
     agent_hist_pos = agent_hist_pos.reshape(b, a * t, 2)
     raster_hist_pos = transform_points_tensor(agent_hist_pos, raster_from_agent)
     raster_hist_pos = raster_hist_pos.reshape(b, a, t, 2).permute(0, 2, 1, 3)  # [B, T, A, 2]
+    raster_hist_pos[torch.isnan(raster_hist_pos)] = 0.0  # NaN will be converted to negative indices. Set it to 0 for now. Will correct below
+    raster_hist_pos[..., 0].clip_(0, (w - 1))
+    raster_hist_pos[..., 1].clip_(0, (h - 1))
 
     raster_hist_pos_flat = torch.round(raster_hist_pos[..., 1] * w + raster_hist_pos[..., 0]).long()  # [B, T, A]
-    raster_hist_pos_flat[raster_hist_pos_flat < 0] = 0  # NaN will be converted to negative indices. Set it to 0 for now. Will correct below
 
     hist_image = torch.zeros(b, t, h * w, dtype=maps.dtype, device=maps.device)  # [B, T, H * W]
 
     hist_image.scatter_(dim=2, index=raster_hist_pos_flat[:, :, [0]], src=torch.ones_like(hist_image))  # mark ego with 1.
     hist_image.scatter_(dim=2, index=raster_hist_pos_flat[:, :, 1:], src=torch.ones_like(hist_image) * -1)  # mark other agents with -1
     hist_image[:, :, 0] = 0  # correct the 0th index caused by NaNs
+    hist_image[:, :, -1] = 0  # correct the maximum index caused by out of bound locations
 
     hist_image = hist_image.reshape(b, t, h, w)
 
@@ -44,6 +47,7 @@ def rasterize_agents(
     return maps
 
 
+@torch.no_grad()
 def parse_avdata_batch(batch: dict):
     fut_pos, fut_yaw, _ = avdata2posyawspeed(batch["agent_fut"])
     hist_pos, hist_yaw, hist_speed = avdata2posyawspeed(batch["agent_hist"])
@@ -55,10 +59,15 @@ def parse_avdata_batch(batch: dict):
     # map-related
     map_res = batch["maps_resolution"][0]
     h, w = batch["maps"].shape[-2:]
-    raster_from_agent = torch.Tensor(
-        [[map_res, 0, 0.5 * h], [0, map_res, 0.5 * w], [0, 0, 1]]
-    ).to(curr_state.device)
+    # TODO: pass env configs to here
+    raster_from_agent = torch.Tensor([
+         [map_res, 0, 0.25 * w],
+         [0, map_res, 0.5 * h],
+         [0, 0, 1]
+    ]).to(curr_state.device)
+    agent_from_raster = torch.inverse(raster_from_agent)
     raster_from_agent = TensorUtils.unsqueeze_expand_at(raster_from_agent, size=batch["maps"].shape[0], dim=0)
+    agent_from_raster = TensorUtils.unsqueeze_expand_at(agent_from_raster, size=batch["maps"].shape[0], dim=0)
 
     agent_hist_pos = torch.cat((hist_pos[:, None], neigh_hist_pos), dim=1)
     agent_hist_yaw = torch.cat((hist_yaw[:, None], neigh_hist_yaw), dim=1)
@@ -77,7 +86,8 @@ def parse_avdata_batch(batch: dict):
         curr_speed=curr_speed,
         centroid=curr_state[..., :2],
         yaw=curr_state[..., -1],
-        raster_from_agent=raster_from_agent
+        raster_from_agent=raster_from_agent,
+        agent_from_raster=agent_from_raster
     )
     batch = dict(batch)
     batch.update(d)

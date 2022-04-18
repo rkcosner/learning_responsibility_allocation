@@ -19,7 +19,6 @@ from tbsim.models.rasterized_models import (
 from tbsim.models.base_models import (
     MLPTrajectoryDecoder,
     RasterizedMapUNet,
-    RasterizedMapKeyPointNet,
 )
 from tbsim.models.transformer_model import TransformerModel
 import tbsim.utils.tensor_utils as TensorUtils
@@ -40,7 +39,6 @@ class L5TrafficModel(pl.LightningModule):
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
         self._do_log = do_log
-        # assert modality_shapes["image"][0] == 15
 
         traj_decoder = MLPTrajectoryDecoder(
             feature_dim=algo_config.map_feature_dim,
@@ -195,7 +193,6 @@ class L5TrafficModelGC(L5TrafficModel):
         pl.LightningModule.__init__(self)
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
-        assert modality_shapes["image"][0] == 15
 
         traj_decoder = MLPTrajectoryDecoder(
             feature_dim=algo_config.map_feature_dim + algo_config.goal_feature_dim,
@@ -239,7 +236,6 @@ class SpatialPlanner(pl.LightningModule):
         super(SpatialPlanner, self).__init__()
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
-        assert modality_shapes["image"][0] == 15
 
         self.nets["policy"] = RasterizedMapUNet(
             model_arch=algo_config.model_architecture,
@@ -431,7 +427,6 @@ class SpatialPlanner(pl.LightningModule):
 class L5VAETrafficModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):
         super(L5VAETrafficModel, self).__init__()
-        assert modality_shapes["image"][0] == 15
 
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
@@ -570,7 +565,6 @@ class L5VAETrafficModel(pl.LightningModule):
 class L5DiscreteVAETrafficModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):
         super(L5DiscreteVAETrafficModel, self).__init__()
-        assert modality_shapes["image"][0] == 15
 
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
@@ -712,7 +706,6 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
 class L5ECTrafficModel(L5TrafficModel):
     def __init__(self, algo_config, modality_shapes):
         super(L5ECTrafficModel, self).__init__(algo_config, modality_shapes)
-        assert modality_shapes["image"][0] == 15
 
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
@@ -842,7 +835,6 @@ class L5ECTrafficModel(L5TrafficModel):
 
         return metrics
 
-
     def get_action(self, obs_dict, sample=True, num_action_samples=1, plan=None, **kwargs):
         preds = self(obs_dict)
         action = Action(
@@ -852,6 +844,7 @@ class L5ECTrafficModel(L5TrafficModel):
         return action, {}
     def get_EC_pred(self,obs,cond_traj,goal_state=None):
         return self.nets["policy"].EC_predict(obs,cond_traj,goal_state)
+
 
 class GANTrafficModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):

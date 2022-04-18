@@ -45,6 +45,8 @@ class UnifiedDataModule(pl.LightningDataModule):
             map_params={
                 "px_per_m": int(1 / data_cfg.pixel_size),
                 "map_size_px": data_cfg.raster_size,
+                "return_rgb": False,
+                "offset_frac_xy": data_cfg.raster_center
             },
             verbose=True,
             num_workers=os.cpu_count(),

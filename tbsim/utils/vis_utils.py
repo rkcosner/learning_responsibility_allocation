@@ -119,12 +119,7 @@ def render_state_avdata(
     neigh_extent = neigh_extent[valid_mask]
     neigh_yaw = neigh_yaw[:, None]
 
-    map_res = batch["maps_resolution"][batch_idx]
-    b, c, h, w = batch["maps"].shape
-
-    trans_mat = np.array(
-        [[map_res, 0, 0.5 * h], [0, map_res, 0.5 * w], [0, 0, 1]]
-    )
+    trans_mat = batch["raster_from_agent"][batch_idx]
     image = Map.to_img(
         TensorUtils.to_tensor(batch["maps"][batch_idx]),
         [[0, 1, 2], [3, 4], [5, 6]],

@@ -50,6 +50,10 @@ class NuscEnvConfig(EnvConfig):
         # raster's spatial resolution [meters per pixel]: the size in the real world one pixel corresponds to.
         self.rasterizer.pixel_size = 0.5
 
+        # where the agent is on the map, (0.0, 0.0) is the center
+        # WARNING: this should not be changed before resolving TODO in parse_avdata_batch() in avdata_utils.py
+        self.rasterizer.ego_center = (-0.5, 0.0)
+
         # maximum number of agents to consider during training
         self.data_generation_params.other_agents_num = 20
 
