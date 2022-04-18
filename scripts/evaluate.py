@@ -26,6 +26,7 @@ from tbsim.algos.l5kit_algos import (
 from tbsim.algos.metric_algos import EBMMetric
 from tbsim.algos.multiagent_algos import MATrafficModel
 from tbsim.configs.eval_configs import EvaluationConfig
+from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.envs.env_l5kit import EnvL5KitSimulation
 from tbsim.envs.env_avdata import EnvUnifiedSimulation
 from tbsim.utils.config_utils import translate_l5kit_cfg, get_experiment_config_from_file, translate_avdata_cfg
@@ -82,9 +83,9 @@ class ReplayAction(PolicyComposer):
         print("Loading action log from {}".format(self.eval_config.experience_hdf5_path))
         h5 = h5py.File(self.eval_config.experience_hdf5_path, "r")
         if self.eval_config.env == "nusc":
-            exp_cfg = get_experiment_config_from_file("nusc_rasterized_plan")
+            exp_cfg = get_registered_experiment_config("nusc_rasterized_plan")
         elif self.eval_config.env == "l5kit":
-            exp_cfg = get_experiment_config_from_file("l5_mixed_plan")
+            exp_cfg = get_registered_experiment_config("l5_mixed_plan")
         else:
             raise NotImplementedError("invalid env {}".format(self.eval_config.env))
         return ReplayPolicy(h5, self.device), exp_cfg
@@ -93,9 +94,9 @@ class ReplayAction(PolicyComposer):
 class GroundTruth(PolicyComposer):
     def get_policy(self, **kwargs):
         if self.eval_config.env == "nusc":
-            exp_cfg = get_experiment_config_from_file("nusc_rasterized_plan")
+            exp_cfg = get_registered_experiment_config("nusc_rasterized_plan")
         elif self.eval_config.env == "l5kit":
-            exp_cfg = get_experiment_config_from_file("l5_mixed_plan")
+            exp_cfg = get_registered_experiment_config("l5_mixed_plan")
         else:
             raise NotImplementedError("invalid env {}".format(self.eval_config.env))
         return GTPolicy(device=self.device), exp_cfg
@@ -353,6 +354,7 @@ def create_env_l5kit(
     l5_config["raster_params"]["pixel_size"] = (0.1, 0.1)
     l5_config["raster_params"]["ego_center"] = (0.5, 0.5)
     render_rasterizer = build_visualization_rasterizer_l5kit(l5_config, LocalDataManager(None))
+    exp_cfg.env.simulation.num_simulation_steps = eval_cfg.num_simulation_steps
     exp_cfg.env.simulation.distance_th_far = 1e+5  # keep controlling everything
     exp_cfg.env.simulation.disable_new_agents = True
     exp_cfg.env.generate_agent_obs = True
@@ -422,6 +424,8 @@ def create_env_nusc(
         map_params={
             "px_per_m": int(1 / data_cfg.pixel_size),
             "map_size_px": data_cfg.raster_size,
+            "return_rgb": False,
+            "offset_frac_xy": data_cfg.raster_center
         },
         num_workers=os.cpu_count(),
         desired_dt=data_cfg.step_time
