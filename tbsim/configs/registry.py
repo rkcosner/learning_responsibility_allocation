@@ -126,6 +126,29 @@ EXP_CONFIG_REGISTRY["nusc_rasterized_plan"] = ExperimentConfig(
     registered_name="nusc_rasterized_plan"
 )
 
+EXP_CONFIG_REGISTRY["nusc_spatial_planner"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=SpatialPlannerConfig(),
+    registered_name="nusc_spatial_planner"
+)
+
+EXP_CONFIG_REGISTRY["nusc_ma_rasterized_plan"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=MARasterizedPlanningConfig(),
+    registered_name="nusc_ma_rasterized_plan"
+)
+
+EXP_CONFIG_REGISTRY["nusc_rasterized_gc"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=L5RasterizedGCConfig(),
+    registered_name="nusc_rasterized_gc"
+)
+
+
+
 def get_registered_experiment_config(registered_name):
     if registered_name not in EXP_CONFIG_REGISTRY.keys():
         raise KeyError(

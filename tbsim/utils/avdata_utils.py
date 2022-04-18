@@ -10,7 +10,8 @@ def avdata2posyawspeed(state):
     pos = state[..., :2]
     yaw = torch.atan2(state[..., [-2]], state[..., [-1]])
     speed = torch.norm(state[..., 2:4], dim=-1)
-    return pos, yaw, speed
+    mask = torch.bitwise_not(torch.max(torch.isnan(state), dim=-1)[0])
+    return pos, yaw, speed, mask
 
 
 def rasterize_agents(
@@ -49,12 +50,13 @@ def rasterize_agents(
 
 @torch.no_grad()
 def parse_avdata_batch(batch: dict):
-    fut_pos, fut_yaw, _ = avdata2posyawspeed(batch["agent_fut"])
-    hist_pos, hist_yaw, hist_speed = avdata2posyawspeed(batch["agent_hist"])
+    fut_pos, fut_yaw, _, fut_mask = avdata2posyawspeed(batch["agent_fut"])
+    hist_pos, hist_yaw, hist_speed, hist_mask = avdata2posyawspeed(batch["agent_hist"])
     curr_speed = hist_speed[..., -1]
     curr_state = batch["curr_agent_state"]
 
-    neigh_hist_pos, neigh_hist_yaw, _ = avdata2posyawspeed(batch["neigh_hist"])
+    neigh_hist_pos, neigh_hist_yaw, _, neigh_hist_mask = avdata2posyawspeed(batch["neigh_hist"])
+    neigh_fut_pos, neigh_fut_yaw, _, neigh_fut_mask = avdata2posyawspeed(batch["neigh_fut"])
 
     # map-related
     map_res = batch["maps_resolution"][0]
@@ -77,12 +79,16 @@ def parse_avdata_batch(batch: dict):
         image=maps,
         target_positions=fut_pos,
         target_yaws=fut_yaw,
-        target_availabilities=torch.ones_like(fut_pos[..., 0]),
+        target_availabilities=fut_mask,
         history_positions=hist_pos,
         history_yaws=hist_yaw,
-        history_availabilities=torch.ones_like(hist_pos[..., 0]),
+        history_availabilities=hist_mask,
         all_other_agents_history_positions=neigh_hist_pos,
         all_other_agents_history_yaws=neigh_hist_yaw,
+        all_other_agents_history_availabilities=neigh_hist_mask,
+        all_other_agents_target_positions=neigh_fut_pos,
+        all_other_agents_target_yaws=neigh_fut_yaw,
+        all_other_agents_target_availabilities=neigh_fut_mask,
         curr_speed=curr_speed,
         centroid=curr_state[..., :2],
         yaw=curr_state[..., -1],

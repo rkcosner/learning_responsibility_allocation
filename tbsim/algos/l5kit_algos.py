@@ -360,6 +360,7 @@ class SpatialPlanner(pl.LightningModule):
         return losses
 
     def training_step(self, batch, batch_idx):
+        batch = AVUtils.maybe_parse_batch(batch)
         pout = self.forward(batch)
         batch["goal"] = AlgoUtils.get_spatial_goal_supervision(batch)
         losses = self._compute_losses(pout, batch)
@@ -377,6 +378,7 @@ class SpatialPlanner(pl.LightningModule):
         return total_loss
 
     def validation_step(self, batch, batch_idx):
+        batch = AVUtils.maybe_parse_batch(batch)
         pout = self(batch)
         batch["goal"] = AlgoUtils.get_spatial_goal_supervision(batch)
         losses = TensorUtils.detach(self._compute_losses(pout, batch))

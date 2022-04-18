@@ -22,8 +22,8 @@ class UnifiedDataModule(pl.LightningDataModule):
         # TODO: better way to figure out channel size?
         return dict(
             image=(7 + self._data_config.history_num_frames + 1,  # semantic map + num_history + current
-                   self._data_config.pixel_size,
-                   self._data_config.pixel_size)
+                   self._data_config.raster_size,
+                   self._data_config.raster_size)
         )
 
     def setup(self, stage = None):
@@ -55,6 +55,7 @@ class UnifiedDataModule(pl.LightningDataModule):
         self.train_dataset = UnifiedDataset(**kwargs)
 
         kwargs["desired_data"] = [data_cfg.avdata_source_valid]
+        kwargs["rebuild_cache"] = self._train_config.on_ngc
         self.valid_dataset = UnifiedDataset(**kwargs)
 
     def train_dataloader(self):
