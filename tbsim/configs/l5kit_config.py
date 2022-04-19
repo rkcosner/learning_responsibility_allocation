@@ -318,6 +318,32 @@ class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
         self.vae.logpi_clamp = -6.0
 
         self.loss_weights.kl_loss = 1
+        self.eval.mode = "mean"
+
+        self.min_std = 0.1
+
+class L5RasterizedTreeVAEConfig(L5RasterizedPlanningConfig):
+    def __init__(self):
+        super(L5RasterizedTreeVAEConfig, self).__init__()
+        self.name = "l5_rasterized_tree_vae"
+        self.map_feature_dim = 256
+        self.goal_conditional = True
+        self.goal_feature_dim = 32
+        self.stage = 3
+        self.num_frames_per_stage = 16
+
+        self.vae.latent_dim = 4
+        self.vae.condition_dim = 128
+        self.vae.num_eval_samples = 10
+        self.vae.encoder.rnn_hidden_size = 100
+        self.vae.encoder.mlp_layer_dims = (128, 128)
+        self.vae.decoder.rnn_hidden_size = 100
+        self.vae.decoder.mlp_layer_dims = (128, 128)
+        self.vae.decoder.Gaussian_var = True
+        self.vae.recon_loss_type = "NLL"
+        self.vae.logpi_clamp = -6.0
+
+        self.loss_weights.kl_loss = 1
         self.eval.mode = "sum"
 
         self.min_std = 0.1

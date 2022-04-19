@@ -17,7 +17,8 @@ from tbsim.configs.l5kit_config import (
     L5RasterizedVAEConfig,
     EBMMetricConfig,
     L5RasterizedGANConfig,
-    L5RasterizedDiscreteVAEConfig
+    L5RasterizedDiscreteVAEConfig,
+    L5RasterizedTreeVAEConfig
 )
 
 from tbsim.configs.l5kit_online_config import (
@@ -88,6 +89,12 @@ EXP_CONFIG_REGISTRY["l5_mixed_discrete_vae_plan"] = ExperimentConfig(
     env_config=L5KitMixedSemanticMapEnvConfig(),
     algo_config=L5RasterizedDiscreteVAEConfig(),
     registered_name="l5_mixed_discrete_vae_plan",
+)
+EXP_CONFIG_REGISTRY["l5_mixed_tree_vae_plan"] = ExperimentConfig(
+    train_config=L5KitMixedTrainConfig(),
+    env_config=L5KitMixedSemanticMapEnvConfig(),
+    algo_config=L5RasterizedTreeVAEConfig(),
+    registered_name="l5_mixed_tree_vae_plan",
 )
 
 EXP_CONFIG_REGISTRY["l5_mixed_transformer_plan"] = ExperimentConfig(

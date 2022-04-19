@@ -508,7 +508,7 @@ class DiscreteCVAE(nn.Module):
         x_out = self.decoder(latents=F.one_hot(z,self.K), condition_features=c, **decoder_kwargs)
         return x_out
 
-    def forward(self, inputs, condition_inputs, n=None, decoder_kwargs=None):
+    def forward(self, inputs, condition_inputs, decoder_kwargs=None):
         """
         Pass the input through encoder and decoder (using posterior parameters)
         Args:
@@ -520,11 +520,13 @@ class DiscreteCVAE(nn.Module):
         Returns:
             dictionary of batched samples (x')
         """
-        if n is None:
-            n = self.K
+
         c = self.c_net(condition_inputs)  # [B, ...]
-        logq = self.q_net(inputs=inputs, condition_features=c)["logq"]
         logp = self.p_net(c)["logp"]
+        if inputs is not None:
+            logq = self.q_net(inputs=inputs, condition_features=c)["logq"]
+        else:
+            logq = logp
         if self.logpi_clamp is not None:
             logq = logq.clamp(min=self.logpi_clamp,max=2.0)
             logp = logp.clamp(min=self.logpi_clamp,max=2.0)
@@ -536,12 +538,12 @@ class DiscreteCVAE(nn.Module):
         q = q/q.sum(dim=-1,keepdim=True)
         p = p/p.sum(dim=-1,keepdim=True)
 
-        z = (-logq).argsort()[...,:n]
+        z = torch.arange(self.K).to(q.device).tile(*q.shape[:-1],1)
         z = F.one_hot(z,self.K)
         decoder_kwargs = dict() if decoder_kwargs is None else decoder_kwargs
-        c_tiled = c.unsqueeze(1).repeat(1,n,1)
+        c_tiled = c.unsqueeze(1).repeat(1,self.K,1)
         x_out = self.decoder(latents=z.reshape(-1,self.K), condition_features=c_tiled.reshape(-1,c.shape[-1]), **decoder_kwargs)
-        x_out = TensorUtils.reshape_dimensions(x_out,0,1,(z.shape[0],n))
+        x_out = TensorUtils.reshape_dimensions(x_out,0,1,(z.shape[0],self.K))
         return {"x_recons": x_out, "q": q, "p": p, "z": z, "c": c}
 
     def compute_kl_loss(self, outputs: dict):

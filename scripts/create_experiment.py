@@ -68,9 +68,9 @@ def configs_to_search(base_cfg):
         # ParamRange("algo.loss_weights.EC_collision_loss",alias="ec_coll_reg", range=[4,8]),
         # ParamRange("algo.loss_weights.deviation_loss",alias="ec_dev_loss", range=[0.2,0.5,1.0]),
         # ParamRange("algo.loss_weights.lane_reg_loss",alias="lreg", range=[0.5, 1.0]),
-        ParamRange("algo.loss_weights.yaw_reg_loss",alias="yreg", range=[0.03,0.08]),
-        ParamRange("algo.vae.recon_loss_type",alias="loss_type", range=["NLL"]),
-        ParamRange("algo.loss_weights.kl_loss",alias="KLw", range=[3,10]),
+        ParamRange("algo.loss_weights.yaw_reg_loss",alias="yreg", range=[0.05]),
+        ParamRange("algo.vae.recon_loss_type",alias="loss_type", range=["NLL","MSE"]),
+        ParamRange("algo.loss_weights.kl_loss",alias="KLw", range=[20,40]),
     ]))
 
     return plan.generate_configs(base_cfg=base_cfg)

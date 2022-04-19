@@ -219,7 +219,6 @@ def batch_average_displacement_error(
     Returns:
         np.ndarray: average displacement error (ADE) of the batch, an array of float numbers
     """
-
     _assert_shapes(ground_truth, pred, confidences, avails)
 
     ground_truth = np.expand_dims(ground_truth, 1)  # add modes
@@ -491,7 +490,7 @@ def batch_detect_off_road_boxes(positions, yaws, extents, drivable_region_map):
     return box_off_road.float()
 
 
-def GMM_loglikelihood(x, m, v, pi, avails=None, mode="sum"):
+def GMM_loglikelihood(x, m, v, pi, avails=None, mode="mean"):
     """
     Log probability of tensor x under a uniform mixture of Gaussians.
     Adapted from CS 236 at Stanford.
@@ -519,6 +518,8 @@ def GMM_loglikelihood(x, m, v, pi, avails=None, mode="sum"):
     log_prob = log_normal(x, m, v, avails=avails)
     if mode=="sum":
         loglikelihood = (pi*log_prob).sum(1)
+    if mode=="mean":
+        loglikelihood = (pi*log_prob).mean(1)
     elif mode=="max":
         loglikelihood = (pi*log_prob).max(1)
     return loglikelihood

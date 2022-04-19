@@ -840,7 +840,7 @@ class RNNTrajectoryEncoder(nn.Module):
 
 class RNNFeatureRoller(nn.Module):
     def __init__(self, trajectory_dim, feature_dim):
-        super(RNNTrajectoryEncoder, self).__init__()
+        super(RNNFeatureRoller, self).__init__()
         self.gru = nn.GRU(
             trajectory_dim, hidden_size=feature_dim, batch_first=True)
         self._feature_dim = feature_dim
@@ -891,7 +891,7 @@ class ConditionEncoder(nn.Module):
 
     def __init__(
             self,
-            map_encoder: nn.Module,
+            map_encoder,
             trajectory_shape: tuple,  # [T, D]
             condition_dim: int,
             mlp_layer_dims: tuple = (128, 128),
@@ -899,13 +899,18 @@ class ConditionEncoder(nn.Module):
             rnn_hidden_size: int = 100
     ) -> None:
         super(ConditionEncoder, self).__init__()
-        self.map_encoder = map_encoder
+        if isinstance(map_encoder,nn.Module):
+            self.map_encoder = map_encoder
+            visual_feature_size = self.map_encoder.output_shape()[0]
+        elif isinstance(map_encoder,int):
+            visual_feature_size = map_encoder
+            self.map_encoder = None
         self.trajectory_shape = trajectory_shape
         self.goal_encoder = goal_encoder
 
         # TODO: history encoder
         # self.hist_lstm = nn.LSTM(trajectory_shape[-1], hidden_size=rnn_hidden_size, batch_first=True)
-        visual_feature_size = self.map_encoder.output_shape()[0]
+        
         self.mlp = MLP(
             input_dim=visual_feature_size,
             output_dim=condition_dim,
@@ -914,12 +919,17 @@ class ConditionEncoder(nn.Module):
         )
 
     def forward(self, condition_inputs):
-        map_feat = self.map_encoder(condition_inputs["image"])
+        if self.map_encoder is None:
+            map_feat = condition_inputs["map_feature"]
+        else:
+            map_feat = self.map_encoder(condition_inputs["image"])
         c_feat = self.mlp(map_feat)
         if self.goal_encoder is not None:
             goal_feat = self.goal_encoder(condition_inputs["goal"])
             c_feat = torch.cat([c_feat, goal_feat], dim=-1)
         return c_feat
+
+
 
 
 class PosteriorNet(nn.Module):
@@ -1042,24 +1052,25 @@ class TrajectoryDecoder(nn.Module):
         assert current_states.shape[-1] == self.dyn.xdim
         assert actions.shape[-1] == self.dyn.udim
         assert isinstance(self.step_time, float) and self.step_time > 0
-        _, pos, yaw = dynamics.forward_dynamics(
+        x, pos, yaw = dynamics.forward_dynamics(
             self.dyn,
             initial_states=current_states,
             actions=actions,
             step_time=self.step_time
         )
         traj = torch.cat((pos, yaw), dim=-1)
-        return traj
+        return traj,x
 
     def forward(self, inputs, current_states=None, num_steps=None):
         preds = self._forward_networks(
             inputs, current_states=current_states, num_steps=num_steps)
         if self.dyn is not None:
             preds["controls"] = preds["trajectories"]
-            preds["trajectories"] = self._forward_dynamics(
+            preds["trajectories"], x = self._forward_dynamics(
                 current_states=current_states,
                 actions=preds["trajectories"]
             )
+            preds["terminal_state"] = x[...,-1,:]
         return preds
 
 class MLPTrajectoryDecoder(TrajectoryDecoder):
