@@ -5,12 +5,16 @@ from tbsim.utils.geometry_utils import transform_points_tensor
 from tbsim.configs.base import ExperimentConfig
 
 
-def avdata2posyawspeed(state):
+def avdata2posyawspeed(state, nan_to_zero=True):
     assert state.shape[-1] == 8  # x, y, vx, vy, ax, ay, sin(heading), cos(heading)
     pos = state[..., :2]
     yaw = torch.atan2(state[..., [-2]], state[..., [-1]])
     speed = torch.norm(state[..., 2:4], dim=-1)
     mask = torch.bitwise_not(torch.max(torch.isnan(state), dim=-1)[0])
+    if nan_to_zero:
+        pos[torch.bitwise_not(mask)] = 0.
+        yaw[torch.bitwise_not(mask)] = 0.
+        speed[torch.bitwise_not(mask)] = 0.
     return pos, yaw, speed, mask
 
 
@@ -60,8 +64,9 @@ def parse_avdata_batch(batch: dict):
     curr_speed = hist_speed[..., -1]
     curr_state = batch["curr_agent_state"]
 
-    neigh_hist_pos, neigh_hist_yaw, _, neigh_hist_mask = avdata2posyawspeed(batch["neigh_hist"])
+    neigh_hist_pos, neigh_hist_yaw, neigh_hist_speed, neigh_hist_mask = avdata2posyawspeed(batch["neigh_hist"])
     neigh_fut_pos, neigh_fut_yaw, _, neigh_fut_mask = avdata2posyawspeed(batch["neigh_fut"])
+    neigh_curr_speed = neigh_hist_speed[..., -1]
 
     # map-related
     map_res = batch["maps_resolution"][0]
@@ -90,17 +95,22 @@ def parse_avdata_batch(batch: dict):
         history_positions=hist_pos,
         history_yaws=hist_yaw,
         history_availabilities=hist_mask,
+        curr_speed=curr_speed,
+        centroid=curr_state[..., :2],
+        type=batch["agent_type"],
+        yaw=curr_state[..., -1],
+        extent=batch["agent_hist_extent"][:, -1],
+        raster_from_agent=raster_from_agent,
+        agent_from_raster=agent_from_raster,
         all_other_agents_history_positions=neigh_hist_pos,
         all_other_agents_history_yaws=neigh_hist_yaw,
         all_other_agents_history_availabilities=neigh_hist_mask,
+        all_other_agents_curr_speed=neigh_curr_speed,
         all_other_agents_target_positions=neigh_fut_pos,
         all_other_agents_target_yaws=neigh_fut_yaw,
         all_other_agents_target_availabilities=neigh_fut_mask,
-        curr_speed=curr_speed,
-        centroid=curr_state[..., :2],
-        yaw=curr_state[..., -1],
-        raster_from_agent=raster_from_agent,
-        agent_from_raster=agent_from_raster
+        all_other_agents_types=batch["neigh_types"],
+        all_other_agents_extents=batch["neigh_hist_extents"][:, :, -1]
     )
     batch = dict(batch)
     batch.update(d)

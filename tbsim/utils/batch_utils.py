@@ -152,11 +152,96 @@ class AVDataBatchUtils(BatchUtils):
 
     @staticmethod
     def batch_to_raw_all_agents(data_batch, step_time):
-        raise NotImplementedError
+        raw_type = torch.cat(
+            (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
+            dim=1,
+        ).type(torch.int64)
+
+        src_pos = torch.cat(
+            (
+                data_batch["history_positions"].unsqueeze(1),
+                data_batch["all_other_agents_history_positions"],
+            ),
+            dim=1,
+        )
+        src_yaw = torch.cat(
+            (
+                data_batch["history_yaws"].unsqueeze(1),
+                data_batch["all_other_agents_history_yaws"],
+            ),
+            dim=1,
+        )
+        src_mask = torch.cat(
+            (
+                data_batch["history_availabilities"].unsqueeze(1),
+                data_batch["all_other_agents_history_availabilities"],
+            ),
+            dim=1,
+        ).bool()
+
+        extents = torch.cat(
+            (
+                data_batch["extent"][..., :2].unsqueeze(1),
+                data_batch["all_other_agents_extents"][..., :2],
+            ),
+            dim=1,
+        )
+
+        curr_speed = torch.cat(
+            (
+                data_batch["curr_speed"].unsqueeze(1),
+                data_batch["all_other_agents_curr_speed"]
+            ),
+            dim=1,
+        )
+
+        return {
+            "history_positions": src_pos,
+            "history_yaws": src_yaw,
+            "curr_speed": curr_speed,
+            "raw_types": raw_type,
+            "history_availabilities": src_mask,
+            "extents": extents,
+        }
 
     @staticmethod
     def batch_to_target_all_agents(data_batch):
-        raise NotImplementedError
+        pos = torch.cat(
+            (
+                data_batch["target_positions"].unsqueeze(1),
+                data_batch["all_other_agents_target_positions"],
+            ),
+            dim=1,
+        )
+        yaw = torch.cat(
+            (
+                data_batch["target_yaws"].unsqueeze(1),
+                data_batch["all_other_agents_target_yaws"],
+            ),
+            dim=1,
+        )
+        avails = torch.cat(
+            (
+                data_batch["target_availabilities"].unsqueeze(1),
+                data_batch["all_other_agents_target_availabilities"],
+            ),
+            dim=1,
+        )
+
+        extents = torch.cat(
+            (
+                data_batch["extent"][..., :2].unsqueeze(1),
+                data_batch["all_other_agents_extents"][..., :2],
+            ),
+            dim=1,
+        )
+
+        return {
+            "target_positions": pos,
+            "target_yaws": yaw,
+            "target_availabilities": avails,
+            "extents": extents
+        }
 
     @staticmethod
     def get_edges_from_batch(data_batch, ego_predictions=None, all_predictions=None):

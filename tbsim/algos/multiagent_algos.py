@@ -20,7 +20,6 @@ class MATrafficModel(pl.LightningModule):
         super(MATrafficModel, self).__init__()
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
-        assert modality_shapes["image"][0] == 15
 
         self.model = AgentAwareRasterizedModel(
             model_arch=algo_config.model_architecture,

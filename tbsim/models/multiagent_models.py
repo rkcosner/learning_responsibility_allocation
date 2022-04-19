@@ -384,15 +384,13 @@ class AgentAwareRasterizedModel(nn.Module):
         )
 
         # compute collision loss
-        preds = TensorUtils.clone(pred_batch["predictions"])
-        # preds["positions"][:, 1:] = preds["positions"][:, 1:].detach()
-        # preds["yaws"][:, 1:] = preds["yaws"][:, 1:].detach()
-        pred_edges = batch_utils().get_edges_from_batch(
-            data_batch=data_batch,
-            all_predictions=preds
-        )
+        # preds = TensorUtils.clone(pred_batch["predictions"])
+        # pred_edges = batch_utils().get_edges_from_batch(
+        #     data_batch=data_batch,
+        #     all_predictions=preds
+        # )
 
-        coll_loss = collision_loss(pred_edges=pred_edges)
+        # coll_loss = collision_loss(pred_edges=pred_edges)
 
         # target_mask = torch.cat(
         #     [
@@ -407,7 +405,7 @@ class AgentAwareRasterizedModel(nn.Module):
         losses = OrderedDict(
             prediction_loss=pred_loss,
             goal_loss=goal_loss,
-            collision_loss=coll_loss
+            # collision_loss=coll_loss
         )
         if self.gan_disc is not None:
             imitation_loss = F.binary_cross_entropy(
