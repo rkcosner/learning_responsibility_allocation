@@ -24,6 +24,7 @@ from tbsim.models.transformer_model import TransformerModel
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.metrics as Metrics
 from tbsim.utils.batch_utils import batch_utils
+import tbsim.utils.loss_utils as LossUtils
 from tbsim.policies.common import Plan, Action
 import tbsim.algos.algo_utils as AlgoUtils
 from tbsim.utils.geometry_utils import transform_points_tensor
@@ -681,6 +682,22 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
         metrics["mode_max"] = prob.max(1).mean()-1/prob.shape[1]
 
         return metrics
+
+    def get_metrics(self, data_batch, traj_batch=None):
+        pout = self.nets["policy"](data_batch)
+        bs, M = pout["x_recons"]["trajectories"].shape[:2]
+        if traj_batch is not None:
+            GT_traj = traj_batch["target_positions"].reshape(bs,-1)
+        else:
+            GT_traj = data_batch["target_positions"].reshape(bs,-1)
+        pred_traj = pout["x_recons"]["trajectories"][...,:2].reshape(bs,M,-1)
+        if "var" in pout:
+            var = pout["var"].reshape(bs,M,-1)
+        else:
+            var = None
+        with torch.no_grad():
+            loglikelihood = Metrics.GMM_loglikelihood(GT_traj, pred_traj, var, pout["p"],mode=self.algo_config.eval.mode)
+        return OrderedDict(loglikelihood=loglikelihood)
 
     def get_action(self, obs_dict, sample=True, num_action_samples=1, plan_samples=None, **kwargs):
         obs_dict = dict(obs_dict)

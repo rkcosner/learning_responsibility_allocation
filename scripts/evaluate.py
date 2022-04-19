@@ -364,7 +364,7 @@ def create_env_l5kit(
 
     metrics = dict()
     if compute_metrics:
-        # modality_shapes = get_batch_utils().get_modality_shapes(exp_cfg)
+        modality_shapes = batch_utils().get_modality_shapes(exp_cfg)
         # ckpt_path, cfg_path = get_checkpoint("2761440", "69999_")
         # metric_cfg = get_experiment_config_from_file(cfg_path, locked=True)
         # metric_algo = EBMMetric.load_from_checkpoint(
@@ -373,10 +373,24 @@ def create_env_l5kit(
         #     modality_shapes=modality_shapes
         # ).eval().to(device)
 
+        ckpt_path, config_path = get_checkpoint(
+            ngc_job_id="2780940",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
+            ckpt_key="iter43000",
+            ckpt_root_dir=eval_cfg.ckpt_dir
+        )
+        controller_cfg = get_experiment_config_from_file(config_path)
+
+        CVAE_model = L5DiscreteVAETrafficModel.load_from_checkpoint(
+            ckpt_path,
+            algo_config=controller_cfg.algo,
+            modality_shapes=modality_shapes
+        ).to(device).eval()
+
         metrics = dict(
             all_off_road_rate=EnvMetrics.OffRoadRate(),
             all_collision_rate=EnvMetrics.CollisionRate(),
-            # all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations)
+            # all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations),
+            all_CVAE_score = EnvMetrics.LearnedCVAENLL(metric_algo=CVAE_model, perturbations=perturbations)
         )
 
     env = EnvL5KitSimulation(

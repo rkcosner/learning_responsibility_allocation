@@ -133,7 +133,7 @@ def log_normal_mixture(x, m, v, w=None, log_w=None):
         log_prob = log_mean_exp(log_prob , dim=1) # mean accounts for uniform weights
     return log_prob
 
-def NLL_GMM_loss(x, m, v, pi, avails=None, detach=True):
+def NLL_GMM_loss(x, m, v, pi, avails=None, detach=True, mode="sum"):
     """
     Log probability of tensor x under a uniform mixture of Gaussians.
     Adapted from CS 236 at Stanford.
@@ -145,10 +145,13 @@ def NLL_GMM_loss(x, m, v, pi, avails=None, detach=True):
             M is number of mixture components
         logpi (torch.Tensor): log probability of the modes (B,M)
         detach (bool): option whether to detach all modes but the best one
+        mode (string): mode of loss, sum or max
 
     Returns:
         -log_prob (torch.Tensor): log probabilities of shape (B,)
     """
+    if v is None:
+        v = torch.ones_like(m)
 
     # (B , D) -> (B , 1, D)
     x = x.unsqueeze(1)
@@ -156,13 +159,17 @@ def NLL_GMM_loss(x, m, v, pi, avails=None, detach=True):
     if avails is not None:
         avails = avails.unsqueeze(1)
     log_prob = log_normal(x, m, v, avails=avails)
-    if detach:
+    if mode=="sum":
+        if detach:
+            max_flag = (log_prob==log_prob.max(dim=1,keepdim=True)[0])
+            nonmax_flag = torch.logical_not(max_flag)
+            log_prob_detach = log_prob.detach()
+            NLL_loss = (-pi*log_prob*max_flag).sum(1).mean()+(-pi*log_prob_detach*nonmax_flag).sum(1).mean()
+        else:
+            NLL_loss = (-pi*log_prob).sum(1).mean()
+    elif mode=="max":
         max_flag = (log_prob==log_prob.max(dim=1,keepdim=True)[0])
-        nonmax_flag = torch.logical_not(max_flag)
-        log_prob_detach = log_prob.detach()
-        NLL_loss = (-pi*log_prob*max_flag).sum(1).mean()+(-pi*log_prob_detach*nonmax_flag).sum(1).mean()
-    else:
-        NLL_loss = (-pi*log_prob).sum(1).mean()
+        NLL_loss = (-pi*log_prob*max_flag).sum(1).mean()
     return NLL_loss
 
 

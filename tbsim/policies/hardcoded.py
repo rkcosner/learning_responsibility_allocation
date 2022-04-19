@@ -203,8 +203,7 @@ class EC_sampling_controller(Policy):
             else:
                 ego_trajs_i = torch.cat((obs["target_positions"][i],obs["target_yaws"][i]),-1).unsqueeze(0)
             ego_trajs.append(ego_trajs_i)
-            import pdb
-            pdb.set_trace()
+
         self.timer.toc("sampling")
         self.timer.tic("prediction")
         N = max(ego_trajs_i.shape[0] for ego_trajs_i in ego_trajs)

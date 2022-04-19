@@ -14,6 +14,7 @@ from tbsim.utils.geometry_utils import (
     PED_PED_collision,
     get_box_world_coords,
 )
+from tbsim.utils.loss_utils import log_normal
 
 metric_signature = Callable[
     [np.ndarray, np.ndarray, np.ndarray, np.ndarray], np.ndarray
@@ -488,3 +489,36 @@ def batch_detect_off_road_boxes(positions, yaws, extents, drivable_region_map):
     off_road = batch_detect_off_road(boxes, drivable_region_map)  # [B, ..., 4]
     box_off_road = off_road.sum(dim=-1) > 0.5
     return box_off_road.float()
+
+
+def GMM_loglikelihood(x, m, v, pi, avails=None, mode="sum"):
+    """
+    Log probability of tensor x under a uniform mixture of Gaussians.
+    Adapted from CS 236 at Stanford.
+    Args:
+        x (torch.Tensor): tensor with shape (B, D)
+        m (torch.Tensor): means tensor with shape (B, M, D) or (1, M, D), where
+            M is number of mixture components
+        v (torch.Tensor): variances tensor with shape (B, M, D) or (1, M, D) where
+            M is number of mixture components
+        logpi (torch.Tensor): log probability of the modes (B,M)
+        detach (bool): option whether to detach all modes but the best one
+        mode (string): mode of loss, sum or max
+
+    Returns:
+        -log_prob (torch.Tensor): log probabilities of shape (B,)
+    """
+    if v is None:
+        v = torch.ones_like(m)
+
+    # (B , D) -> (B , 1, D)
+    x = x.unsqueeze(1)
+    # (B, 1, D) -> (B, M, D) -> (B, M)
+    if avails is not None:
+        avails = avails.unsqueeze(1)
+    log_prob = log_normal(x, m, v, avails=avails)
+    if mode=="sum":
+        loglikelihood = (pi*log_prob).sum(1)
+    elif mode=="max":
+        loglikelihood = (pi*log_prob).max(1)
+    return loglikelihood
