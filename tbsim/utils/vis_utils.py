@@ -146,7 +146,8 @@ def render_state_avdata(
             fill_color=COLORS["agent_fill"]
         )
     plan_info = None
-    plan_info = TensorUtils.map_ndarray(action.agents_info["plan_info"], lambda x: x[[batch_idx]])
+    if "plan_info" in action.agents_info:
+        plan_info = TensorUtils.map_ndarray(action.agents_info["plan_info"], lambda x: x[[batch_idx]])
     vis_action = TensorUtils.map_ndarray(action.agents.to_dict(), lambda x: x[batch_idx])
     image = draw_actions(image, trans_mat=trans_mat, pred_action=vis_action, pred_plan_info=plan_info)
     return image
