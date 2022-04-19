@@ -48,5 +48,6 @@ def translate_avdata_cfg(cfg: ExperimentConfig):
     rcfg.pixel_size = cfg.env.rasterizer.pixel_size
     rcfg.raster_size = int(cfg.env.rasterizer.raster_size)
     rcfg.raster_center = cfg.env.rasterizer.ego_center
+    rcfg.yaw_correction_speed = cfg.env.data_generation_params.yaw_correction_speed
     rcfg.lock()
     return rcfg

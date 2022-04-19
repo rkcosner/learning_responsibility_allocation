@@ -59,6 +59,9 @@ class NuscEnvConfig(EnvConfig):
 
         self.data_generation_params.max_agents_distance = 30
 
+        # correct for yaw (zero-out delta yaw) when speed is lower than this threshold
+        self.data_generation_params.yaw_correction_speed = 1.0
+
         self.simulation.distance_th_close = 30
 
         # maximum number of simulation steps to run (0.1sec / step)

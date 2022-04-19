@@ -145,7 +145,7 @@ class PolicyWrapper(object):
 
 class Pos2YawWrapper(object):
     """A wrapper that computes action yaw from action positions"""
-    def __init__(self, policy, dt, speed_filter):
+    def __init__(self, policy, dt, yaw_correction_speed):
         """
 
         Args:
@@ -156,7 +156,7 @@ class Pos2YawWrapper(object):
         self.device = policy.device
         self.policy = policy
         self._dt = dt
-        self._speed_filter = speed_filter
+        self._yaw_correction_speed = yaw_correction_speed
 
     def eval(self):
         self.policy.eval()
@@ -165,7 +165,7 @@ class Pos2YawWrapper(object):
         action, action_info = self.policy.get_action(obs, **kwargs)
         curr_pos = torch.zeros_like(action.positions[..., [0], :])
         pos_seq = torch.cat((curr_pos, action.positions), dim=-2)
-        yaws = yaw_from_pos(pos_seq, dt=self._dt, speed_filter=self._speed_filter)
+        yaws = yaw_from_pos(pos_seq, dt=self._dt, yaw_correction_speed=self._yaw_correction_speed)
         action.yaws = yaws
         return action, action_info
 

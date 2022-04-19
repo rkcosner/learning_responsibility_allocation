@@ -12,6 +12,8 @@ import torch
 
 from l5kit.data import LocalDataManager, ChunkedDataset
 from l5kit.rasterization import build_rasterizer
+from avdata.augmentation.low_vel_yaw_correction import LowSpeedYawCorrection
+from avdata import AgentType, UnifiedDataset
 
 from tbsim.l5kit.vectorizer import build_vectorizer
 from tbsim.algos.l5kit_algos import (
@@ -34,7 +36,6 @@ from tbsim.utils.config_utils import translate_l5kit_cfg, get_experiment_config_
 from tbsim.utils.env_utils import rollout_episodes
 import tbsim.envs.env_metrics as EnvMetrics
 from tbsim.policies.hardcoded import ReplayPolicy, GTPolicy, EC_sampling_controller
-from avdata import AgentType, UnifiedDataset
 from tbsim.configs.base import ExperimentConfig
 
 from tbsim.policies.wrappers import (
@@ -350,8 +351,8 @@ def create_env_l5kit(
     env_dataset = EgoDatasetMixed(l5_config, eval_zarr, vectorizer, rasterizer)
 
     l5_config = deepcopy(l5_config)
-    l5_config["raster_params"]["raster_size"] = (1000, 1000)
-    l5_config["raster_params"]["pixel_size"] = (0.1, 0.1)
+    l5_config["raster_params"]["raster_size"] = (500, 500)
+    l5_config["raster_params"]["pixel_size"] = (0.2, 0.2)
     l5_config["raster_params"]["ego_center"] = (0.5, 0.5)
     render_rasterizer = build_visualization_rasterizer_l5kit(l5_config, LocalDataManager(None))
     exp_cfg.env.simulation.num_simulation_steps = eval_cfg.num_simulation_steps
@@ -411,6 +412,9 @@ def create_env_nusc(
     future_sec = data_cfg.future_num_frames * data_cfg.step_time
     history_sec = data_cfg.history_num_frames * data_cfg.step_time
     neighbor_distance = data_cfg.max_agents_distance
+
+    low_speed_yaw = LowSpeedYawCorrection(speed_threshold=data_cfg.yaw_correction_speed)
+
     kwargs = dict(
         desired_data=["nusc-val"],
         future_sec=(future_sec, future_sec),
@@ -428,6 +432,7 @@ def create_env_nusc(
             "return_rgb": False,
             "offset_frac_xy": data_cfg.raster_center
         },
+        augmentations=[low_speed_yaw],
         num_workers=os.cpu_count(),
         desired_dt=data_cfg.step_time
     )
@@ -484,7 +489,7 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
         policy = Pos2YawWrapper(
             policy,
             dt=exp_config.algo.step_time,
-            speed_filter=eval_cfg.policy.pos_to_yaw_speed_limit
+            yaw_corection_speed=eval_cfg.policy.yaw_correction_speed
         )
 
     if eval_cfg.env == "nusc":
