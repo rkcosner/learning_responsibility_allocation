@@ -235,9 +235,10 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 return
             v.add_step(obs, self.current_scene_names)
 
-    def _step(self, step_actions: RolloutAction):
+    def _step(self, step_actions: RolloutAction, num_steps_to_take):
         if self.is_done():
             raise SimulationException("Cannot step in a finished episode")
+
         obs = self.get_observation()["agents"]
         # record metrics
         self._add_per_step_metrics(obs)
@@ -245,6 +246,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         action = step_actions.agents.to_dict()
         assert action["positions"].shape[0] == obs["centroid"].shape[0]
         idx = 0
+        action_index = num_steps_to_take - 1
         for scene in self._current_scenes:
             scene_action = dict()
             for agent in scene.agents:
@@ -257,19 +259,19 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                     ]
                 )
                 next_state = np.zeros(3, dtype=obs["agent_fut"].dtype)
-                if not np.any(np.isnan(action["positions"][idx, 0])):  # ground truth action may be NaN
-                    next_state[:2] = action["positions"][idx, 0] @ world_from_agent + curr_pos
-                    next_state[2] = curr_yaw + action["yaws"][idx, 0, 0]
+                if not np.any(np.isnan(action["positions"][idx, action_index])):  # ground truth action may be NaN
+                    next_state[:2] = action["positions"][idx, action_index] @ world_from_agent + curr_pos
+                    next_state[2] = curr_yaw + action["yaws"][idx, action_index, 0]
                 scene_action[agent.name] = next_state
                 idx += 1
             scene.step(scene_action)
 
         self._cached_observation = None
 
-        if self._frame_index + 1 == self.horizon:
+        if self._frame_index + num_steps_to_take >= self.horizon:
             self._done = True
         else:
-            self._frame_index += 1
+            self._frame_index += num_steps_to_take
 
     def step(self, actions: RolloutAction, num_steps_to_take: int = 1, render=False):
         """
@@ -281,9 +283,8 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
             render (bool): whether to render state and actions and return renderings
         """
         actions = actions.to_numpy()
-        assert num_steps_to_take == 1
         renderings = []
         if render:
             renderings.append(self.render(actions))
-        self._step(step_actions=actions)
+        self._step(step_actions=actions, num_steps_to_take=num_steps_to_take)
         return renderings

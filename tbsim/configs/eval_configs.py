@@ -23,6 +23,8 @@ class EvaluationConfig(Dict):
         self.policy.mask_drivable = True
         self.policy.num_plan_samples = 10
         self.policy.num_action_samples = 10
+        self.policy.pos_to_yaw = True
+        self.policy.pos_to_yaw_speed_limit = 1.0
 
         self.perturb.std = [5.0, 5.0, np.pi / 2]
 

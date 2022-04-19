@@ -413,6 +413,7 @@ def get_checkpoint(
     )
     assert len(ckpt_paths) == 1, "More than one checkpoint found"
     cfg_path = os.path.join(ckpt_dir, "config.json")
+    print("Checkpoint path: {}".format(ckpt_paths[0]))
     return ckpt_paths[0], cfg_path
 
 

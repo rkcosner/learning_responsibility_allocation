@@ -44,6 +44,7 @@ from tbsim.policies.wrappers import (
     HierarchicalSamplerWrapper,
     RolloutWrapper,
     SamplingPolicyWrapper,
+    Pos2YawWrapper
 )
 
 from tbsim.utils.tensor_utils import map_ndarray
@@ -483,7 +484,12 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
     evaluation = eval(eval_cfg.eval_class)(eval_cfg, device, ckpt_dir=eval_cfg.ckpt_dir)
     policy, exp_config = evaluation.get_policy(**eval_cfg.policy)
 
-    print(exp_config.algo)
+    if eval_cfg.policy.pos_to_yaw:
+        policy = Pos2YawWrapper(
+            policy,
+            dt=exp_config.algo.step_time,
+            speed_filter=eval_cfg.policy.pos_to_yaw_speed_limit
+        )
 
     if eval_cfg.env == "nusc":
         rollout_policy = RolloutWrapper(agents_policy=policy)
@@ -491,6 +497,8 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
         rollout_policy = RolloutWrapper(ego_policy=policy)
     else:
         rollout_policy = RolloutWrapper(ego_policy=policy, agents_policy=policy)
+
+    print(exp_config.algo)
 
     env = env_func(
         exp_config,

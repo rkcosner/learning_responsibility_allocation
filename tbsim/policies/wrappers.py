@@ -6,6 +6,7 @@ from tbsim.utils.l5_utils import get_drivable_region_map
 from tbsim.utils.geometry_utils import calc_distance_map
 from tbsim.utils.planning_utils import ego_sample_planning
 from tbsim.policies.common import Action, Plan, RolloutAction
+from tbsim.algos.algo_utils import yaw_from_pos
 
 
 class HierarchicalWrapper(object):
@@ -142,10 +143,37 @@ class PolicyWrapper(object):
         return cls(model=model, get_plan_kwargs=kwargs)
 
 
+class Pos2YawWrapper(object):
+    """A wrapper that computes action yaw from action positions"""
+    def __init__(self, policy, dt, speed_filter):
+        """
+
+        Args:
+            policy: policy to be wrapped
+            dt:
+            speed_filter:
+        """
+        self.device = policy.device
+        self.policy = policy
+        self._dt = dt
+        self._speed_filter = speed_filter
+
+    def eval(self):
+        self.policy.eval()
+
+    def get_action(self, obs, **kwargs):
+        action, action_info = self.policy.get_action(obs, **kwargs)
+        curr_pos = torch.zeros_like(action.positions[..., [0], :])
+        pos_seq = torch.cat((curr_pos, action.positions), dim=-2)
+        yaws = yaw_from_pos(pos_seq, dt=self._dt, speed_filter=self._speed_filter)
+        action.yaws = yaws
+        return action, action_info
+
+
 class RolloutWrapper(object):
     """A wrapper policy that can (optionally) control both ego and other agents in a scene"""
 
-    def __init__(self, ego_policy=None, agents_policy=None,pass_agent_obs = True):
+    def __init__(self, ego_policy=None, agents_policy=None, pass_agent_obs=True):
         self.device = ego_policy.device if agents_policy is None else agents_policy.device
         self.ego_policy = ego_policy
         self.agents_policy = agents_policy

@@ -222,3 +222,25 @@ def combine_ego_agent_data(batch, ego_keys, agent_keys, mask=None):
             combined_batch[ego_key] = torch.cat((batch[ego_key], batch[agent_key][mask].reshape(
                 size_dim0, *batch[agent_key].shape[2:])), dim=0)
     return combined_batch
+
+
+def yaw_from_pos(pos: torch.Tensor, dt, speed_filter=0.):
+    """
+    Compute yaws from position sequences. Optionally suppress yaws computed from low-velocity steps
+
+    Args:
+        pos (torch.Tensor): sequence of positions [..., T, 2]
+        dt (float): delta timestep to compute speed
+        speed_filter (float): zero out yaw change when the speed is below this threshold (noisy heading)
+
+    Returns:
+        accum_yaw (torch.Tensor): sequence of yaws [..., T-1, 1]
+    """
+
+    pos_diff = pos[..., 1:, :] - pos[..., :-1, :]
+    yaw = torch.atan2(pos_diff[..., 1], pos_diff[..., 0])
+    delta_yaw = torch.cat((yaw[..., [0]], yaw[..., 1:] - yaw[..., :-1]), dim=-1)
+    speed = torch.norm(pos_diff, dim=-1) / dt
+    delta_yaw[speed < speed_filter] = 0.
+    accum_yaw = torch.cumsum(delta_yaw, dim=-1)
+    return accum_yaw[..., None]
