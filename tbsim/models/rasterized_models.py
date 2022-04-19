@@ -8,8 +8,8 @@ import torch.distributions as distributions
 
 import tbsim.models.base_models as base_models
 import tbsim.models.vaes as vaes
-import tbsim.utils.l5_utils as L5Utils
 import tbsim.utils.tensor_utils as TensorUtils
+from tbsim.utils.batch_utils import batch_utils
 from tbsim.utils.loss_utils import (
     trajectory_loss,
     MultiModal_trajectory_loss,
@@ -53,7 +53,7 @@ class RasterizedPlanningModel(nn.Module):
         map_feat = self.map_encoder(image_batch)
 
         if self.traj_decoder.dyn is not None:
-            curr_states = L5Utils.get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
+            curr_states = batch_utils().get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
         else:
             curr_states = None
         dec_output = self.traj_decoder.forward(inputs=map_feat, current_states=curr_states)
@@ -86,7 +86,7 @@ class RasterizedPlanningModel(nn.Module):
         )
 
         # compute collision loss
-        # pred_edges = L5Utils.get_edges_from_batch(
+        # pred_edges = batch_utils().get_edges_from_batch(
         #     data_batch=data_batch,
         #     ego_predictions=pred_batch["predictions"]
         # )
@@ -134,7 +134,7 @@ class RasterizedGCModel(RasterizedPlanningModel):
         image_batch = data_batch["image"]
         map_feat = self.map_encoder(image_batch)
         target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=2)
-        goal_inds = L5Utils.get_last_available_index(data_batch["target_availabilities"])
+        goal_inds = batch_utils().get_last_available_index(data_batch["target_availabilities"])
         goal_state = torch.gather(
             target_traj,  # [B, T, 3]
             dim=1,
@@ -144,7 +144,7 @@ class RasterizedGCModel(RasterizedPlanningModel):
         input_feat = torch.cat((map_feat, goal_feat), dim=-1)
 
         if self.traj_decoder.dyn is not None:
-            curr_states = L5Utils.get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
+            curr_states = batch_utils().get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
         else:
             curr_states = None
         preds = self.traj_decoder.forward(inputs=input_feat, current_states=curr_states)
@@ -218,7 +218,7 @@ class RasterizedGANModel(nn.Module):
         map_feat = self.map_encoder(image_batch)
 
         if self.traj_decoder.dyn is not None:
-            curr_states = L5Utils.get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
+            curr_states = batch_utils().get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
         else:
             curr_states = None
 
@@ -256,7 +256,7 @@ class RasterizedGANModel(nn.Module):
         map_feat = self.gen_map_encoder(image_batch)
 
         if self.traj_decoder.dyn is not None:
-            curr_states = L5Utils.get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
+            curr_states = batch_utils().get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
         else:
             curr_states = None
 
@@ -284,7 +284,7 @@ class RasterizedGANModel(nn.Module):
         map_feat = self.gen_map_encoder(image_batch)
 
         if self.traj_decoder.dyn is not None:
-            curr_states = L5Utils.get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
+            curr_states = batch_utils().get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
         else:
             curr_states = None
 
@@ -311,7 +311,7 @@ class RasterizedGANModel(nn.Module):
         map_feat = TensorUtils.repeat_by_expand_at(map_feat, repeats=n, dim=0)
 
         if self.traj_decoder.dyn is not None:
-            curr_states = L5Utils.get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
+            curr_states = batch_utils().get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
             curr_states = TensorUtils.repeat_by_expand_at(curr_states, repeats=n, dim=0)
         else:
             curr_states = None
@@ -449,7 +449,7 @@ class RasterizedVAEModel(nn.Module):
 
     def _get_goal_states(self, data_batch) -> torch.Tensor:
         target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=-1)
-        goal_inds = L5Utils.get_last_available_index(data_batch["target_availabilities"])  # [B]
+        goal_inds = batch_utils().get_last_available_index(data_batch["target_availabilities"])  # [B]
         goal_state = torch.gather(
             target_traj,  # [B, T, 3]
             dim=1,
@@ -464,7 +464,7 @@ class RasterizedVAEModel(nn.Module):
 
         decoder_kwargs = dict()
         if self.dyn is not None:
-            decoder_kwargs["current_states"] = L5Utils.get_current_states(batch_inputs, self.dyn.type())
+            decoder_kwargs["current_states"] = batch_utils().get_current_states(batch_inputs, self.dyn.type())
 
         outs = self.vae.forward(inputs=inputs, condition_inputs=condition_inputs, decoder_kwargs=decoder_kwargs)
         outs.update(self._traj_to_preds(outs["x_recons"]["trajectories"]))
@@ -477,7 +477,7 @@ class RasterizedVAEModel(nn.Module):
 
         decoder_kwargs = dict()
         if self.dyn is not None:
-            curr_states = L5Utils.get_current_states(batch_inputs, self.dyn.type())
+            curr_states = batch_utils().get_current_states(batch_inputs, self.dyn.type())
             decoder_kwargs["current_states"] = TensorUtils.repeat_by_expand_at(curr_states, repeats=n, dim=0)
 
         outs = self.vae.sample(condition_inputs=condition_inputs, n=n, decoder_kwargs=decoder_kwargs)
@@ -488,7 +488,7 @@ class RasterizedVAEModel(nn.Module):
 
         decoder_kwargs = dict()
         if self.dyn is not None:
-            decoder_kwargs["current_states"] = L5Utils.get_current_states(batch_inputs, self.dyn.type())
+            decoder_kwargs["current_states"] = batch_utils().get_current_states(batch_inputs, self.dyn.type())
 
         outs = self.vae.predict(condition_inputs=condition_inputs, decoder_kwargs=decoder_kwargs)
         return self._traj_to_preds(outs["trajectories"])
@@ -593,7 +593,7 @@ class RasterizedDiscreteVAEModel(nn.Module):
 
     def _get_goal_states(self, data_batch) -> torch.Tensor:
         target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=-1)
-        goal_inds = L5Utils.get_last_available_index(data_batch["target_availabilities"])  # [B]
+        goal_inds = batch_utils().get_last_available_index(data_batch["target_availabilities"])  # [B]
         goal_state = torch.gather(
             target_traj,  # [B, T, 3]
             dim=1,
@@ -608,7 +608,7 @@ class RasterizedDiscreteVAEModel(nn.Module):
 
         decoder_kwargs = dict()
         if self.dyn is not None:
-            current_states = L5Utils.get_current_states(batch_inputs, self.dyn.type())
+            current_states = batch_utils().get_current_states(batch_inputs, self.dyn.type())
             decoder_kwargs["current_states"] = current_states.tile(self.vae.K,1)
         
         outs = self.vae.forward(inputs=inputs, condition_inputs=condition_inputs, decoder_kwargs=decoder_kwargs)
@@ -622,7 +622,7 @@ class RasterizedDiscreteVAEModel(nn.Module):
 
         decoder_kwargs = dict()
         if self.dyn is not None:
-            curr_states = L5Utils.get_current_states(batch_inputs, self.dyn.type())
+            curr_states = batch_utils().get_current_states(batch_inputs, self.dyn.type())
             decoder_kwargs["current_states"] = TensorUtils.repeat_by_expand_at(curr_states, repeats=n, dim=0)
 
         outs = self.vae.sample(condition_inputs=condition_inputs, n=n, decoder_kwargs=decoder_kwargs)
@@ -633,7 +633,7 @@ class RasterizedDiscreteVAEModel(nn.Module):
 
         decoder_kwargs = dict()
         if self.dyn is not None:
-            decoder_kwargs["current_states"] = L5Utils.get_current_states(batch_inputs, self.dyn.type())
+            decoder_kwargs["current_states"] = batch_utils().get_current_states(batch_inputs, self.dyn.type())
 
         outs = self.vae.predict(condition_inputs=condition_inputs, decoder_kwargs=decoder_kwargs)
         return self._traj_to_preds(outs["trajectories"])
@@ -747,7 +747,7 @@ class RasterizedECModel(nn.Module):
         map_feat = self.map_encoder(image_batch)
         target_traj = torch.cat((data_batch["target_positions"],data_batch["target_yaws"]),-1)
         if self.GC:
-            goal_inds = L5Utils.get_last_available_index(data_batch["target_availabilities"])
+            goal_inds = batch_utils().get_last_available_index(data_batch["target_availabilities"])
             goal_state = torch.gather(
                 target_traj,  # [B, T, 3]
                 dim=1,
@@ -758,7 +758,7 @@ class RasterizedECModel(nn.Module):
         else:
             input_feat = map_feat
         if self.traj_decoder.dyn is not None:
-            curr_states = L5Utils.get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
+            curr_states = batch_utils().get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
         else:
             curr_states = None
 
@@ -786,7 +786,7 @@ class RasterizedECModel(nn.Module):
         map_feat = self.map_encoder(image_batch)
         if self.GC:
             if goal_state is None:
-                goal_inds = L5Utils.get_last_available_index(obs["target_availabilities"])
+                goal_inds = batch_utils().get_last_available_index(obs["target_availabilities"])
                 target_traj = torch.cat((obs["target_positions"],obs["target_yaws"]),-1)
                 goal_state = torch.gather(
                     target_traj,  # [B, T, 3]
@@ -802,7 +802,7 @@ class RasterizedECModel(nn.Module):
         else:
             input_feat = map_feat
         if self.traj_decoder.dyn is not None:
-            curr_states = L5Utils.get_current_states(obs, dyn_type=self.traj_decoder.dyn.type())
+            curr_states = batch_utils().get_current_states(obs, dyn_type=self.traj_decoder.dyn.type())
         else:
             curr_states = None
         dec_output = self.traj_decoder.forward(inputs=input_feat, current_states=curr_states, cond_traj=cond_traj)
@@ -839,7 +839,7 @@ class RasterizedECModel(nn.Module):
             availabilities=data_batch["target_availabilities"],
             weights_scaling=self.weights_scaling
         )
-        EC_edges,type_mask = L5Utils.gen_EC_edges(
+        EC_edges,type_mask = batch_utils().gen_EC_edges(
             pred_batch["EC_trajectories"],
             pred_batch["cond_traj"],
             data_batch["extent"][...,:2],
@@ -857,7 +857,7 @@ class RasterizedECModel(nn.Module):
         )
         
         # compute collision loss
-        pred_edges = L5Utils.get_edges_from_batch(
+        pred_edges = batch_utils().get_edges_from_batch(
             data_batch=data_batch,
             ego_predictions=pred_batch["predictions"]
         )

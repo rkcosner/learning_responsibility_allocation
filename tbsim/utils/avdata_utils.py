@@ -108,14 +108,6 @@ def parse_avdata_batch(batch: dict):
     return batch
 
 
-def maybe_parse_batch(batch):
-    """Parse batch to the expected format"""
-    if "agent_fut" in batch:  # avdata
-        return parse_avdata_batch(batch)
-    else:
-        return batch
-
-
 def get_modality_shapes(cfg: ExperimentConfig):
     num_channels = (cfg.algo.history_num_frames + 1) + 7
     h = cfg.env.rasterizer.raster_size

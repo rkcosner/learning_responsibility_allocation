@@ -6,7 +6,7 @@ import torch
 from l5kit.geometry import transform_points, angular_distance
 
 import tbsim.utils.tensor_utils as TensorUtils
-import tbsim.utils.l5_utils as L5Utils
+from tbsim.utils.batch_utils import batch_utils
 from tbsim.utils.geometry_utils import transform_points_tensor, detect_collision, CollisionType
 import tbsim.utils.metrics as Metrics
 
@@ -113,7 +113,7 @@ class OffRoadRate(EnvMetrics):
     @staticmethod
     def compute_per_step(state_info: dict, all_scene_index: np.ndarray):
         obs = TensorUtils.to_tensor(state_info)
-        drivable_region = L5Utils.get_drivable_region_map(obs["image"])
+        drivable_region = batch_utils().get_drivable_region_map(obs["image"])
         centroid_raster = transform_points_tensor(obs["centroid"][:, None], obs["raster_from_world"])[:, 0]
         off_road = Metrics.batch_detect_off_road(centroid_raster, drivable_region)  # [num_agents]
         off_road = TensorUtils.to_numpy(off_road)

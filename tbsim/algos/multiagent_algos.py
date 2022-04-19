@@ -12,7 +12,7 @@ from tbsim.models.multiagent_models import (
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.policies.common import Action, Plan, Trajectory
 from tbsim.utils.loss_utils import discriminator_loss
-import tbsim.utils.avdata_utils as AVUtils
+from tbsim.utils.batch_utils import batch_utils
 
 
 class MATrafficModel(pl.LightningModule):
@@ -51,7 +51,7 @@ class MATrafficModel(pl.LightningModule):
         return self.model(obs_dict, plan)
 
     def training_step(self, batch, batch_idx):
-        batch = AVUtils.maybe_parse_batch(batch)
+        batch = batch_utils().parse_batch(batch)
         pout = self.model.forward(batch)
         losses = self.model.compute_losses(pout, batch)
         total_loss = 0.0
@@ -67,7 +67,7 @@ class MATrafficModel(pl.LightningModule):
         return total_loss
 
     def validation_step(self, batch, batch_idx):
-        batch = AVUtils.maybe_parse_batch(batch)
+        batch = batch_utils().parse_batch(batch)
         pout = self.model.forward(batch)
         losses = TensorUtils.detach(self.model.compute_losses(pout, batch))
         metrics = self.model.compute_metrics(pout, batch)
@@ -162,7 +162,7 @@ class MAGANTrafficModel(MATrafficModel):
         return d_loss
 
     def training_step(self, batch, batch_idx, optimizer_idx):
-
+        batch = batch_utils().parse_batch(batch)
         pout = self.model.forward(batch)
         if optimizer_idx == 0:
             losses = self.model.compute_losses(pout, batch)
@@ -185,6 +185,7 @@ class MAGANTrafficModel(MATrafficModel):
             return d_loss
 
     def validation_step(self, batch, batch_idx):
+        batch = batch_utils().parse_batch(batch)
         pout = self.model.forward(batch)
         losses = TensorUtils.detach(self.model.compute_losses(pout, batch))
         metrics = self.model.compute_metrics(pout, batch)

@@ -11,8 +11,7 @@ import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.metrics as Metrics
 from tbsim.policies.common import Plan
 
-import tbsim.models.vaes as vaes
-import tbsim.utils.l5_utils as L5Utils
+from tbsim.utils.batch_utils import batch_utils
 from tbsim.utils.geometry_utils import get_upright_box, transform_points_tensor, calc_distance_map
 from tbsim.utils.loss_utils import (
     trajectory_loss,
@@ -153,7 +152,7 @@ class AgentAwareRasterizedModel(nn.Module):
             agents_preds["predictions"]["positions"])
         num_frames = pos_preds.shape[2]
         pos_preds = pos_preds.reshape(-1, num_frames, 2)
-        all_targets = L5Utils.batch_to_target_all_agents(data_batch)
+        all_targets = batch_utils().batch_to_target_all_agents(data_batch)
         gt = TensorUtils.to_numpy(
             all_targets["target_positions"][:, 1:]).reshape(-1, num_frames, 2)
         avail = TensorUtils.to_numpy(
@@ -192,10 +191,10 @@ class AgentAwareRasterizedModel(nn.Module):
 
     def _get_goal_states(self, data_batch, plan=None) -> torch.Tensor:
         if plan is None:
-            all_targets = L5Utils.batch_to_target_all_agents(data_batch)
+            all_targets = batch_utils().batch_to_target_all_agents(data_batch)
             target_traj = torch.cat(
                 (all_targets["target_positions"], all_targets["target_yaws"]), dim=-1)
-            goal_inds = L5Utils.get_last_available_index(
+            goal_inds = batch_utils().get_last_available_index(
                 all_targets["target_availabilities"])  # [B, A]
             goal_state = torch.gather(
                 target_traj,  # [B, A, T, 3]
@@ -207,7 +206,7 @@ class AgentAwareRasterizedModel(nn.Module):
             return goal_state
         else:
             assert isinstance(plan, Plan)
-            goal_inds = L5Utils.get_last_available_index(
+            goal_inds = batch_utils().get_last_available_index(
                 plan.availabilities)  # [B, A]
             goal_state = torch.gather(
                 plan.trajectories,  # [B, T, 3]
@@ -219,7 +218,7 @@ class AgentAwareRasterizedModel(nn.Module):
             return goal_state
 
     def _get_lane_flags(self, data_batch, pred_yaws, pred_positions):
-        lane_mask = L5Utils.get_drivable_region_map(
+        lane_mask = batch_utils().get_drivable_region_map(
             data_batch["image"]).float()
         dis_map = calc_distance_map(lane_mask)
         target_mask = torch.cat([data_batch["target_availabilities"].unsqueeze(
@@ -247,7 +246,7 @@ class AgentAwareRasterizedModel(nn.Module):
 
     def extract_features(self, data_batch):
         image_batch = data_batch["image"]
-        states_all = L5Utils.batch_to_raw_all_agents(
+        states_all = batch_utils().batch_to_raw_all_agents(
             data_batch, self.ego_decoder.step_time)
         b, a = states_all["history_positions"].shape[:2]
 
@@ -312,7 +311,7 @@ class AgentAwareRasterizedModel(nn.Module):
 
         # for dynamics models
         if self.ego_decoder.dyn is not None:
-            dyn_states = L5Utils.get_current_states_all_agents(
+            dyn_states = batch_utils().get_current_states_all_agents(
                 data_batch,
                 self.ego_decoder.step_time,
                 dyn_type=self.ego_decoder.dyn.type()
@@ -367,7 +366,7 @@ class AgentAwareRasterizedModel(nn.Module):
         return pred_dict
 
     def compute_losses(self, pred_batch, data_batch):
-        all_targets = L5Utils.batch_to_target_all_agents(data_batch)
+        all_targets = batch_utils().batch_to_target_all_agents(data_batch)
         target_traj = torch.cat(
             (all_targets["target_positions"], all_targets["target_yaws"]), dim=-1)
         pred_loss = trajectory_loss(
@@ -388,7 +387,7 @@ class AgentAwareRasterizedModel(nn.Module):
         preds = TensorUtils.clone(pred_batch["predictions"])
         # preds["positions"][:, 1:] = preds["positions"][:, 1:].detach()
         # preds["yaws"][:, 1:] = preds["yaws"][:, 1:].detach()
-        pred_edges = L5Utils.get_edges_from_batch(
+        pred_edges = batch_utils().get_edges_from_batch(
             data_batch=data_batch,
             all_predictions=preds
         )

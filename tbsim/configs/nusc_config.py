@@ -42,7 +42,7 @@ class NuscEnvConfig(EnvConfig):
     def __init__(self):
         super(NuscEnvConfig, self).__init__()
 
-        self.name = "nusc_avdata"
+        self.name = "avdata_nusc"
 
         # raster image size [pixels]
         self.rasterizer.raster_size = 224

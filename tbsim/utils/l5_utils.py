@@ -564,7 +564,8 @@ def generate_edges(
             edges[et] = torch.cat(v, dim=1)
     return edges
 
-def gen_ego_edges(ego_trajectories,agent_trajectories,ego_extents, agent_extents, raw_types):
+
+def gen_ego_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types):
     """generate edges between ego trajectory samples and agent trajectories
 
     Args:
@@ -594,6 +595,7 @@ def gen_ego_edges(ego_trajectories,agent_trajectories,ego_extents, agent_extents
     edges[...,8:] = agent_extents.reshape(B,1,A,1,2).repeat(1,N,1,T,1)
     type_mask = {"VV":veh_mask,"VP":ped_mask}
     return edges,type_mask
+
 
 def gen_EC_edges(ego_trajectories,agent_trajectories,ego_extents, agent_extents, raw_types):
     """generate edges between ego trajectory samples and agent trajectories

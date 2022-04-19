@@ -12,14 +12,21 @@ import tbsim.utils.train_utils as TrainUtils
 from tbsim.envs.env_l5kit import EnvL5KitSimulation
 from tbsim.utils.env_utils import RolloutCallback
 from tbsim.configs.registry import get_registered_experiment_config
-from tbsim.utils.config_utils import get_experiment_config_from_file
 from tbsim.datasets.factory import datamodule_factory
 from tbsim.utils.config_utils import get_experiment_config_from_file
+from tbsim.utils.batch_utils import set_global_batch_type
 from tbsim.algos.factory import algo_factory
 
 
 def main(cfg, auto_remove_exp_dir=False, debug=False):
     pl.seed_everything(cfg.seed)
+
+    if cfg.env.name.startswith("l5_"):
+        set_global_batch_type("l5kit")
+    elif cfg.env.name.startswith("avdata_"):
+        set_global_batch_type("avdata")
+    else:
+        raise NotImplementedError("Env {} is not supported".format(cfg.env.name))
 
     print("\n============= New Training Run with Config =============")
     print(cfg)

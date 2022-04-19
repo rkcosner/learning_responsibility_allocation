@@ -8,7 +8,7 @@ import pytorch_lightning as pl
 
 from tbsim.models.learned_metrics import PermuteEBM
 import tbsim.utils.tensor_utils as TensorUtils
-
+from tbsim.utils.batch_utils import batch_utils
 
 
 class EBMMetric(pl.LightningModule):
@@ -61,6 +61,7 @@ class EBMMetric(pl.LightningModule):
             info (dict): dictionary of relevant inputs, outputs, and losses
                 that might be relevant for logging
         """
+        batch = batch_utils().parse_batch(batch)
         pout = self.nets["ebm"](batch)
         losses = self.nets["ebm"].compute_losses(pout, batch)
         total_loss = 0.0
@@ -82,6 +83,7 @@ class EBMMetric(pl.LightningModule):
         }
 
     def validation_step(self, batch, batch_idx):
+        batch = batch_utils().parse_batch(batch)
         pout = self.nets["ebm"](batch)
         losses = TensorUtils.detach(self.nets["ebm"].compute_losses(pout, batch))
         metrics = self._compute_metrics(pout, batch)

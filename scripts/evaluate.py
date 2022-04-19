@@ -24,6 +24,7 @@ from tbsim.algos.l5kit_algos import (
     L5ECTrafficModel
 )
 from tbsim.algos.metric_algos import EBMMetric
+from tbsim.utils.batch_utils import set_global_batch_type, batch_utils
 from tbsim.algos.multiagent_algos import MATrafficModel
 from tbsim.configs.eval_configs import EvaluationConfig
 from tbsim.configs.registry import get_registered_experiment_config
@@ -33,8 +34,6 @@ from tbsim.utils.config_utils import translate_l5kit_cfg, get_experiment_config_
 from tbsim.utils.env_utils import rollout_episodes
 import tbsim.envs.env_metrics as EnvMetrics
 from tbsim.policies.hardcoded import ReplayPolicy, GTPolicy, EC_sampling_controller
-import tbsim.utils.l5_utils as L5Utils
-import tbsim.utils.avdata_utils as AVUtils
 from avdata import AgentType, UnifiedDataset
 from tbsim.configs.base import ExperimentConfig
 
@@ -68,12 +67,7 @@ class PolicyComposer(object):
         self._exp_config = None
 
     def get_modality_shapes(self, exp_cfg: ExperimentConfig):
-        if self.eval_config.env == "nusc":
-            return AVUtils.get_modality_shapes(exp_cfg)
-        elif self.eval_config.env == "l5kit":
-            return L5Utils.get_modality_shapes(exp_cfg)
-        else:
-            raise NotImplementedError("{} is not a valid env".format(self.eval_config.env))
+        return batch_utils().get_modality_shapes(exp_cfg)
 
     def get_policy(self):
         raise NotImplementedError
@@ -354,7 +348,6 @@ def create_env_l5kit(
     eval_zarr = ChunkedDataset(dm.require(exp_cfg.train.dataset_valid_key)).open()
 
     env_dataset = EgoDatasetMixed(l5_config, eval_zarr, vectorizer, rasterizer)
-    modality_shapes = L5Utils.get_modality_shapes(exp_cfg)
 
     l5_config = deepcopy(l5_config)
     l5_config["raster_params"]["raster_size"] = (1000, 1000)
@@ -370,13 +363,14 @@ def create_env_l5kit(
 
     metrics = dict()
     if compute_metrics:
-        ckpt_path, cfg_path = get_checkpoint("2761440", "69999_")
-        metric_cfg = get_experiment_config_from_file(cfg_path, locked=True)
-        metric_algo = EBMMetric.load_from_checkpoint(
-            checkpoint_path=ckpt_path,
-            algo_config=metric_cfg.algo,
-            modality_shapes=modality_shapes
-        ).eval().to(device)
+        # modality_shapes = get_batch_utils().get_modality_shapes(exp_cfg)
+        # ckpt_path, cfg_path = get_checkpoint("2761440", "69999_")
+        # metric_cfg = get_experiment_config_from_file(cfg_path, locked=True)
+        # metric_algo = EBMMetric.load_from_checkpoint(
+        #     checkpoint_path=ckpt_path,
+        #     algo_config=metric_cfg.algo,
+        #     modality_shapes=modality_shapes
+        # ).eval().to(device)
 
         metrics = dict(
             all_off_road_rate=EnvMetrics.OffRoadRate(),
@@ -475,8 +469,10 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
     # create env
     if eval_cfg.env == "nusc":
         env_func = create_env_nusc
+        set_global_batch_type("avdata")
     elif eval_cfg.env == 'l5kit':
         env_func = create_env_l5kit
+        set_global_batch_type("l5kit")
     else:
         raise NotImplementedError("{} is not a valid env".format(eval_cfg.env))
 

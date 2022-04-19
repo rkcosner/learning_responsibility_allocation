@@ -3,7 +3,7 @@ from torch import optim as optim
 
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim import dynamics as dynamics
-from tbsim.utils import l5_utils as L5Utils
+from tbsim.utils.batch_utils import batch_utils
 from tbsim.utils.geometry_utils import transform_points_tensor, calc_distance_map
 from tbsim.utils.l5_utils import get_last_available_index
 from tbsim.utils.loss_utils import goal_reaching_loss, trajectory_loss, collision_loss
@@ -169,7 +169,7 @@ def optimize_trajectories(
             ) * traj_loss_weight
             if coll_loss_weight > 0:
                 assert data_batch is not None
-                coll_edges = L5Utils.get_edges_from_batch(
+                coll_edges = batch_utils().get_edges_from_batch(
                     data_batch,
                     ego_predictions=dict(positions=pos, yaws=yaw)
                 )

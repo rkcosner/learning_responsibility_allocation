@@ -8,7 +8,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import tbsim.utils.tensor_utils as TensorUtils
-import tbsim.utils.l5_utils as L5Utils
+from tbsim.utils.batch_utils import batch_utils
 from tbsim.utils.geometry_utils import (
     VEH_VEH_collision,
     VEH_PED_collision,
@@ -318,7 +318,7 @@ def goal_reaching_loss(predictions, targets, availabilities, weights_scaling=Non
     """
     # compute loss mask by finding the last available target
     num_frames = availabilities.shape[-1]
-    last_inds = L5Utils.get_last_available_index(availabilities)  # [B, (A)]
+    last_inds = batch_utils().get_last_available_index(availabilities)  # [B, (A)]
     goal_mask = TensorUtils.to_one_hot(last_inds, num_class=num_frames)  # [B, (A), T] with the last frame set to 1
     # filter out samples that do not have available frames
     available_samples_mask = availabilities.sum(-1) > 0  # [B, (A)]
@@ -468,7 +468,7 @@ def goal_reaching_loss(
     """
     # compute loss mask by finding the last available target
     num_frames = availabilities.shape[-1]
-    last_inds = L5Utils.get_last_available_index(availabilities)  # [B, (A)]
+    last_inds = batch_utils().get_last_available_index(availabilities)  # [B, (A)]
     goal_mask = TensorUtils.to_one_hot(
         last_inds, num_class=num_frames
     )  # [B, (A), T] with the last frame set to 1
