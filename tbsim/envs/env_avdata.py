@@ -264,7 +264,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                     next_state[2] = curr_yaw + action["yaws"][idx, action_index, 0]
                 scene_action[agent.name] = next_state
                 idx += 1
-            scene.step(scene_action)
+            scene.step(scene_action, return_obs=False)
 
         self._cached_observation = None
 

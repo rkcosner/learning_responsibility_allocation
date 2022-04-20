@@ -12,7 +12,6 @@ import torch
 
 from l5kit.data import LocalDataManager, ChunkedDataset
 from l5kit.rasterization import build_rasterizer
-from avdata.augmentation.low_vel_yaw_correction import LowSpeedYawCorrection
 from avdata import AgentType, UnifiedDataset
 
 from tbsim.l5kit.vectorizer import build_vectorizer
@@ -427,8 +426,6 @@ def create_env_nusc(
     history_sec = data_cfg.history_num_frames * data_cfg.step_time
     neighbor_distance = data_cfg.max_agents_distance
 
-    low_speed_yaw = LowSpeedYawCorrection(speed_threshold=data_cfg.yaw_correction_speed)
-
     kwargs = dict(
         desired_data=["nusc-val"],
         future_sec=(future_sec, future_sec),
@@ -446,7 +443,6 @@ def create_env_nusc(
             "return_rgb": False,
             "offset_frac_xy": data_cfg.raster_center
         },
-        augmentations=[low_speed_yaw],
         num_workers=os.cpu_count(),
         desired_dt=data_cfg.step_time
     )

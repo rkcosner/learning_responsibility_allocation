@@ -7,7 +7,6 @@ from torch.utils.data import DataLoader
 from tbsim.configs.base import TrainConfig
 
 from avdata import AgentBatch, AgentType, UnifiedDataset
-from avdata.augmentation.low_vel_yaw_correction import LowSpeedYawCorrection
 
 
 class UnifiedDataModule(pl.LightningDataModule):
@@ -32,7 +31,6 @@ class UnifiedDataModule(pl.LightningDataModule):
         future_sec = data_cfg.future_num_frames * data_cfg.step_time
         history_sec = data_cfg.history_num_frames * data_cfg.step_time
         neighbor_distance = data_cfg.max_agents_distance
-        low_speed_yaw = LowSpeedYawCorrection(speed_threshold=data_cfg.yaw_correction_speed)
 
         kwargs = dict(
             desired_data=[data_cfg.avdata_source_train],
@@ -51,7 +49,6 @@ class UnifiedDataModule(pl.LightningDataModule):
                 "return_rgb": False,
                 "offset_frac_xy": data_cfg.raster_center
             },
-            augmentations=[low_speed_yaw],
             verbose=False,
             num_workers=os.cpu_count(),
         )
