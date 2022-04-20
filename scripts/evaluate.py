@@ -503,7 +503,7 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
         policy = Pos2YawWrapper(
             policy,
             dt=exp_config.algo.step_time,
-            yaw_corection_speed=eval_cfg.policy.yaw_correction_speed
+            yaw_correction_speed=eval_cfg.policy.yaw_correction_speed
         )
 
     if eval_cfg.env == "nusc":
