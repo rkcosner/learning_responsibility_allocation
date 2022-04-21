@@ -833,14 +833,15 @@ class RasterizedTreeVAEModel(nn.Module):
                 else:
                     current_states = outs["x_recons"]["terminal_state"]
                     # current_states = TensorUtils.reshape_dimensions_single(current_states,0,2,batch_shape)
-                decoder_kwargs["current_states"] = current_states.reshape(-1,current_states.shape[-1]).tile(self.vae.K,1)
+                repeats = [1]*(t+1)+[self.vae.K]+[1]
+                decoder_kwargs["current_states"] = current_states.unsqueeze(-2).repeat(*repeats).reshape(-1,current_states.shape[-1])
             if t>0:
                 if goal is not None:
                     goal = TensorUtils.expand_at_single(goal.unsqueeze(-2),self.vae.K,-2)
                 curr_map_feat = TensorUtils.expand_at_single(curr_map_feat.unsqueeze(-2),self.vae.K,-2).contiguous()
                 input_seq = outs["controls"]
                 curr_map_feat = self.FeatureRoller(curr_map_feat.reshape(-1,*curr_map_feat.shape[-1:]),input_seq.reshape(-1,*input_seq.shape[-2:]))
-
+            
             condition_inputs = OrderedDict(map_feature=curr_map_feat.reshape(-1,curr_map_feat.shape[-1]), goal=goal.reshape(-1,goal.shape[-1]))
             if not sample:
                 GT_traj = trajectories[...,t*H:(t+1)*H,:]
@@ -943,6 +944,8 @@ class RasterizedTreeVAEModel(nn.Module):
         total_horizon=self.stage*self.num_frames_per_stage
         target_traj = target_traj[...,:total_horizon,:]
         prob = pred_batch["q"]
+        import pdb
+        pdb.set_trace()
         if self.recon_loss_type=="NLL":
             assert "logvar" in pred_batch
             bs, M, T, D = pred_batch["trajectories"].shape
