@@ -1,4 +1,5 @@
 import collections
+from logging import exception, raiseExceptions
 import numpy as np
 import torch
 from tbsim.utils.tensor_utils import round_2pi
@@ -57,10 +58,24 @@ def get_upright_box(pos, extent):
 
 def batch_nd_transform_points(points, Mat):
     ndim = Mat.shape[-1] - 1
-    Mat = torch.transpose(Mat, -1, -2)
+    Mat = Mat.transpose(-1, -2)
     return (points.unsqueeze(-2) @ Mat[..., :ndim, :ndim]).squeeze(-2) + Mat[
         ..., -1:, :ndim
     ].squeeze(-2)
+
+def batch_nd_transform_points_np(points, Mat):
+    ndim = Mat.shape[-1] - 1
+    batch = list(range(Mat.ndim-2))+[Mat.ndim-1]+[Mat.ndim-2]
+    Mat = np.transpose(Mat,batch)
+    if points.ndim==Mat.ndim-1:
+        return (points[...,np.newaxis,:] @ Mat[..., :ndim, :ndim]).squeeze(-2) + Mat[
+            ..., -1:, :ndim
+        ].squeeze(-2)
+    elif points.ndim==Mat.ndim:
+        return ((points[...,np.newaxis,:] @ Mat[...,np.newaxis, :ndim, :ndim]) + Mat[
+            ...,np.newaxis, -1:, :ndim]).squeeze(-2)
+    else:
+        raise Exception("wrong shape")
 
 
 def transform_points_tensor(
