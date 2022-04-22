@@ -98,20 +98,18 @@ class GTPolicy(Policy):
     def eval(self):
         pass
 
-    @staticmethod
-    def get_action(obs, **kwargs) -> Tuple[Action, Dict]:
+    def get_action(self, obs, **kwargs) -> Tuple[Action, Dict]:
         action = Action(
-            positions=obs["target_positions"],
-            yaws=obs["target_yaws"]
+            positions=TensorUtils.to_torch(obs["target_positions"], device=self.device),
+            yaws=TensorUtils.to_torch(obs["target_yaws"], device=self.device),
         )
         return action, {}
 
-    @staticmethod
-    def get_plan(obs, **kwargs) -> Tuple[Plan, Dict]:
+    def get_plan(self, obs, **kwargs) -> Tuple[Plan, Dict]:
         plan = Plan(
-            positions=obs["target_positions"],
-            yaws=obs["target_yaws"],
-            availabilities=obs["target_availabilities"],
+            positions=TensorUtils.to_torch(obs["target_positions"], device=self.device),
+            yaws=TensorUtils.to_torch(obs["target_yaws"], device=self.device),
+            availabilities=TensorUtils.to_torch(obs["target_availabilities"], self.device),
         )
         return plan, {}
 
