@@ -385,12 +385,14 @@ def create_env_l5kit(
             algo_config=controller_cfg.algo,
             modality_shapes=modality_shapes
         ).to(device).eval()
-
+        perturbations = None
+        gridinfo = {"offset":np.zeros(2),"step":0.5*np.ones(2)}
         metrics = dict(
             all_off_road_rate=EnvMetrics.OffRoadRate(),
             all_collision_rate=EnvMetrics.CollisionRate(),
+            all_occupancy = EnvMetrics.Occupancydistr(gridinfo,sigma=2.0)
             # all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations),
-            all_CVAE_score = EnvMetrics.LearnedCVAENLL(metric_algo=CVAE_model, perturbations=perturbations)
+            # all_CVAE_score = EnvMetrics.LearnedCVAENLL(metric_algo=CVAE_model, perturbations=perturbations)
         )
 
     env = EnvL5KitSimulation(
