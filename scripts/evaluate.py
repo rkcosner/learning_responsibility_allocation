@@ -372,26 +372,12 @@ def create_env_l5kit(
         #     modality_shapes=modality_shapes
         # ).eval().to(device)
 
-        ckpt_path, config_path = get_checkpoint(
-            ngc_job_id="2780940",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
-            ckpt_key="iter43000",
-            ckpt_root_dir=eval_cfg.ckpt_dir
-        )
-        controller_cfg = get_experiment_config_from_file(config_path)
-
-        CVAE_model = L5DiscreteVAETrafficModel.load_from_checkpoint(
-            ckpt_path,
-            algo_config=controller_cfg.algo,
-            modality_shapes=modality_shapes
-        ).to(device).eval()
-        perturbations = None
         gridinfo = {"offset":np.zeros(2),"step":0.5*np.ones(2)}
         metrics = dict(
             all_off_road_rate=EnvMetrics.OffRoadRate(),
             all_collision_rate=EnvMetrics.CollisionRate(),
             all_occupancy = EnvMetrics.Occupancydistr(gridinfo,sigma=2.0)
             # all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations),
-            # all_CVAE_score = EnvMetrics.LearnedCVAENLL(metric_algo=CVAE_model, perturbations=perturbations)
         )
 
     env = EnvL5KitSimulation(
@@ -521,7 +507,24 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
         compute_metrics=compute_metrics,
         seed=eval_cfg.seed
     )
-
+    if True:
+        env_delayed_start = deepcopy(env)
+        ckpt_path, config_path = get_checkpoint(
+            ngc_job_id="2780940",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
+            ckpt_key="iter43000",
+            ckpt_root_dir=eval_cfg.ckpt_dir
+        )
+        modality_shapes = batch_utils().get_modality_shapes(exp_config)
+        controller_cfg = get_experiment_config_from_file(config_path)
+        CVAE_model = L5DiscreteVAETrafficModel.load_from_checkpoint(
+                ckpt_path,
+                algo_config=controller_cfg.algo,
+                modality_shapes=modality_shapes
+            ).to(device).eval()
+        perturbations = None
+        env_delayed_start._metrics = dict(all_CVAE_score = EnvMetrics.LearnedCVAENLL(metric_algo=CVAE_model, perturbations=perturbations))
+    else:
+        env_delayed_start = None
     # eval loop
     obs_to_torch = eval_cfg.eval_class not in ["GroundTruth", "ReplayAction"]
 
@@ -532,7 +535,6 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
     while scene_i < eval_cfg.num_scenes_to_evaluate:
         scene_indices = eval_scenes[scene_i: scene_i + eval_cfg.num_scenes_per_batch]
         scene_i += eval_cfg.num_scenes_per_batch
-
         stats, info, renderings = rollout_episodes(
             env,
             rollout_policy,
@@ -543,6 +545,37 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
             scene_indices=scene_indices,
             obs_to_torch=obs_to_torch
         )
+        if env_delayed_start is not None:
+            Ts = np.random.choice(np.arange(eval_cfg.skip_first_n,200-exp_config.algo.future_num_frames-1),3,replace=False)
+            metric_trials = dict()
+            for T in Ts:
+                stats_trial_i, _, _ = rollout_episodes(
+                    env_delayed_start,
+                    rollout_policy,
+                    num_episodes=1,
+                    n_step_action=eval_cfg.n_step_action,
+                    render=False,
+                    skip_first_n=T,
+                    scene_indices=scene_indices,
+                    obs_to_torch=obs_to_torch,
+                    horizon=T+exp_config.algo.future_num_frames
+                )
+                for met in stats_trial_i:
+                    if met not in ["ego_ADE", "ego_FDE"]:
+                        if met not in metric_trials:
+                            metric_trials[met]=[]
+
+                        metric_trials[met].append(stats_trial_i[met])
+            for met in metric_trials:
+                metric_trials[met] = np.stack(metric_trials[met],0).mean(0)
+            stats.update(metric_trials)
+                
+
+                
+        
+
+
+
 
         print(info["scene_index"])
         print(stats)

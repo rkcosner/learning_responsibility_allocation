@@ -97,6 +97,7 @@ def rollout_episodes(
     device=None,
     obs_to_torch=True,
     adjustment_plan=None,
+    horizon = None,
 ):
     """
     Rollout an environment for a number of episodes
@@ -108,6 +109,8 @@ def rollout_episodes(
         n_step_action (int): number of steps to take between querying models
         render (bool): if True, return a sequence of rendered frames
         scene_indices (tuple, list): (Optional) scenes indices to rollout with
+        adjustment_plan (dict): (Optional) initialization condition
+        horizon (int): (Optional) override horizon of the simulation
 
     Returns:
         stats (dict): A dictionary of rollout stats for each episode (metrics, rewards, etc.)
@@ -146,6 +149,7 @@ def rollout_episodes(
                 if adjustment_plan is not None:
                     set_initial_states(env, obs, adjustment_plan ,device)
                 # env.step(env.get_gt_action(obs), num_steps_to_take=1, render=False)
+                counter += 1
             else:
                 with timers.timed("network"):
                     action = policy.get_action(obs_torch, step_index=counter)
@@ -155,12 +159,16 @@ def rollout_episodes(
                     )  # List of [num_scene, h, w, 3]
                 if render:
                     frames.extend(ims)
+                counter += n_step_action
             timers.toc("step")
             print(timers)
 
             done = env.is_done()
-            counter += 1
+            
+            if horizon is not None and counter>=horizon:
+                break
         metrics = env.get_metrics()
+
         for k, v in metrics.items():
             if k not in stats:
                 stats[k] = []

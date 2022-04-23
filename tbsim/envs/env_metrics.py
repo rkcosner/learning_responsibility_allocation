@@ -372,15 +372,11 @@ class LearnedCVAENLL(EnvMetrics):
         state_info = dict(state_info)
         state_info["image"] = (state_info["image"] * 255.).astype(np.uint8)
         self.state_buffer.append(state_info)
-        while len(self.state_buffer) > self.traj_len + 1:
-            self.state_buffer.pop(0)
-        if len(self.state_buffer) == self.traj_len + 1:
-            step_metrics = self.compute_per_step(self.state_buffer, all_scene_index)
-            self._per_step.append(step_metrics)
+        
 
         self.total_steps += 1
 
-    def compute_per_step(self, state_buffer, all_scene_index):
+    def compute_metric(self, state_buffer, all_scene_index):
         assert len(state_buffer) == self.traj_len + 1
         appearance_idx = obtain_active_agent_index(state_buffer)
         agent_selected = np.where((appearance_idx>=0).all(axis=1))[0]
@@ -441,22 +437,12 @@ class LearnedCVAENLL(EnvMetrics):
         return step_metrics
 
     def get_episode_metrics(self):
-        ep_metrics = dict()
+        assert len(self.state_buffer) >= self.traj_len+1
+        all_scene_index = np.unique(self.state_buffer[-self.traj_len-1]["scene_index"])
+        ep_metrics = self.compute_metric(self.state_buffer[-self.traj_len-1:], all_scene_index)
 
-        for step_metrics in self._per_step:
-            for k in step_metrics:
-                if k not in ep_metrics:
-                    ep_metrics[k] = []
-                ep_metrics[k].append(step_metrics[k])
 
-        ep_metrics_agg = dict()
-        for k in ep_metrics:
-            met = np.stack(ep_metrics[k], axis=1)  # [num_scene, T, ...]
-            ep_metrics_agg[k] = np.mean(met, axis=1)
-            for met_horizon in [10, 50, 100, 150]:
-                if met.shape[1] >= met_horizon:
-                    ep_metrics_agg[k + "@{}".format(met_horizon)] = np.mean(met[:, :met_horizon], axis=1)
-        return ep_metrics_agg
+        return ep_metrics
 
 def obtain_active_agent_index(state_buffer):
     agents_indices = dict()
@@ -560,8 +546,7 @@ class Occupancydistr(EnvMetrics):
             
             self.og[scene_idx].update(coords[indices],state_info["raster_from_world"][indices],drivable_area[indices],threshold=0.1,weight=1)
     def get_episode_metrics(self):
-        import pdb
-        pdb.set_trace()
+        return np.zeros(len(self.og))
 
 
 if __name__=="__main__":
