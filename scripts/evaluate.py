@@ -374,9 +374,10 @@ def create_env_l5kit(
 
         gridinfo = {"offset":np.zeros(2),"step":0.5*np.ones(2)}
         metrics = dict(
-            all_off_road_rate=EnvMetrics.OffRoadRate(),
-            all_collision_rate=EnvMetrics.CollisionRate(),
-            all_occupancy = EnvMetrics.Occupancydistr(gridinfo,sigma=2.0)
+            # all_off_road_rate=EnvMetrics.OffRoadRate(),
+            # all_collision_rate=EnvMetrics.CollisionRate(),
+            # all_occupancy = EnvMetrics.Occupancydistr(gridinfo,sigma=2.0)
+            ego_occupancy_diversity = EnvMetrics.OccupancyDiversity(gridinfo,sigma=2.0)
             # all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations),
         )
 
@@ -538,12 +539,12 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
         stats, info, renderings = rollout_episodes(
             env,
             rollout_policy,
-            num_episodes=1,
+            num_episodes=3,
             n_step_action=eval_cfg.n_step_action,
             render=render_to_video,
             skip_first_n=eval_cfg.skip_first_n,
             scene_indices=scene_indices,
-            obs_to_torch=obs_to_torch
+            obs_to_torch=obs_to_torch,
         )
         if env_delayed_start is not None:
             Ts = np.random.choice(np.arange(eval_cfg.skip_first_n,200-exp_config.algo.future_num_frames-1),3,replace=False)

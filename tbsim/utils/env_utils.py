@@ -98,6 +98,7 @@ def rollout_episodes(
     obs_to_torch=True,
     adjustment_plan=None,
     horizon = None,
+    seeds = None,
 ):
     """
     Rollout an environment for a number of episodes
@@ -122,10 +123,14 @@ def rollout_episodes(
     renderings = []
     is_batched_env = isinstance(env, BatchedEnv)
     timers = Timers()
-
+    if seeds is not None:
+        assert len(seeds)==num_episodes
     for ei in range(num_episodes):
         env.reset(scene_indices=scene_indices)
-
+        if seeds is None:
+            env.update_random_seed(ei)
+        else:
+            env.update_random_seed(seeds[ei])
         done = env.is_done()
         counter = 0
         frames = []
@@ -192,7 +197,9 @@ def rollout_episodes(
                 # [step, scene] -> [scene, step]
                 frames = frames.transpose((1, 0, 2, 3, 4))
             renderings.append(frames)
-
+    if num_episodes>1:
+        multi_episodes_metrics = env.get_metrics(multi_episodes=True)
+        stats.update(multi_episodes_metrics)
     return stats, info, renderings
 
 

@@ -31,7 +31,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             prediction_only=False,
             metrics=None,
             skimp_rollout=False,
-            renderer=None
+            renderer=None,
+            start_frame_index = None,
     ):
         """
         A gym-like interface for simulating traffic behaviors (both ego and other agents) with L5Kit's SimulationDataset
@@ -42,12 +43,14 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             dataset (EgoDataset): an EgoDataset instance that contains scene data for simulation
             prediction_only (bool): if set to True, ignore the input action command and only record the predictions
         """
+        if start_frame_index is None:
+            start_frame_index = env_config.simulation.start_frame_index
         self._sim_cfg = SimulationConfig(
             disable_new_agents=True,
             distance_th_far=env_config.simulation.distance_th_far,
             distance_th_close=env_config.simulation.distance_th_close,
             num_simulation_steps=env_config.simulation.num_simulation_steps,
-            start_frame_index=env_config.simulation.start_frame_index,
+            start_frame_index=start_frame_index,
             show_info=True,
         )
 
@@ -83,6 +86,9 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         self._metrics = dict() if metrics is None else metrics
         self._skimp = skimp_rollout
+
+    def update_random_seed(self,seed):
+        self._npr = np.random.RandomState(seed=seed)
 
     def reset(self, scene_indices: List = None):
         """
@@ -200,39 +206,53 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
     def scene_to_ego_index(self):
         return np.split(np.arange(self.num_instances), self.num_instances)
 
-    def get_metrics(self):
+    def get_metrics(self,multi_episodes=False):
         """
         Get metrics of the current episode (may compute before is_done==True)
 
         Returns: a dictionary of metrics, each containing an array of measurement same length as the number of scenes
         """
         # TODO: phase out the dependencies on l5kit Metrics
-        met = DisplacementErrorL2Metric()
-        sim_states = self._get_l5_sim_states()
-        ego_ade = np.zeros(self._num_scenes)
-        ego_fde = np.zeros(self._num_scenes)
-        for si, scene_states in enumerate(sim_states):
-            err = TensorUtils.to_numpy(met.compute(scene_states))
-            ego_ade[si] = np.mean(err)
-            ego_fde[si] = err[self._frame_index]
+        
 
-        # TODO: compute agent metrics
+        if multi_episodes:
+            metrics = dict()
+            for met_name, met in self._metrics.items():
+                met_vals = met.get_multi_episode_metrics()
+                if isinstance(met_vals, dict):
+                    for k, v in met_vals.items():
+                        metrics[met_name + "_" + k] = v
+                elif met_vals is not None:
+                    metrics[met_name] = met_vals
+        else:
+            met = DisplacementErrorL2Metric()
+            sim_states = self._get_l5_sim_states()
+            ego_ade = np.zeros(self._num_scenes)
+            ego_fde = np.zeros(self._num_scenes)
+            for si, scene_states in enumerate(sim_states):
+                err = TensorUtils.to_numpy(met.compute(scene_states))
+                ego_ade[si] = np.mean(err)
+                ego_fde[si] = err[self._frame_index]
 
-        metrics = {
-            "ego_ADE": ego_ade,
-            "ego_FDE": ego_fde,
-        }
+            # TODO: compute agent metrics
 
-        # aggregate per-step metrics
-        self._add_per_step_metrics(self.get_observation())
-        for met_name, met in self._metrics.items():
-            assert len(met) == self._frame_index + 1, len(met)
-            met_vals = met.get_episode_metrics()
-            if isinstance(met_vals, dict):
-                for k, v in met_vals.items():
-                    metrics[met_name + "_" + k] = v
-            else:
-                metrics[met_name] = met_vals
+            metrics = {
+                "ego_ADE": ego_ade,
+                "ego_FDE": ego_fde,
+            }
+            # aggregate per-step metrics
+            self._add_per_step_metrics(self.get_observation())
+            for met_name, met in self._metrics.items():
+                
+                assert len(met) == self._frame_index + 1, len(met)
+                met_vals = met.get_episode_metrics()
+                if isinstance(met_vals, dict):
+                    for k, v in met_vals.items():
+                        metrics[met_name + "_" + k] = v
+                elif met_vals is not None:
+                    metrics[met_name] = met_vals
+            
+                
         return metrics
 
     def get_observation(self):
@@ -380,6 +400,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
     def _step(self, step_actions: RolloutAction):
         obs = self.get_observation()
         # record metrics
+        
         self._add_per_step_metrics(obs)
 
         # record observations and actions
