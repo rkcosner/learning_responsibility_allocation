@@ -89,6 +89,10 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
     def update_random_seed(self,seed):
         self._npr = np.random.RandomState(seed=seed)
+    
+    def reset_multi_episodes_metrics(self):
+        for v in self._metrics.values():
+            v.multi_episode_reset()
 
     def reset(self, scene_indices: List = None):
         """

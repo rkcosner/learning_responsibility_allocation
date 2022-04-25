@@ -200,6 +200,7 @@ def rollout_episodes(
     if num_episodes>1:
         multi_episodes_metrics = env.get_metrics(multi_episodes=True)
         stats.update(multi_episodes_metrics)
+        env.reset_multi_episodes_metrics()
     return stats, info, renderings
 
 

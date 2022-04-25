@@ -372,7 +372,7 @@ def create_env_l5kit(
         #     modality_shapes=modality_shapes
         # ).eval().to(device)
 
-        gridinfo = {"offset":np.zeros(2),"step":0.5*np.ones(2)}
+        gridinfo = {"offset":np.zeros(2),"step":2.0*np.ones(2)}
         metrics = dict(
             # all_off_road_rate=EnvMetrics.OffRoadRate(),
             # all_collision_rate=EnvMetrics.CollisionRate(),
@@ -508,7 +508,7 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
         compute_metrics=compute_metrics,
         seed=eval_cfg.seed
     )
-    if True:
+    if False:
         env_delayed_start = deepcopy(env)
         ckpt_path, config_path = get_checkpoint(
             ngc_job_id="2780940",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
@@ -570,12 +570,6 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
             for met in metric_trials:
                 metric_trials[met] = np.stack(metric_trials[met],0).mean(0)
             stats.update(metric_trials)
-                
-
-                
-        
-
-
 
 
         print(info["scene_index"])

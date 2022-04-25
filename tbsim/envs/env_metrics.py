@@ -35,6 +35,9 @@ class EnvMetrics(abc.ABC):
 
     def get_multi_episode_metrics(self) -> Dict[str, np.ndarray]:
         pass
+    
+    def multi_episode_reset(self):
+        pass
 
     def __len__(self):
         return len(self._per_step)
@@ -571,6 +574,11 @@ class OccupancyDiversity(Occupancymet):
         self._per_step = []
         self._per_step_mask = []
         pass
+    
+    def multi_episode_reset(self):
+        self.episode_index = 0
+        self.og.clear()
+
     def add_step(self, state_info: dict, all_scene_index: np.ndarray):
         self._per_step.append(0)
         self._per_step_mask.append(1)
@@ -606,6 +614,7 @@ class OccupancyDiversity(Occupancymet):
                     wasser_dis = np.append(wasser_dis,emd(distr_i, distr_j, distance_matrix))
                 distr.append(distr_i)
             result.append(wasser_dis.mean())
+            print("Wasserstein metric:",wasser_dis)
         return np.array(result)
 
             
