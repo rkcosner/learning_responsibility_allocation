@@ -125,6 +125,32 @@ def get_spatial_goal_supervision(data_batch):
     }
 
 
+def get_spatial_trajectory_supervision(data_batch):
+    b, _, h, w = data_batch["image"].shape  # [B, C, H, W]
+    t = data_batch["target_positions"].shape[-2]
+    # create spatial supervisions
+    pos_raster = transform_points_tensor(
+        data_batch["target_positions"],
+        data_batch["raster_from_agent"].float()
+    )  # [B, T, 2]
+    # make sure all pixels are within the raster image
+    pos_raster[..., 0] = pos_raster[..., 0].clip(0, w - 1e-5)
+    pos_raster[..., 1] = pos_raster[..., 1].clip(0, h - 1e-5)
+
+    pos_pixel = torch.floor(pos_raster).float()  # round down pixels
+
+    # compute flattened pixel location
+    pos_pixel_flat = pos_pixel[..., 1] * w + pos_pixel[..., 0]
+    raster_sup_flat = TensorUtils.to_one_hot(
+        pos_pixel_flat.long(), num_class=h * w)
+    raster_sup = raster_sup_flat.reshape(b, t, h, w)
+    return {
+        "traj_spatial_map": raster_sup,  # [B, T, H, W]
+        "traj_position_pixel": pos_pixel,  # [B, T, 2]
+        "traj_position_pixel_flat": pos_pixel_flat  # [B, T]
+    }
+
+
 def optimize_trajectories(
         init_u,
         init_x,

@@ -279,6 +279,14 @@ class EBMMetricConfig(L5RasterizedPlanningConfig):
         self.loss_weights.infoNCE_loss = 1.0
 
 
+class OccupancyMetricConfig(L5RasterizedPlanningConfig):
+    def __init__(self):
+        super(OccupancyMetricConfig, self).__init__()
+        self.name = "occupancy"
+        self.loss_weights.pixel_bce_loss = 0.0
+        self.loss_weights.pixel_ce_loss = 1.0
+
+
 class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(L5RasterizedVAEConfig, self).__init__()

@@ -17,7 +17,8 @@ from tbsim.configs.l5kit_config import (
     L5RasterizedVAEConfig,
     EBMMetricConfig,
     L5RasterizedGANConfig,
-    L5RasterizedDiscreteVAEConfig
+    L5RasterizedDiscreteVAEConfig,
+    OccupancyMetricConfig
 )
 
 from tbsim.configs.nusc_config import (
@@ -111,6 +112,14 @@ EXP_CONFIG_REGISTRY["l5_ebm"] = ExperimentConfig(
     algo_config=EBMMetricConfig(),
     registered_name="l5_ebm",
 )
+
+EXP_CONFIG_REGISTRY["l5_occupancy"] = ExperimentConfig(
+    train_config=L5KitMixedTrainConfig(),
+    env_config=L5KitMixedSemanticMapEnvConfig(),
+    algo_config=OccupancyMetricConfig(),
+    registered_name="l5_occupancy"
+)
+
 
 EXP_CONFIG_REGISTRY["l5_rasterized_ebm"] = ExperimentConfig(
     train_config=L5KitTrainConfig(),
