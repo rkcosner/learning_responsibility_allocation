@@ -21,6 +21,7 @@ setup(
         "wandb",
         "torch==1.10.2",
         "torchvision==0.11.3",
+        "pyemd",
         "torchtext",  # weird pytorch-lightning dependency bug
     ],
     eager_resources=["*"],
