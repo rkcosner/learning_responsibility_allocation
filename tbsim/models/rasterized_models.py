@@ -725,16 +725,28 @@ class RasterizedTreeVAEModel(nn.Module):
         self.num_frames_per_stage=algo_config.num_frames_per_stage
         if algo_config.vae.recon_loss_type=="MSE":
             algo_config.vae.decoder.Gaussian_var=False
-        traj_decoder = base_models.MLPTrajectoryDecoder(
-            feature_dim=algo_config.vae.condition_dim + goal_dim + algo_config.vae.latent_dim,
-            state_dim=trajectory_shape[-1],
-            num_steps=algo_config.num_frames_per_stage,
-            dynamics_type=algo_config.dynamics.type,
-            dynamics_kwargs=algo_config.dynamics,
-            network_kwargs=algo_config.decoder,
-            step_time=algo_config.step_time,
-            Gaussian_var=algo_config.vae.decoder.Gaussian_var
-        )
+        if algo_config.EC:
+            self.traj_decoder = base_models.MLPECTrajectoryDecoder(
+                feature_dim=algo_config.map_feature_dim + goal_dim,
+                state_dim=trajectory_shape[-1],
+                num_steps=algo_config.future_num_frames,
+                dynamics_type=algo_config.dynamics.type,
+                dynamics_kwargs=algo_config.dynamics,
+                EC_feature_dim = algo_config.EC.feature_dim,
+                network_kwargs=algo_config.decoder,
+                step_time=algo_config.step_time,
+            )
+        else:
+            traj_decoder = base_models.MLPTrajectoryDecoder(
+                feature_dim=algo_config.vae.condition_dim + goal_dim + algo_config.vae.latent_dim,
+                state_dim=trajectory_shape[-1],
+                num_steps=algo_config.num_frames_per_stage,
+                dynamics_type=algo_config.dynamics.type,
+                dynamics_kwargs=algo_config.dynamics,
+                network_kwargs=algo_config.decoder,
+                step_time=algo_config.step_time,
+                Gaussian_var=algo_config.vae.decoder.Gaussian_var
+            )
         self.recon_loss_type = algo_config.vae.recon_loss_type
         
         if algo_config.goal_conditional:
@@ -1024,13 +1036,18 @@ class RasterizedECModel(nn.Module):
         )
         trajectory_shape = (algo_config.future_num_frames, 3)
         goal_dim = 0 if not algo_config.goal_conditional else algo_config.goal_feature_dim
+        self.traj_encoder = base_models.RNNTrajectoryEncoder(
+            trajectory_dim = 3, 
+            rnn_hidden_size = algo_config.EC.RNN_hidden_size, 
+            feature_dim=algo_config.EC.feature_dim,
+            mlp_layer_dims=(64,64)
+            )
         self.traj_decoder = base_models.MLPECTrajectoryDecoder(
             feature_dim=algo_config.map_feature_dim + goal_dim,
             state_dim=trajectory_shape[-1],
             num_steps=algo_config.future_num_frames,
             dynamics_type=algo_config.dynamics.type,
             dynamics_kwargs=algo_config.dynamics,
-            EC_RNN_dim = algo_config.EC.RNN_hidden_size,
             EC_feature_dim = algo_config.EC.feature_dim,
             network_kwargs=algo_config.decoder,
             step_time=algo_config.step_time,
@@ -1043,7 +1060,6 @@ class RasterizedECModel(nn.Module):
             output_activation=nn.ReLU
         )
         
-
         self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
 
     def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
@@ -1067,7 +1083,9 @@ class RasterizedECModel(nn.Module):
             curr_states = None
 
         cond_traj = torch.cat((data_batch["all_other_agents_future_positions"],data_batch["all_other_agents_future_yaws"]),-1)
-        dec_output = self.traj_decoder.forward(inputs=input_feat, current_states=curr_states, cond_traj=cond_traj)
+        bs,Na,T,D = cond_traj.shape
+        EC_feat = self.traj_encoder(cond_traj.reshape(-1,T,D)).reshape(bs,Na,-1)
+        dec_output = self.traj_decoder.forward(inputs=input_feat, current_states=curr_states, EC_feat=EC_feat)
         
         traj = dec_output["trajectories"]
 

@@ -1,0 +1,22 @@
+Monitoring metrics val/losses_prediction_loss under alias valLoss
+wandb: Currently logged in as: chenyx (use `wandb login --relogin` to force relogin)
+wandb: Appending key for api.wandb.ai to your netrc file: /home/yuxiaoc/.netrc
+wandb: WARNING Changes to your `wandb` environment variables will be ignored because your `wandb` session has already started. For more information on how to modify your settings with `wandb.init()` arguments, please refer to https://wandb.me/wandb-init.
+wandb: Tracking run with wandb version 0.12.14
+wandb: Run data is saved locally in /home/yuxiaoc/repos/behavior-generation/wandb/run-20220420_143523-ofnvxhmp
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run test
+wandb:  View project at https://wandb.ai/chenyx/tbsim
+wandb:  View run at https://wandb.ai/chenyx/tbsim/runs/ofnvxhmp
+wandb: logging graph, to disable use `wandb.watch(log_graph=False)`
+/home/yuxiaoc/.conda/envs/tbsim/lib/python3.8/site-packages/pytorch_lightning/trainer/connectors/logger_connector/logger_connector.py:61: LightningDeprecationWarning: Setting `Trainer(flush_logs_every_n_steps=100)` is deprecated in v1.5 and will be removed in v1.7. Please configure flushing in the logger instead.
+  rank_zero_deprecation(
+Sanity Checking: 0it [00:00, ?it/s]/home/yuxiaoc/.conda/envs/tbsim/lib/python3.8/site-packages/pytorch_lightning/trainer/connectors/data_connector.py:486: PossibleUserWarning: Your `val_dataloader`'s sampler has shuffling enabled, it is strongly recommended that you turn shuffling off for val/test/predict dataloaders.
+  rank_zero_warn(
+Sanity Checking DataLoader 0:   0%|          | 0/2 [00:01<?, ?it/s]> /home/yuxiaoc/repos/behavior-generation/tbsim/models/rasterized_models.py(949)compute_losses()
+-> if self.recon_loss_type=="NLL":
+(Pdb) dict_keys(['trajectories', 'logvar', 'controls', 'predictions', 'staged_pred', 'p', 'q'])
+(Pdb) torch.Size([32, 64, 48, 3])
+(Pdb) --KeyboardInterrupt--
+(Pdb) --KeyboardInterrupt--
+(Pdb) 

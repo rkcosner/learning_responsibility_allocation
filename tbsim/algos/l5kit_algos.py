@@ -922,7 +922,6 @@ class L5ECTrafficModel(L5TrafficModel):
             self.log("train/losses_" + lk, l)
         for mk, m in metrics.items():
             self.log("train/metrics_" + mk, m)
-
         return {
             "loss": total_loss,
             "all_losses": losses,
