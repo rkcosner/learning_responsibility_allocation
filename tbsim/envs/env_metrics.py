@@ -9,8 +9,12 @@ import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.utils.batch_utils import batch_utils
 from tbsim.utils.geometry_utils import transform_points_tensor, detect_collision, CollisionType
 import tbsim.utils.metrics as Metrics
-
-
+from collections import defaultdict
+from tbsim.models.cnn_roi_encoder import obtain_lane_flag
+from torchvision.ops.roi_align import RoIAlign
+import tbsim.utils.geometry_utils as GeoUtils
+from tbsim.utils.l5_utils import get_current_states, get_drivable_region_map
+from pyemd import emd
 class EnvMetrics(abc.ABC):
     def __init__(self):
         self._per_step = None
@@ -27,6 +31,12 @@ class EnvMetrics(abc.ABC):
 
     @abc.abstractmethod
     def get_episode_metrics(self) -> Dict[str, np.ndarray]:
+        pass
+
+    def get_multi_episode_metrics(self) -> Dict[str, np.ndarray]:
+        pass
+    
+    def multi_episode_reset(self):
         pass
 
     def __len__(self):
@@ -369,15 +379,11 @@ class LearnedCVAENLL(EnvMetrics):
         state_info = dict(state_info)
         state_info["image"] = (state_info["image"] * 255.).astype(np.uint8)
         self.state_buffer.append(state_info)
-        while len(self.state_buffer) > self.traj_len + 1:
-            self.state_buffer.pop(0)
-        if len(self.state_buffer) == self.traj_len + 1:
-            step_metrics = self.compute_per_step(self.state_buffer, all_scene_index)
-            self._per_step.append(step_metrics)
+        
 
         self.total_steps += 1
 
-    def compute_per_step(self, state_buffer, all_scene_index):
+    def compute_metric(self, state_buffer, all_scene_index):
         assert len(state_buffer) == self.traj_len + 1
         appearance_idx = obtain_active_agent_index(state_buffer)
         agent_selected = np.where((appearance_idx>=0).all(axis=1))[0]
@@ -438,22 +444,12 @@ class LearnedCVAENLL(EnvMetrics):
         return step_metrics
 
     def get_episode_metrics(self):
-        ep_metrics = dict()
+        assert len(self.state_buffer) >= self.traj_len+1
+        all_scene_index = np.unique(self.state_buffer[-self.traj_len-1]["scene_index"])
+        ep_metrics = self.compute_metric(self.state_buffer[-self.traj_len-1:], all_scene_index)
 
-        for step_metrics in self._per_step:
-            for k in step_metrics:
-                if k not in ep_metrics:
-                    ep_metrics[k] = []
-                ep_metrics[k].append(step_metrics[k])
 
-        ep_metrics_agg = dict()
-        for k in ep_metrics:
-            met = np.stack(ep_metrics[k], axis=1)  # [num_scene, T, ...]
-            ep_metrics_agg[k] = np.mean(met, axis=1)
-            for met_horizon in [10, 50, 100, 150]:
-                if met.shape[1] >= met_horizon:
-                    ep_metrics_agg[k + "@{}".format(met_horizon)] = np.mean(met[:, :met_horizon], axis=1)
-        return ep_metrics_agg
+        return ep_metrics
 
 def obtain_active_agent_index(state_buffer):
     agents_indices = dict()
@@ -469,3 +465,169 @@ def obtain_active_agent_index(state_buffer):
                 appearance_idx[agents_indices[agent_idx],t] = i
 
     return appearance_idx.astype(np.int)
+
+
+class OccupancyGrid():
+    def __init__(self,gridinfo,sigma=1.0):
+        """Estimate occupancy with kernel density estimation under a Gaussian RBF kernel
+
+        Args:
+            gridinfo (dict): grid offset, grid step size
+            sigma (float): std for the RBF kernel
+        """
+        self.gridinfo = gridinfo
+        self.sigma = sigma
+        self.occupancy_grid = defaultdict(lambda:0)
+        self.lane_flag = dict()
+
+    
+    def get_neighboring_grid_points(self,coords,radius):
+        
+        x0,y0=self.gridinfo["offset"]
+        xs,ys=self.gridinfo["step"]
+        bs = coords.shape[0]
+        Nx = int(np.ceil(radius/xs))+1
+        Ny = int(np.ceil(radius/xs))+1
+        grid = np.concatenate((np.tile(np.arange(-Nx,Nx+1)[:,np.newaxis],(1,2*Ny+1))[...,np.newaxis],
+                              np.tile(np.arange(-Ny,Ny+1)[np.newaxis,:],(2*Nx+1,1))[...,np.newaxis]),-1)
+        grid = np.tile(grid[np.newaxis,...],(bs,1,1,1))
+        xi,yi = np.round((coords[:,0:1]-x0)/xs).astype(np.int), np.round((coords[:,1:]-y0)/ys).astype(np.int)
+        XYi = (grid+np.concatenate((xi,yi),-1).reshape(bs,1,1,2))
+        grid_points = self.gridinfo["step"].reshape(1,1,1,2)*XYi+self.gridinfo["offset"].reshape(1,1,1,2)
+
+        kernel_value= np.exp(-np.linalg.norm(coords[:,np.newaxis,np.newaxis]-grid_points,axis=-1)**2/2/self.sigma)
+        return grid_points.reshape(bs,-1,2),XYi.reshape(bs,-1,2),kernel_value.reshape(bs,-1)
+    def reset(self):
+        self.occupancy_grid.clear()
+    
+    def obtain_lane_flag(self,grid_points,raster_from_world,lane_map):
+        raster_points = GeoUtils.batch_nd_transform_points_np(grid_points,raster_from_world)
+        raster_points = raster_points.astype(np.int)
+        raster_points[...,0] = raster_points[...,0].clip(0,lane_map.shape[-2])
+        raster_points[...,1] = raster_points[...,1].clip(0,lane_map.shape[-1])
+        lane_flag = list()
+        
+        for k in range(raster_points.shape[0]):
+            lane_flag.append(np.array([lane_map[k,i,j] for i,j in zip(raster_points[k,:,0],raster_points[k,:,1])]))
+        lane_flag = np.stack(lane_flag,0)
+        # clear_flag = (raster_points[:,0]>=0) & (raster_points[:,0]<drivable_area_map.shape[0])& (raster_points[:,1]>=0) & (raster_points[:,1]<drivable_area_map.shape[1])
+        return lane_flag
+
+
+    def update(self,coords,raster_from_world,lane_map,threshold=0.1,weight=1):
+        assert threshold<1.0
+        radius = np.sqrt(-2*self.sigma*np.log(threshold))
+        grid_points,XYi,kernel_value = self.get_neighboring_grid_points(coords,radius)
+        lane_flag = self.obtain_lane_flag(grid_points,raster_from_world,lane_map)
+        XYi_flatten = XYi.reshape(-1,2)
+        lane_flag_flatten = lane_flag.flatten()
+        kernel_value_flatten  = kernel_value.flatten()
+        for i in range(XYi_flatten.shape[0]):
+            self.occupancy_grid[(XYi_flatten[i,0],XYi_flatten[i,1])]+=weight*kernel_value_flatten[i]
+            self.lane_flag[(XYi_flatten[i,0],XYi_flatten[i,1])]=lane_flag_flatten[i]
+class Occupancymet(EnvMetrics):
+    def __init__(self,gridinfo,sigma=1.0):
+        self.og = dict()
+        super(Occupancymet,self).__init__()
+        self.gridinfo = gridinfo
+        self.sigma=sigma
+        self._per_step = []
+        self._per_step_mask = []
+
+
+    """Compute occupancy grid on the map for agents."""
+    def reset(self):
+        self.og.clear()
+
+
+    def add_step(self, state_info: dict, all_scene_index: np.ndarray):
+        self._per_step.append(0)
+        self._per_step_mask.append(1)
+        drivable_area = get_drivable_region_map(state_info["image"])
+        coords = state_info["history_positions"][:,-1]
+        coords = GeoUtils.batch_nd_transform_points_np(coords,state_info["world_from_agent"])
+        for scene_idx in all_scene_index:
+            indices = np.where(state_info["scene_index"]==scene_idx)[0]
+            if scene_idx not in self.og:
+                self.og[scene_idx] = OccupancyGrid(self.gridinfo,self.sigma)
+            
+            self.og[scene_idx].update(coords[indices],state_info["raster_from_world"][indices],drivable_area[indices],threshold=0.1,weight=1)
+    def get_episode_metrics(self):
+        pass
+
+class OccupancyCoverage(Occupancymet):
+    def __init__(self,gridinfo,sigma=1.0,threshold = 1e-2):
+        super(OccupancyCoverage,self).__init__(gridinfo,sigma)
+        self.threshold = threshold
+    def get_episode_metrics(self):
+        coverage_num = list()
+        for scene_idx,og in self.og.items():
+            data = np.array(list(og.values()))
+            coverage_num.append((data>self.threshold).sum())
+        return np.array(coverage_num)
+
+class OccupancyDiversity(Occupancymet):
+    def __init__(self,gridinfo,sigma=1.0):
+        super(OccupancyDiversity,self).__init__(gridinfo,sigma)
+        self.episode_index = 0
+    def reset(self):
+        self._per_step = []
+        self._per_step_mask = []
+        pass
+    
+    def multi_episode_reset(self):
+        self.episode_index = 0
+        self.og.clear()
+
+    def add_step(self, state_info: dict, all_scene_index: np.ndarray):
+        self._per_step.append(0)
+        self._per_step_mask.append(1)
+        drivable_area = get_drivable_region_map(state_info["image"])
+        coords = state_info["history_positions"][:,-1]
+        coords = GeoUtils.batch_nd_transform_points_np(coords,state_info["world_from_agent"])
+        for scene_idx in all_scene_index:
+            indices = np.where(state_info["scene_index"]==scene_idx)[0]
+            if scene_idx not in self.og:
+                self.og[scene_idx] = [OccupancyGrid(self.gridinfo,self.sigma)]
+            if len(self.og[scene_idx])==self.episode_index:
+                self.og[scene_idx].append(OccupancyGrid(self.gridinfo,self.sigma))
+            
+            assert len(self.og[scene_idx])==self.episode_index+1
+            self.og[scene_idx][self.episode_index].update(coords[indices],state_info["raster_from_world"][indices],drivable_area[indices],threshold=0.1,weight=1)
+    def get_multi_episode_metrics(self):
+        
+        result = []
+        for scene_index in self.og:
+            keys_union = set()
+            distr = list()
+            for og in self.og[scene_index]:
+                keys_union = keys_union.union(set(og.occupancy_grid.keys()))
+                
+            coords = np.array(list(keys_union))*self.gridinfo["step"]+self.gridinfo["offset"]
+            coords = np.tile(coords,(coords.shape[0],1,1))
+            distance_matrix = np.linalg.norm(coords-coords.transpose(1,0,2),axis=2)
+            wasser_dis = np.array([])
+            for og in self.og[scene_index]:
+                distr_i = np.array([og.occupancy_grid[k] for k in keys_union])
+                distr_i = distr_i/distr_i.sum()
+                for distr_j in distr:
+                    wasser_dis = np.append(wasser_dis,emd(distr_i, distr_j, distance_matrix))
+                distr.append(distr_i)
+            result.append(wasser_dis.mean())
+            print("Wasserstein metric:",wasser_dis)
+        return np.array(result)
+
+            
+
+
+    def get_episode_metrics(self):
+        self.episode_index+=1
+        return
+
+
+
+
+if __name__=="__main__":
+    gridinfo = {"offset":np.zeros(2),"step":0.3*np.ones(2)}
+    occu = OccupancyGrid(gridinfo,sigma=0.5)
+    pts = occu.get_neighboring_grid_points(np.array([0.5,0.6]))
