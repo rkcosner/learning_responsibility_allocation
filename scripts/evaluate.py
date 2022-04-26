@@ -5,6 +5,7 @@ import numpy as np
 import json
 import h5py
 import random
+import yaml
 from collections import defaultdict
 
 import os
@@ -60,9 +61,9 @@ except ImportError:
 
 
 class PolicyComposer(object):
-    def __init__(self, eval_config, device, ckpt_dir="checkpoints/"):
+    def __init__(self, eval_config, device, ckpt_root_dir="checkpoints/"):
         self.device = device
-        self.ckpt_dir = ckpt_dir
+        self.ckpt_root_dir = ckpt_root_dir
         self.eval_config = eval_config
         self._exp_config = None
 
@@ -100,9 +101,9 @@ class GroundTruth(PolicyComposer):
 class BC(PolicyComposer):
     def get_policy(self, **kwargs):
         policy_ckpt_path, policy_config_path = get_checkpoint(
-            ngc_job_id="2775586",
-            ckpt_key="iter73000",
-            ckpt_root_dir=self.ckpt_dir,
+            ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
+            ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+            ckpt_root_dir=self.ckpt_root_dir,
         )
         policy_cfg = get_experiment_config_from_file(policy_config_path)
         policy = L5TrafficModel.load_from_checkpoint(
@@ -116,9 +117,9 @@ class BC(PolicyComposer):
 class TrafficSim(PolicyComposer):
     def get_policy(self, **kwargs):
         policy_ckpt_path, policy_config_path = get_checkpoint(
-            ngc_job_id="",
-            ckpt_key="",
-            ckpt_root_dir=self.ckpt_dir,
+            ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
+            ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+            ckpt_root_dir=self.ckpt_root_dir,
         )
         policy_cfg = get_experiment_config_from_file(policy_config_path)
         policy = L5VAETrafficModel.load_from_checkpoint(
@@ -132,9 +133,9 @@ class TrafficSim(PolicyComposer):
 class TPP(PolicyComposer):
     def get_policy(self, **kwargs):
         policy_ckpt_path, policy_config_path = get_checkpoint(
-            ngc_job_id="",
-            ckpt_key="",
-            ckpt_root_dir=self.ckpt_dir,
+            ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
+            ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+            ckpt_root_dir=self.ckpt_root_dir,
         )
         policy_cfg = get_experiment_config_from_file(policy_config_path)
         policy = L5DiscreteVAETrafficModel.load_from_checkpoint(
@@ -148,8 +149,11 @@ class TPP(PolicyComposer):
 
 class GAN(PolicyComposer):
     def get_policy(self, **kwargs):
-        policy_ckpt_path = "/home/danfeix/workspace/tbsim/gan_trained_models/test/run0/checkpoints/iter11999_ep0_egoADE1.41.ckpt"
-        policy_config_path = "/home/danfeix/workspace/tbsim/gan_trained_models/test/run0/config.json"
+        policy_ckpt_path, policy_config_path = get_checkpoint(
+            ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
+            ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+            ckpt_root_dir=self.ckpt_root_dir,
+        )
         policy_cfg = get_experiment_config_from_file(policy_config_path)
         policy = GANTrafficModel.load_from_checkpoint(
             policy_ckpt_path,
@@ -162,9 +166,9 @@ class GAN(PolicyComposer):
 class Hierarchical(PolicyComposer):
     def _get_planner(self):
         planner_ckpt_path, planner_config_path = get_checkpoint(
-            ngc_job_id="2573128",  # spatial_archresnet50_bs64_pcl1.0_pbl0.0_rlFalse
-            ckpt_key="iter55999_",
-            ckpt_root_dir=self.ckpt_dir
+            ngc_job_id=self.eval_config.ckpt.planner.ngc_job_id,
+            ckpt_key=self.eval_config.ckpt.planner.ckpt_key,
+            ckpt_root_dir=self.ckpt_root_dir,
         )
         planner_cfg = get_experiment_config_from_file(planner_config_path)
         planner = SpatialPlanner.load_from_checkpoint(
@@ -182,15 +186,12 @@ class Hierarchical(PolicyComposer):
 
     def _get_controller(self):
         policy_ckpt_path, policy_config_path = get_checkpoint(
-            # ngc_job_id="2596419",  # gc_clip_regyaw_dynUnicycle_decmlp128,128_decstateTrue_yrl1.0
-            # ckpt_key="iter120999_",
-            ngc_job_id="2732861",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
-            ckpt_key="iter20999",
-            ckpt_root_dir=self.ckpt_dir
+            ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
+            ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+            ckpt_root_dir=self.ckpt_root_dir,
         )
         policy_cfg = get_experiment_config_from_file(policy_config_path)
         policy_cfg.lock()
-        assert policy_cfg.algo.goal_conditional
 
         controller = MATrafficModel.load_from_checkpoint(
             policy_ckpt_path,
@@ -210,9 +211,9 @@ class Hierarchical(PolicyComposer):
 class HierAgentAware(Hierarchical):
     def _get_predictor(self):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
-            ngc_job_id="2732861",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
-            ckpt_key="iter20999",
-            ckpt_root_dir=self.ckpt_dir
+            ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
+            ckpt_key=self.eval_config.ckpt.predictor.ckpt_key,
+            ckpt_root_dir=self.ckpt_root_dir
         )
         predictor_cfg = get_experiment_config_from_file(predictor_config_path)
 
@@ -232,7 +233,7 @@ class HierAgentAware(Hierarchical):
             mask_drivable=kwargs.get("mask_drivable"),
             sample=True,
             num_plan_samples=kwargs.get("num_plan_samples"),
-            clearance=3,
+            clearance=kwargs.get("diversification_clearance"),
         )
         sampler = HierarchicalSamplerWrapper(plan_sampler, controller)
 
@@ -243,9 +244,11 @@ class HierAgentAware(Hierarchical):
 class HierAgentAwareCVAE(Hierarchical):
     def _get_controller(self):
         controller_ckpt_path, controller_config_path = get_checkpoint(
-            ngc_job_id="2792906",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
-            ckpt_key="iter13000",
-            ckpt_root_dir=self.ckpt_dir
+            ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
+            ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+            # ngc_job_id="2792906",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
+            # ckpt_key="iter13000",
+            ckpt_root_dir=self.ckpt_root_dir
         )
         controller_cfg = get_experiment_config_from_file(controller_config_path)
 
@@ -258,9 +261,11 @@ class HierAgentAwareCVAE(Hierarchical):
 
     def _get_predictor(self):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
-            ngc_job_id="2732861",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
-            ckpt_key="iter20999",
-            ckpt_root_dir=self.ckpt_dir
+            ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
+            ckpt_key=self.eval_config.ckpt.predictor.ckpt_key,
+            # ngc_job_id="2732861",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
+            # ckpt_key="iter20999",
+            ckpt_root_dir=self.ckpt_root_dir
         )
         predictor_cfg = get_experiment_config_from_file(predictor_config_path)
 
@@ -290,11 +295,13 @@ class HierAgentAwareCVAE(Hierarchical):
 class AgentAwareEC(Hierarchical):
     def _get_EC_predictor(self):
         EC_ckpt_path, EC_config_path = get_checkpoint(
+            ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
+            ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
             # ngc_job_id="2596419",  # gc_clip_regyaw_dynUnicycle_decmlp128,128_decstateTrue_yrl1.0
             # ckpt_key="iter120999_",
-            ngc_job_id="2783997",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
-            ckpt_key="iter33000",
-            ckpt_root_dir=self.ckpt_dir
+            # ngc_job_id="2783997",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
+            # ckpt_key="iter33000",
+            ckpt_root_dir=self.ckpt_root_dir
         )
         EC_cfg = get_experiment_config_from_file(EC_config_path)
 
@@ -439,12 +446,20 @@ def create_env_nusc(
 
     env_dataset = UnifiedDataset(**kwargs)
 
+    metrics = None
+    if compute_metrics:
+        metrics = dict(
+            all_off_road_rate=EnvMetrics.OffRoadRate(),
+            all_collision_rate=EnvMetrics.CollisionRate(),
+        )
+
     env = EnvUnifiedSimulation(
         exp_cfg.env,
         dataset=env_dataset,
         seed=seed,
         num_scenes=eval_cfg.num_scenes_per_batch,
-        prediction_only=False
+        prediction_only=False,
+        metrics=metrics
     )
 
     return env
@@ -463,7 +478,7 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
     print('saving results to {}'.format(eval_cfg.results_dir))
     os.makedirs(eval_cfg.results_dir, exist_ok=True)
     os.makedirs(os.path.join(eval_cfg.results_dir, "videos/"), exist_ok=True)
-    os.makedirs(eval_cfg.ckpt_dir, exist_ok=True)
+    os.makedirs(eval_cfg.ckpt_root_dir, exist_ok=True)
     if save_cfg:
         json.dump(eval_cfg, open(os.path.join(eval_cfg.results_dir, "config.json"), "w+"))
     if data_to_disk and os.path.exists(eval_cfg.experience_hdf5_path):
@@ -481,7 +496,7 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
         raise NotImplementedError("{} is not a valid env".format(eval_cfg.env))
 
     # create policy and rollout wrapper
-    evaluation = eval(eval_cfg.eval_class)(eval_cfg, device, ckpt_dir=eval_cfg.ckpt_dir)
+    evaluation = eval(eval_cfg.eval_class)(eval_cfg, device, ckpt_root_dir=eval_cfg.ckpt_root_dir)
     policy, exp_config = evaluation.get_policy(**eval_cfg.policy)
 
     if eval_cfg.policy.pos_to_yaw:
@@ -536,15 +551,16 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
     while scene_i < eval_cfg.num_scenes_to_evaluate:
         scene_indices = eval_scenes[scene_i: scene_i + eval_cfg.num_scenes_per_batch]
         scene_i += eval_cfg.num_scenes_per_batch
+
         stats, info, renderings = rollout_episodes(
             env,
             rollout_policy,
-            num_episodes=3,
+            num_episodes=1,
             n_step_action=eval_cfg.n_step_action,
             render=render_to_video,
             skip_first_n=eval_cfg.skip_first_n,
             scene_indices=scene_indices,
-            obs_to_torch=obs_to_torch,
+            obs_to_torch=obs_to_torch
         )
         if env_delayed_start is not None:
             Ts = np.random.choice(np.arange(eval_cfg.skip_first_n,200-exp_config.algo.future_num_frames-1),3,replace=False)
@@ -634,6 +650,13 @@ if __name__ == "__main__":
         choices=["nusc", "l5kit"],
         help="Which env to run evaluation in",
         required=True
+    )
+
+    parser.add_argument(
+        "--ckpt_yaml",
+        type=str,
+        help="specify a yaml file that specifies checkpoint and config location of each model",
+        default=None
     )
 
     parser.add_argument(
@@ -738,6 +761,11 @@ if __name__ == "__main__":
         cfg[k] = cfg[cfg.env][k]
     cfg.pop("nusc")
     cfg.pop("l5kit")
+
+    if args.ckpt_yaml is not None:
+        with open(args.ckpt_yaml, "r") as f:
+            ckpt_info = yaml.safe_load(f)
+            cfg.ckpt.update(**ckpt_info)
 
     data_to_disk = False
     skimp_rollout = False

@@ -385,12 +385,12 @@ def get_local_checkpoint_dir(ngc_job_id, ckpt_root_dir):
 def get_checkpoint(
     ngc_job_id, ckpt_key, ckpt_root_dir="checkpoints/", download_tmp_dir="/tmp"
 ):
-    def ckpt_path_func(paths): return [p for p in paths if ckpt_key in p]
+    def ckpt_path_func(paths): return [p for p in paths if str(ckpt_key) in p]
     local_dir = get_local_checkpoint_dir(ngc_job_id, ckpt_root_dir)
     if local_dir is None:
         print("checkpoint does not exist, downloading ...")
         ckpt_dir = download_checkpoints_from_ngc(
-            ngc_job_id=ngc_job_id,
+            ngc_job_id=str(ngc_job_id),
             ckpt_root_dir=ckpt_root_dir,
             ckpt_path_func=ckpt_path_func,
             tmp_dir=download_tmp_dir,
@@ -400,7 +400,7 @@ def get_checkpoint(
         if len(ckpt_path_func(ckpt_paths)) == 0:
             print("checkpoint does not exist, downloading ...")
             ckpt_dir = download_checkpoints_from_ngc(
-                ngc_job_id=ngc_job_id,
+                ngc_job_id=str(ngc_job_id),
                 ckpt_root_dir=ckpt_root_dir,
                 ckpt_path_func=ckpt_path_func,
                 tmp_dir=download_tmp_dir,

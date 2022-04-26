@@ -8,25 +8,33 @@ class EvaluationConfig(Dict):
         self.name = None
         self.env = "nusc"  # [l5kit, nusc]
         self.dataset_path = None
-        self.eval_class = "HierAgentAware"
+        self.eval_class = ""
         self.seed = 0
         self.num_scenes_per_batch = 5
         self.num_scenes_to_evaluate = 100
         self.ego_only = False
 
-        self.ckpt_dir = "checkpoints/"
+        self.ckpt_root_dir = "checkpoints/"
         self.experience_hdf5_path = None
         self.results_dir = "results/"
 
+        self.ckpt.policy.ngc_job_id = ""
+        self.ckpt.policy.ckpt_key = ""
+        self.ckpt.planner.ngc_job_id = ""
+        self.ckpt.planner.ckpt_key = ""
+        self.ckpt.predictor.ngc_job_id = ""
+        self.ckpt.predictor.ckpt_key = ""
+
         self.policy.mask_drivable = True
-        self.policy.num_plan_samples = 10
+        self.policy.num_plan_samples = 50
         self.policy.num_action_samples = 10
-        self.policy.pos_to_yaw = False
+        self.policy.pos_to_yaw = True
         self.policy.yaw_correction_speed = 1.0
+        self.policy.diversification_clearance = None
 
         self.perturb.std = [5.0, 5.0, np.pi / 2]
 
-        self.nusc.eval_scenes = [0, 1, 2, 3, 4]
+        self.nusc.eval_scenes = np.arange(100).tolist()
         self.nusc.n_step_action = 1
         self.nusc.num_simulation_steps = 40
         self.nusc.skip_first_n = 0
