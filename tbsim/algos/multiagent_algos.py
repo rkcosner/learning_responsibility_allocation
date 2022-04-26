@@ -118,7 +118,9 @@ class MATrafficModel(pl.LightningModule):
             plan_tiled = TensorUtils.join_dimensions(plan_samples.to_dict(), begin_axis=0, end_axis=2)
             plan_tiled = Plan.from_dict(plan_tiled)
 
-            obs_tiled = TensorUtils.repeat_by_expand_at(obs_dict, repeats=n, dim=0)
+            relevant_keys = ["curr_speed", "history_positions", "history_yaws", "extent"]
+            relevant_obs = {k: obs_dict[k] for k in relevant_keys}
+            obs_tiled = TensorUtils.repeat_by_expand_at(relevant_obs, repeats=n, dim=0)
             preds = self.model.forward_prediction(feats_tiled, obs_tiled, plan=plan_tiled)
         else:
             plan = kwargs.get("plan", None)
@@ -133,7 +135,13 @@ class MATrafficModel(pl.LightningModule):
 
     def get_prediction(self, obs_dict, **kwargs):
         """If using the model as a trajectory predictor (generating trajs for non-ego agents)"""
-        plan = kwargs.get("plan", None)
+        # Hack: ego can be goal-conditional - feed a fake goal here since we only care about other agents
+        dummy_plan = Plan(
+            positions=torch.zeros(obs_dict["image"].shape[0], 1, 2).to(self.device),
+            yaws=torch.zeros(obs_dict["image"].shape[0], 1, 1).to(self.device),
+            availabilities=torch.zeros(obs_dict["image"].shape[0], 1).to(self.device)
+        )
+        plan = kwargs.get("plan", dummy_plan)
         preds = self(obs_dict, plan)
         agent_preds = self.model.get_agents_predictions(preds)
         agent_trajs = Trajectory(

@@ -102,6 +102,8 @@ def parse_avdata_batch(batch: dict):
         extent=batch["agent_hist_extent"][:, -1],
         raster_from_agent=raster_from_agent,
         agent_from_raster=agent_from_raster,
+        raster_from_world=batch["rasters_from_world_tf"],
+        agent_from_world=batch["agents_from_world_tf"],
         all_other_agents_history_positions=neigh_hist_pos,
         all_other_agents_history_yaws=neigh_hist_yaw,
         all_other_agents_history_availabilities=neigh_hist_mask,
@@ -110,11 +112,14 @@ def parse_avdata_batch(batch: dict):
         all_other_agents_target_yaws=neigh_fut_yaw,
         all_other_agents_target_availabilities=neigh_fut_mask,
         all_other_agents_types=batch["neigh_types"],
-        all_other_agents_extents=batch["neigh_hist_extents"][:, :, -1]
+        all_other_agents_extents=batch["neigh_hist_extents"].max(dim=-2)[0],
+        all_other_agents_history_extents=batch["neigh_hist_extents"],
+
     )
     batch = dict(batch)
     batch.update(d)
     batch.pop("agent_name")
+    batch.pop("robot_fut")
     return batch
 
 

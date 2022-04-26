@@ -49,6 +49,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
         # indices of the scenes (in dataset) that are being used for simulation
         self._current_scenes: List[SimulationScene] = None # corresponding dataset of the scenes
+        self._current_scene_indices = None
 
         self._frame_index = 0
         self._done = False
@@ -70,11 +71,19 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         return sum(len(scene.agents) for scene in self._current_scenes)
 
     @property
-    def obs_scene_index(self):
+    def current_agent_scene_index(self):
         si = []
         for i, scene in enumerate(self._current_scenes):
             si.extend([i] * len(scene.agents))
         return np.array(si, dtype=np.int64)
+
+    @property
+    def current_agent_track_id(self):
+        return np.arange(self.current_num_agents)
+
+    @property
+    def current_scene_index(self):
+        return self._current_scene_indices.copy()
 
     @property
     def current_agent_names(self):
@@ -122,6 +131,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
             assert si in self._all_scene_info
 
         self._num_scenes = len(scene_info)
+        self._current_scene_indices = scene_indices
 
         assert (
                 np.max(scene_indices) < self._num_total_scenes
@@ -191,9 +201,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         """
         metrics = dict()
         # aggregate per-step metrics
-        self._add_per_step_metrics(self.get_observation()["agents"])
         for met_name, met in self._metrics.items():
-            assert len(met) == self._frame_index + 1, len(met)
             met_vals = met.get_episode_metrics()
             if isinstance(met_vals, dict):
                 for k, v in met_vals.items():
@@ -205,7 +213,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
     def get_observation_by_scene(self):
         obs = self.get_observation()["agents"]
         obs_by_scene = []
-        obs_scene_index = self.obs_scene_index
+        obs_scene_index = self.current_agent_scene_index
         for i in range(self.num_instances):
             obs_by_scene.append(TensorUtils.map_ndarray(obs, lambda x: x[obs_scene_index == i]))
         return obs_by_scene
@@ -222,6 +230,8 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         agent_obs = self.dataset.get_collate_fn(return_dict=True)(raw_obs)
         agent_obs = parse_avdata_batch(agent_obs)
         agent_obs = TensorUtils.to_numpy(agent_obs)
+        agent_obs["scene_index"] = self.current_agent_scene_index
+        agent_obs["track_id"] = self.current_agent_track_id
 
         # cache observations
         self._cached_observation = dict(agents=agent_obs)
@@ -231,9 +241,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
     def _add_per_step_metrics(self, obs):
         for k, v in self._metrics.items():
-            if len(v) >= self._frame_index + 1:
-                return
-            v.add_step(obs, self.current_scene_names)
+            v.add_step(obs, self.current_scene_index)
 
     def _step(self, step_actions: RolloutAction, num_steps_to_take):
         if self.is_done():

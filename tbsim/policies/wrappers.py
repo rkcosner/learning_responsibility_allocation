@@ -2,7 +2,7 @@ import torch
 from typing import Tuple, Dict
 
 import tbsim.utils.tensor_utils as TensorUtils
-from tbsim.utils.l5_utils import get_drivable_region_map
+from tbsim.utils.batch_utils import batch_utils
 from tbsim.utils.geometry_utils import calc_distance_map
 from tbsim.utils.planning_utils import ego_sample_planning
 from tbsim.policies.common import Action, Plan, RolloutAction
@@ -86,9 +86,9 @@ class SamplingPolicyWrapper(object):
         ego_trajs = action_samples.trajectories
         agent_pred_trajs = agent_preds.trajectories
 
-        agent_extents = obs["all_other_agents_future_extents"][..., :2].max(
+        agent_extents = obs["all_other_agents_history_extents"][..., :2].max(
             dim=-2)[0]
-        drivable_map = get_drivable_region_map(obs["image"]).float()
+        drivable_map = batch_utils().get_drivable_region_map(obs["image"]).float()
         dis_map = calc_distance_map(drivable_map)
         action_idx = ego_sample_planning(
             ego_trajectories=ego_trajs,
