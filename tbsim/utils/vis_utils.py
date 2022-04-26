@@ -35,7 +35,10 @@ def draw_actions(
         pred_action=None,
         pred_plan=None,
         pred_plan_info=None,
-        ego_action_samples=None
+        ego_action_samples=None,
+        plan_samples=None,
+        action_marker_size=3,
+        plan_marker_size=8,
 ):
     im = Image.fromarray((state_image * 255).astype(np.uint8))
     draw = ImageDraw.Draw(im)
@@ -44,13 +47,13 @@ def draw_actions(
         raster_traj = agent_to_raster_np(
             pred_action["positions"].reshape(-1, 2), trans_mat)
         for point in raster_traj:
-            circle = np.hstack([point - 3, point + 3])
+            circle = np.hstack([point - action_marker_size, point + action_marker_size])
             draw.ellipse(circle.tolist(), fill="#FE5F55", outline="#911A12")
     if ego_action_samples is not None:
         raster_traj = agent_to_raster_np(
             ego_action_samples["positions"].reshape(-1, 2), trans_mat)
         for point in raster_traj:
-            circle = np.hstack([point - 3, point + 3])
+            circle = np.hstack([point - action_marker_size, point + action_marker_size])
             draw.ellipse(circle.tolist(), fill="#808080",
                          outline="#911A12")
 
@@ -58,11 +61,17 @@ def draw_actions(
         pos_raster = agent_to_raster_np(
             pred_plan["positions"][:, -1], trans_mat)
         for pos in pos_raster:
-            circle = np.hstack([pos - 8, pos + 8])
+            circle = np.hstack([pos - plan_marker_size, pos + plan_marker_size])
+            draw.ellipse(circle.tolist(), fill="#FF6B35")
+
+    if plan_samples is not None:
+        pos_raster = agent_to_raster_np(
+            plan_samples["positions"][0, :, -1], trans_mat)
+        for pos in pos_raster:
+            circle = np.hstack([pos - plan_marker_size, pos + plan_marker_size])
             draw.ellipse(circle.tolist(), fill="#FF6B35")
 
     im = np.asarray(im)
-
     # visualize plan heat map
     if pred_plan_info is not None and "location_map" in pred_plan_info:
         import matplotlib.pyplot as plt
@@ -146,15 +155,25 @@ def render_state_avdata(
             fill_color=COLORS["agent_fill"]
         )
     plan_info = None
+    plan_samples = None
+    action_samples = None
     if "plan_info" in action.agents_info:
         plan_info = TensorUtils.map_ndarray(action.agents_info["plan_info"], lambda x: x[[batch_idx]])
+    if "plan_samples" in action.agents_info:
+        plan_samples = TensorUtils.map_ndarray(action.agents_info["plan_samples"], lambda x: x[[batch_idx]])
+    if "action_samples" in action.agents_info:
+        action_samples = TensorUtils.map_ndarray(action.agents_info["action_samples"], lambda x: x[[batch_idx]])
+
     vis_action = TensorUtils.map_ndarray(action.agents.to_dict(), lambda x: x[batch_idx])
     image = draw_actions(
         image,
         trans_mat=trans_mat,
         pred_action=vis_action,
         pred_plan_info=plan_info,
-        ego_action_samples=action.agents_info.get("action_samples")
+        ego_action_samples=action_samples,
+        plan_samples=plan_samples,
+        action_marker_size=2,
+        plan_marker_size=3
     )
     return image
 
@@ -220,13 +239,15 @@ def render_state_l5kit_ego_view(
             action.ego.to_dict(), lambda x:  x[ego_scene_index])
         pred_plan = action.ego_info.get("plan", None)
         pred_plan_info = action.ego_info.get("plan_info", None)
-        if action.ego_info is not None:
-            ego_action_samples = action.ego_info.get("action_samples")
+        ego_action_samples = action.ego_info.get("action_samples", None)
 
     if pred_plan is not None:
         pred_plan = map_ndarray(pred_plan, lambda x:  x[ego_scene_index])
         pred_plan_info = map_ndarray(
             pred_plan_info, lambda x:  x[ego_scene_index])
+    if ego_action_samples is not None:
+        ego_action_samples = map_ndarray(
+            ego_action_samples, lambda x:  x[ego_scene_index])
 
     state_im, raster_from_agent, _ = get_state_image_with_boxes_l5kit(
         ego_obs, agents_obs, rasterizer)
