@@ -62,6 +62,9 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
         self._metrics = dict() if metrics is None else metrics
 
+    def update_random_seed(self, seed):
+        self._npr = np.random.RandomState(seed=seed)
+
     @property
     def current_scene_names(self):
         return deepcopy([scene.scene_info.name for scene in self._current_scenes])
@@ -253,26 +256,26 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
         action = step_actions.agents.to_dict()
         assert action["positions"].shape[0] == obs["centroid"].shape[0]
-        idx = 0
-        action_index = num_steps_to_take - 1
-        for scene in self._current_scenes:
-            scene_action = dict()
-            for agent in scene.agents:
-                curr_yaw = obs["curr_agent_state"][idx, -1]
-                curr_pos = obs["curr_agent_state"][idx, :2]
-                world_from_agent = np.array(
-                    [
-                        [np.cos(curr_yaw), np.sin(curr_yaw)],
-                        [-np.sin(curr_yaw), np.cos(curr_yaw)],
-                    ]
-                )
-                next_state = np.zeros(3, dtype=obs["agent_fut"].dtype)
-                if not np.any(np.isnan(action["positions"][idx, action_index])):  # ground truth action may be NaN
-                    next_state[:2] = action["positions"][idx, action_index] @ world_from_agent + curr_pos
-                    next_state[2] = curr_yaw + action["yaws"][idx, action_index, 0]
-                scene_action[agent.name] = next_state
-                idx += 1
-            scene.step(scene_action, return_obs=False)
+        for action_index in range(num_steps_to_take):
+            idx = 0
+            for scene in self._current_scenes:
+                scene_action = dict()
+                for agent in scene.agents:
+                    curr_yaw = obs["curr_agent_state"][idx, -1]
+                    curr_pos = obs["curr_agent_state"][idx, :2]
+                    world_from_agent = np.array(
+                        [
+                            [np.cos(curr_yaw), np.sin(curr_yaw)],
+                            [-np.sin(curr_yaw), np.cos(curr_yaw)],
+                        ]
+                    )
+                    next_state = np.zeros(3, dtype=obs["agent_fut"].dtype)
+                    if not np.any(np.isnan(action["positions"][idx, action_index])):  # ground truth action may be NaN
+                        next_state[:2] = action["positions"][idx, action_index] @ world_from_agent + curr_pos
+                        next_state[2] = curr_yaw + action["yaws"][idx, action_index, 0]
+                    scene_action[agent.name] = next_state
+                    idx += 1
+                scene.step(scene_action, return_obs=False)
 
         self._cached_observation = None
 
