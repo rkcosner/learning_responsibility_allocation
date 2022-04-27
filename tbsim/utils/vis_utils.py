@@ -119,16 +119,6 @@ def render_state_avdata(
     yaw = batch["history_yaws"][batch_idx, -1]
     extent = batch["agent_hist_extent"][batch_idx, -1][:2]
 
-    neigh_pos = batch["neigh_hist"][batch_idx, :, -1, :2]
-    neigh_yaw = np.arctan2(batch["neigh_hist"][batch_idx, :, -1, -2], batch["neigh_hist"][batch_idx, :, -1, -1])
-    neigh_extent = batch["neigh_hist_extents"][batch_idx, :, -1, :2]
-    valid_mask = np.bitwise_not(np.any(np.isnan(neigh_pos), axis=-1))
-    neigh_pos = neigh_pos[valid_mask]
-    neigh_yaw = neigh_yaw[valid_mask]
-    neigh_extent = neigh_extent[valid_mask]
-    neigh_yaw = neigh_yaw[:, None]
-
-    trans_mat = batch["raster_from_agent"][batch_idx]
     image = Map.to_img(
         TensorUtils.to_tensor(batch["maps"][batch_idx]),
         [[0, 1, 2], [3, 4], [5, 6]],
@@ -139,21 +129,50 @@ def render_state_avdata(
         pos=pos[None, :],
         yaw=yaw[None, :],
         extent=extent[None, :],
-        raster_from_agent=trans_mat,
+        raster_from_agent=batch["raster_from_agent"][batch_idx],
         outline_color=COLORS["ego_contour"],
         fill_color=COLORS["ego_fill"]
     )
+
+    # neigh_pos = batch["neigh_hist"][batch_idx, :, -1, :2]
+    # neigh_yaw = np.arctan2(batch["neigh_hist"][batch_idx, :, -1, -2], batch["neigh_hist"][batch_idx, :, -1, -1])
+    # neigh_extent = batch["neigh_hist_extents"][batch_idx, :, -1, :2]
+    # valid_mask = np.bitwise_not(np.any(np.isnan(neigh_pos), axis=-1))
+    # neigh_pos = neigh_pos[valid_mask]
+    # neigh_yaw = neigh_yaw[valid_mask]
+    # neigh_extent = neigh_extent[valid_mask]
+    # neigh_yaw = neigh_yaw[:, None]
+    #
+    # if neigh_pos.shape[0] > 0:
+    #     image = draw_agent_boxes(
+    #         image,
+    #         pos=neigh_pos,
+    #         yaw=neigh_yaw,
+    #         extent=neigh_extent,
+    #         raster_from_agent=trans_mat,
+    #         outline_color=COLORS["agent_contour"],
+    #         fill_color=COLORS["agent_fill"]
+    #     )
+
+    scene_index = batch["scene_index"][batch_idx]
+    agent_scene_index= scene_index == batch["scene_index"]
+    agent_scene_index[batch_idx] = 0  # don't plot ego
+
+    neigh_pos = batch["centroid"][agent_scene_index]
+    neigh_yaw = batch["yaw"][agent_scene_index]
+    neigh_extent = batch["extent"][agent_scene_index, :2]
 
     if neigh_pos.shape[0] > 0:
         image = draw_agent_boxes(
             image,
             pos=neigh_pos,
-            yaw=neigh_yaw,
+            yaw=neigh_yaw[:, None],
             extent=neigh_extent,
-            raster_from_agent=trans_mat,
+            raster_from_agent=batch["raster_from_world"][batch_idx],
             outline_color=COLORS["agent_contour"],
             fill_color=COLORS["agent_fill"]
         )
+
     plan_info = None
     plan_samples = None
     action_samples = None
@@ -167,7 +186,7 @@ def render_state_avdata(
     vis_action = TensorUtils.map_ndarray(action.agents.to_dict(), lambda x: x[batch_idx])
     image = draw_actions(
         image,
-        trans_mat=trans_mat,
+        trans_mat=batch["raster_from_agent"][batch_idx],
         pred_action=vis_action,
         pred_plan_info=plan_info,
         ego_action_samples=action_samples,
