@@ -34,7 +34,7 @@ def get_experiment_config_from_file(file_path, locked=False):
 
 def translate_avdata_cfg(cfg: ExperimentConfig):
     rcfg = Dict()
-    assert cfg.algo.step_time == 0.5  # TODO: support interpolation
+    # assert cfg.algo.step_time == 0.5  # TODO: support interpolation
     rcfg.step_time = cfg.algo.step_time
     rcfg.avdata_source_root = cfg.train.avdata_source_root
     rcfg.avdata_source_train = cfg.train.avdata_source_train

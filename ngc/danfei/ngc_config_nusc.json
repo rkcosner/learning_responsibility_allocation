@@ -2,7 +2,7 @@
   "wandb_apikey": null,
   "wandb_project_name": null,
   "workspace_mounting_point": "/workspace/ws_mount/",
-  "result_dir": "/workspace/result/",
+  "result_dir": "/workspace/ws_mount/tbsim/checkpoints/",
   "workspace_id": "OVG6VSVJRjq7TTKBpOdohg",
   "dataset_id": "98618",
   "dataset_mounting_point": "/workspace/nuscenes/",

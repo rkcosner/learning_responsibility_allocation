@@ -36,6 +36,7 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         output_dir=cfg.root_dir,
         save_checkpoints=cfg.train.save.enabled,
         auto_remove_exp_dir=auto_remove_exp_dir,
+        on_ngc=cfg.train.on_ngc
     )
     # Save experiment config to the training dir
     cfg.dump(os.path.join(root_dir, version_key, "config.json"))

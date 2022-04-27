@@ -4,8 +4,7 @@ mainly consists of functions to assist with logging, rollouts, and the @run_epoc
 which is the core training logic for models in this repository.
 """
 import os
-import time
-import datetime
+import socket
 import shutil
 
 
@@ -26,7 +25,7 @@ def infinite_iter(data_loader):
         yield data
 
 
-def get_exp_dir(exp_name, output_dir, save_checkpoints=True, auto_remove_exp_dir=False):
+def get_exp_dir(exp_name, output_dir, save_checkpoints=True, auto_remove_exp_dir=False, on_ngc=False):
     """
     Create experiment directory from config. If an identical experiment directory
     exists and @auto_remove_exp_dir is False (default), the function will prompt
@@ -39,6 +38,7 @@ def get_exp_dir(exp_name, output_dir, save_checkpoints=True, auto_remove_exp_dir
         save_checkpoints (bool): if save checkpoints
         auto_remove_exp_dir (bool): if True, automatically remove the existing experiment
             folder if it exists at the same path.
+        on_ngc (bool): whether the experiment is on NGC
 
     Returns:
         log_dir (str): path to created log directory (sub-folder in experiment directory)
@@ -52,7 +52,11 @@ def get_exp_dir(exp_name, output_dir, save_checkpoints=True, auto_remove_exp_dir
     base_output_dir = output_dir
     if not os.path.isabs(base_output_dir):
         base_output_dir = os.path.abspath(base_output_dir)
-    base_output_dir = os.path.join(base_output_dir, exp_name)
+    exp_dir_name = exp_name
+    if on_ngc:  # postpend the dir name with the job ID
+        ngc_job_id = socket.gethostname()
+        exp_dir_name += "_" + ngc_job_id
+    base_output_dir = os.path.join(base_output_dir, exp_dir_name)
     if os.path.exists(base_output_dir):
         if not auto_remove_exp_dir:
             ans = input(
@@ -68,8 +72,6 @@ def get_exp_dir(exp_name, output_dir, save_checkpoints=True, auto_remove_exp_dir
     os.makedirs(base_output_dir, exist_ok=True)
 
     # version the run
-    # t_now = time.time()
-    # version_str = datetime.datetime.fromtimestamp(t_now).strftime('%Y%m%d%H%M%S')
     existing_runs = [
         a
         for a in os.listdir(base_output_dir)
