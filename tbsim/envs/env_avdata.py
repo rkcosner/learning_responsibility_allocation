@@ -43,9 +43,8 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         self.dataset = dataset
         self._env_config = env_config
 
-        self._num_total_scenes = len(dataset.scene_index)
+        self._num_total_scenes = dataset.num_scenes()
         self._num_scenes = num_scenes
-        self._all_scene_info = dataset.scene_index
 
         # indices of the scenes (in dataset) that are being used for simulation
         self._current_scenes: List[SimulationScene] = None # corresponding dataset of the scenes
@@ -128,10 +127,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 all_indices, size=(self.num_instances,), replace=False
             )
 
-        scene_info = [self._all_scene_info[i] for i in scene_indices]
-
-        for si in scene_info:
-            assert si in self._all_scene_info
+        scene_info = [self.dataset.get_scene(i) for i in scene_indices]
 
         self._num_scenes = len(scene_info)
         self._current_scene_indices = scene_indices
