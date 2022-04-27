@@ -22,6 +22,7 @@ def rasterize_agents(
         maps: torch.Tensor,
         agent_hist_pos: torch.Tensor,
         agent_hist_yaw: torch.Tensor,
+        agent_mask: torch.Tensor,
         raster_from_agent: torch.Tensor,
         map_res: torch.Tensor,
 ) -> torch.Tensor:
@@ -32,18 +33,19 @@ def rasterize_agents(
 
     agent_hist_pos = agent_hist_pos.reshape(b, a * t, 2)
     raster_hist_pos = transform_points_tensor(agent_hist_pos, raster_from_agent)
+    raster_hist_pos[~agent_mask.reshape(b, a * t)] = 0.0  # Set invalid positions to 0.0 Will correct below
     raster_hist_pos = raster_hist_pos.reshape(b, a, t, 2).permute(0, 2, 1, 3)  # [B, T, A, 2]
-    raster_hist_pos[torch.isnan(raster_hist_pos)] = 0.0  # NaN will be converted to negative indices. Set it to 0 for now. Will correct below
     raster_hist_pos[..., 0].clip_(0, (w - 1))
     raster_hist_pos[..., 1].clip_(0, (h - 1))
+    raster_hist_pos = torch.round(raster_hist_pos).long()  # round pixels
 
-    raster_hist_pos_flat = torch.round(raster_hist_pos[..., 1] * w + raster_hist_pos[..., 0]).long()  # [B, T, A]
+    raster_hist_pos_flat = raster_hist_pos[..., 1] * w + raster_hist_pos[..., 0]  # [B, T, A]
 
     hist_image = torch.zeros(b, t, h * w, dtype=maps.dtype, device=maps.device)  # [B, T, H * W]
 
-    hist_image.scatter_(dim=2, index=raster_hist_pos_flat[:, :, [0]], src=torch.ones_like(hist_image))  # mark ego with 1.
     hist_image.scatter_(dim=2, index=raster_hist_pos_flat[:, :, 1:], src=torch.ones_like(hist_image) * -1)  # mark other agents with -1
-    hist_image[:, :, 0] = 0  # correct the 0th index caused by NaNs
+    hist_image.scatter_(dim=2, index=raster_hist_pos_flat[:, :, [0]], src=torch.ones_like(hist_image))  # mark ego with 1.
+    hist_image[:, :, 0] = 0  # correct the 0th index from invalid positions
     hist_image[:, :, -1] = 0  # correct the maximum index caused by out of bound locations
 
     hist_image = hist_image.reshape(b, t, h, w)
@@ -80,10 +82,21 @@ def parse_avdata_batch(batch: dict):
     agent_from_raster = torch.inverse(raster_from_agent)
     raster_from_agent = TensorUtils.unsqueeze_expand_at(raster_from_agent, size=batch["maps"].shape[0], dim=0)
     agent_from_raster = TensorUtils.unsqueeze_expand_at(agent_from_raster, size=batch["maps"].shape[0], dim=0)
+    curr_yaw = curr_state[:, -1]
+    curr_pos = curr_state[:, :2]
+    raster_from_world = torch.bmm(raster_from_agent, batch["agents_from_world_tf"])
 
-    agent_hist_pos = torch.cat((hist_pos[:, None], neigh_hist_pos), dim=1)
-    agent_hist_yaw = torch.cat((hist_yaw[:, None], neigh_hist_yaw), dim=1)
-    maps = rasterize_agents(batch["maps"], agent_hist_pos, agent_hist_yaw, raster_from_agent, map_res)
+    all_hist_pos = torch.cat((hist_pos[:, None], neigh_hist_pos), dim=1)
+    all_hist_yaw = torch.cat((hist_yaw[:, None], neigh_hist_yaw), dim=1)
+    all_hist_mask = torch.cat((hist_mask[:, None], neigh_hist_mask), dim=1)
+    maps = rasterize_agents(
+        batch["maps"],
+        all_hist_pos,
+        all_hist_yaw,
+        all_hist_mask,
+        raster_from_agent,
+        map_res
+    )
     drivable_map = get_drivable_region_map(batch["maps"])
 
     d = dict(
@@ -96,13 +109,13 @@ def parse_avdata_batch(batch: dict):
         history_yaws=hist_yaw,
         history_availabilities=hist_mask,
         curr_speed=curr_speed,
-        centroid=curr_state[..., :2],
+        centroid=curr_pos,
+        yaw=curr_yaw,
         type=batch["agent_type"],
-        yaw=curr_state[..., -1],
         extent=batch["agent_hist_extent"][:, -1],
         raster_from_agent=raster_from_agent,
         agent_from_raster=agent_from_raster,
-        raster_from_world=batch["rasters_from_world_tf"],
+        raster_from_world=raster_from_world,
         agent_from_world=batch["agents_from_world_tf"],
         all_other_agents_history_positions=neigh_hist_pos,
         all_other_agents_history_yaws=neigh_hist_yaw,
@@ -118,8 +131,8 @@ def parse_avdata_batch(batch: dict):
     )
     batch = dict(batch)
     batch.update(d)
-    batch.pop("agent_name")
-    batch.pop("robot_fut")
+    batch.pop("agent_name", None)
+    batch.pop("robot_fut", None)
     return batch
 
 
