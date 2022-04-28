@@ -13,9 +13,10 @@ import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.utils.vis_utils import render_state_avdata
 from tbsim.envs.base import BaseEnv, BatchedEnv, SimulationException
 from tbsim.policies.common import RolloutAction, Action
+from tbsim.utils.geometry_utils import transform_points_tensor
 import tbsim.envs.env_metrics as EnvMetrics
 from tbsim.utils.timer import Timers
-from tbsim.utils.avdata_utils import parse_avdata_batch
+from tbsim.utils.avdata_utils import parse_avdata_batch, get_drivable_region_map
 
 
 class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
@@ -113,6 +114,20 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
     def horizon(self):
         return self._env_config.simulation.num_simulation_steps
 
+    def _disable_offroad_agents(self, scene):
+        obs = scene.get_obs()
+        obs = parse_avdata_batch(obs)
+        drivable_region = get_drivable_region_map(obs["maps"])
+        raster_pos = transform_points_tensor(obs["centroid"][:, None], obs["raster_from_world"])[:, 0]
+        valid_agents = []
+        for i, rpos in enumerate(raster_pos):
+            print(scene.agents[i].name)
+            if scene.agents[i].name == "ego" or drivable_region[i, int(rpos[1]), int(rpos[0])].item() > 0:
+                valid_agents.append(scene.agents[i])
+
+        print(len(valid_agents), len(scene.agents))
+        scene.agents = valid_agents
+
     def reset(self, scene_indices: List = None):
         """
         Reset the previous simulation episode. Randomly sample a batch of new scenes unless specified in @scene_indices
@@ -146,8 +161,10 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 dataset=self.dataset,
                 init_timestep=self._env_config.simulation.start_frame_index,
                 freeze_agents=True,
+                return_dict=True
             )
             sim_scene.reset()
+            self._disable_offroad_agents(sim_scene)
             self._current_scenes.append(sim_scene)
 
         self._frame_index = 0

@@ -55,7 +55,7 @@ def rasterize_agents(
 
 
 def get_drivable_region_map(maps: torch.Tensor):
-    drivable = torch.amax(maps, dim=-3).bool()
+    drivable = torch.amax(maps[..., :3, :, :], dim=-3).bool()
     return drivable
 
 
