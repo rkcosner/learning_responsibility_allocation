@@ -117,7 +117,7 @@ def render_state_avdata(
 ) -> np.ndarray:
     pos = batch["history_positions"][batch_idx, -1]
     yaw = batch["history_yaws"][batch_idx, -1]
-    extent = batch["agent_hist_extent"][batch_idx, -1][:2]
+    extent = batch["extent"][batch_idx, :2]
 
     image = Map.to_img(
         TensorUtils.to_tensor(batch["maps"][batch_idx]),

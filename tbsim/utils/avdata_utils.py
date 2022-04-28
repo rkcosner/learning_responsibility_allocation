@@ -99,6 +99,8 @@ def parse_avdata_batch(batch: dict):
     )
     drivable_map = get_drivable_region_map(batch["maps"])
 
+    extent_scale = 1.1
+
     d = dict(
         image=maps,
         drivable_map=drivable_map,
@@ -112,7 +114,7 @@ def parse_avdata_batch(batch: dict):
         centroid=curr_pos,
         yaw=curr_yaw,
         type=batch["agent_type"],
-        extent=batch["agent_hist_extent"][:, -1],
+        extent=batch["agent_hist_extent"][:, -1] * extent_scale,
         raster_from_agent=raster_from_agent,
         agent_from_raster=agent_from_raster,
         raster_from_world=raster_from_world,
@@ -125,8 +127,8 @@ def parse_avdata_batch(batch: dict):
         all_other_agents_target_yaws=neigh_fut_yaw,
         all_other_agents_target_availabilities=neigh_fut_mask,
         all_other_agents_types=batch["neigh_types"],
-        all_other_agents_extents=batch["neigh_hist_extents"].max(dim=-2)[0],
-        all_other_agents_history_extents=batch["neigh_hist_extents"],
+        all_other_agents_extents=batch["neigh_hist_extents"].max(dim=-2)[0] * extent_scale,
+        all_other_agents_history_extents=batch["neigh_hist_extents"] * extent_scale,
 
     )
     batch = dict(batch)
