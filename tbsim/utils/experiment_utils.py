@@ -396,7 +396,7 @@ def get_checkpoint(
             tmp_dir=download_tmp_dir,
         )
     else:
-        ckpt_paths = glob(local_dir + "/*.ckpt")
+        ckpt_paths = glob(local_dir + "/**/*.ckpt", recursive=True)
         if len(ckpt_path_func(ckpt_paths)) == 0:
             print("checkpoint does not exist, downloading ...")
             ckpt_dir = download_checkpoints_from_ngc(
@@ -407,13 +407,15 @@ def get_checkpoint(
             )
         else:
             ckpt_dir = local_dir
-    ckpt_paths = ckpt_path_func(glob(ckpt_dir + "/*.ckpt"))
+
+    ckpt_paths = ckpt_path_func(glob(ckpt_dir + "/**/*.ckpt", recursive=True))
     assert len(ckpt_paths) > 0, "Could not find a checkpoint that has key {}".format(
         ckpt_key
     )
-    assert len(ckpt_paths) == 1, "More than one checkpoint found"
-    cfg_path = os.path.join(ckpt_dir, "config.json")
+    assert len(ckpt_paths) == 1, "More than one checkpoint found {}".format(ckpt_paths)
+    cfg_path = glob(ckpt_dir + "/**/config.json", recursive=True)[0]
     print("Checkpoint path: {}".format(ckpt_paths[0]))
+    print("Config path: {}".format(cfg_path))
     return ckpt_paths[0], cfg_path
 
 

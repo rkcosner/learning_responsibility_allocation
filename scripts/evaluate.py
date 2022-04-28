@@ -667,7 +667,7 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--ckpt_dir",
+        "--ckpt_root_dir",
         type=str,
         default=None,
         help="Directory to look for saved checkpoints"
@@ -706,7 +706,6 @@ if __name__ == "__main__":
         type=str,
         default="evaluate_rollout",
         choices=["record_rollout", "evaluate_replay", "evaluate_rollout"],
-        required=True
     )
 
     parser.add_argument(
@@ -732,8 +731,8 @@ if __name__ == "__main__":
     if args.eval_class is not None:
         cfg.eval_class = args.eval_class
 
-    if args.ckpt_dir is not None:
-        cfg.ckpt_dir = args.ckpt_dir
+    if args.ckpt_root_dir is not None:
+        cfg.ckpt_root_dir = args.ckpt_root_dir
 
     if args.num_scenes_per_batch is not None:
         cfg.num_scenes_per_batch = args.num_scenes_per_batch
