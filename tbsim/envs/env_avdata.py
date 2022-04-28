@@ -8,6 +8,7 @@ from l5kit.geometry import transform_points, transform_point
 from avdata import AgentBatch, AgentType, UnifiedDataset
 from avdata.simulation import SimulationScene
 from avdata.visualization.vis import plot_agent_batch
+from avdata.simulation import sim_metrics
 
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.utils.vis_utils import render_state_avdata
@@ -121,11 +122,9 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         raster_pos = transform_points_tensor(obs["centroid"][:, None], obs["raster_from_world"])[:, 0]
         valid_agents = []
         for i, rpos in enumerate(raster_pos):
-            print(scene.agents[i].name)
             if scene.agents[i].name == "ego" or drivable_region[i, int(rpos[1]), int(rpos[0])].item() > 0:
                 valid_agents.append(scene.agents[i])
 
-        print(len(valid_agents), len(scene.agents))
         scene.agents = valid_agents
 
     def reset(self, scene_indices: List = None):
@@ -216,6 +215,14 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         Returns: a dictionary of metrics, each containing an array of measurement same length as the number of scenes
         """
         metrics = dict()
+        # get ADE and FDE from SimulationScene
+        metrics["ade"] = np.zeros(self.num_instances)
+        metrics["fde"] = np.zeros(self.num_instances)
+        for i, scene in enumerate(self._current_scenes):
+            mets_per_agent = scene.get_metrics([sim_metrics.ADE(), sim_metrics.FDE()])
+            metrics["ade"][i] = np.array(list(mets_per_agent["ade"].values())).mean()
+            metrics["fde"][i] = np.array(list(mets_per_agent["fde"].values())).mean()
+
         # aggregate per-step metrics
         for met_name, met in self._metrics.items():
             met_vals = met.get_episode_metrics()
@@ -224,6 +231,9 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                     metrics[met_name + "_" + k] = v
             else:
                 metrics[met_name] = met_vals
+
+        for k in metrics:
+            assert metrics[k].shape == (self.num_instances,)
         return metrics
 
     def get_observation_by_scene(self):
