@@ -1,7 +1,6 @@
 import json
 import os
 import itertools
-import sys
 from collections import namedtuple
 from typing import List
 from glob import glob
@@ -118,7 +117,10 @@ class ParamSearchPlan(object):
         """
         Generate configs from the parameter search plan, also rename the experiment by generating the correct alias.
         """
-        return [pc.generate_config(base_cfg) for pc in self.param_configs]
+        if len(self.param_configs) > 0:
+            return [pc.generate_config(base_cfg) for pc in self.param_configs]
+        else:
+            return [base_cfg]
 
 
 def create_configs(
@@ -174,24 +176,12 @@ def read_configs(config_dir):
 
 def create_evaluation_configs(
         configs_to_search_fn,
-        config_file,
         config_dir,
-        prefix,
+        cfg,
         delete_config_dir=True,
 ):
-    if config_file is not None:
-        # Update default config with external json file
-        ext_cfg = json.load(open(config_file, "r"))
-        cfg = EvaluationConfig()
-        cfg.update(**ext_cfg)
-        print("Generating configs with {} as template".format(config_file))
-    else:
-        cfg = EvaluationConfig()
-
     configs = configs_to_search_fn(base_cfg=cfg)
-    for c in configs:
-        pfx = "{}_".format(prefix) if prefix is not None else ""
-        c.name = pfx + c.name
+
     config_fns = []
 
     if delete_config_dir and os.path.exists(config_dir):

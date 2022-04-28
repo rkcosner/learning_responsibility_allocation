@@ -35,15 +35,29 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--script_path",
-        type=str,
-        default="scripts/evaluate.py"
+        "--render",
+        default=False,
+        action="store_true"
     )
 
     parser.add_argument(
-        "--wandb_project_name",
+        "--num_scenes_per_batch",
+        type=int,
+        default=2,
+        help="Number of scenes to run concurrently (to accelerate eval)"
+    )
+
+    parser.add_argument(
+        "--ckpt_root_dir",
         type=str,
-        default="vae-sweep"
+        default="checkpoints/",
+        help="checkpoint root directory when running on ngc"
+    )
+
+    parser.add_argument(
+        "--script_path",
+        type=str,
+        default="scripts/evaluate.py"
     )
 
     parser.add_argument(
@@ -69,18 +83,23 @@ if __name__ == "__main__":
         cfgs, cfg_fns = read_evaluation_configs(args.config_dir)
 
     ngc_cfg = json.load(open(args.ngc_config, "r"))
-    ngc_cfg["wandb_apikey"] = os.environ["WANDB_APIKEY"]
-    ngc_cfg["wandb_project_name"] = args.wandb_project_name
     ngc_cfg["instance"] = args.ngc_instance
 
     script_command = [
         "python",
         args.script_path,
-        "--results_dir",
-        ngc_cfg["result_dir"],
+        "--results_root_dir",
+        ngc_cfg["eval_output_dir"],
+        "--num_scenes_per_batch",
+        str(args.num_scenes_per_batch),
         "--dataset_path",
-        ngc_cfg["dataset_path"]
+        ngc_cfg["dataset_path"],
+        "--ckpt_root_dir",
+        args.ckpt_root_dir
     ]
+
+    if args.render:
+        script_command.append("--render")
 
     res = input("upload codebase to ngc workspace? (y/n)")
     if res == "y":

@@ -3,7 +3,6 @@ import argparse
 from copy import deepcopy
 import numpy as np
 import json
-import h5py
 import random
 import yaml
 from collections import defaultdict
@@ -77,6 +76,7 @@ class PolicyComposer(object):
 class ReplayAction(PolicyComposer):
     def get_policy(self, **kwargs):
         print("Loading action log from {}".format(self.eval_config.experience_hdf5_path))
+        import h5py
         h5 = h5py.File(self.eval_config.experience_hdf5_path, "r")
         if self.eval_config.env == "nusc":
             exp_cfg = get_registered_experiment_config("nusc_rasterized_plan")
@@ -623,6 +623,7 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
 
 
 def dump_episode_buffer(buffer, scene_index, h5_path):
+    import h5py
     h5_file = h5py.File(h5_path, "a")
 
     for si, scene_buffer in zip(scene_index, buffer):
@@ -648,8 +649,7 @@ if __name__ == "__main__":
         "--env",
         type=str,
         choices=["nusc", "l5kit"],
-        help="Which env to run evaluation in",
-        required=True
+        help="Which env to run evaluation in"
     )
 
     parser.add_argument(
@@ -752,7 +752,10 @@ if __name__ == "__main__":
     if args.results_root_dir is not None:
         cfg.results_dir = os.path.join(args.results_root_dir, cfg.name)
 
-    cfg.env = args.env
+    if args.env is not None:
+        cfg.env = args.env
+    else:
+        assert cfg.env is not None
 
     cfg.experience_hdf5_path = os.path.join(cfg.results_dir, "data.hdf5")
 
@@ -788,7 +791,7 @@ if __name__ == "__main__":
     cfg.lock()
     run_evaluation(
         cfg,
-        save_cfg=args.mode == "record_rollout",
+        save_cfg=True,
         data_to_disk=data_to_disk,
         skimp_rollout=skimp_rollout,
         compute_metrics=compute_metrics,
