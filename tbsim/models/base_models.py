@@ -896,7 +896,6 @@ class ConditionEncoder(nn.Module):
             condition_dim: int,
             mlp_layer_dims: tuple = (128, 128),
             goal_encoder=None,
-            rnn_hidden_size: int = 100
     ) -> None:
         super(ConditionEncoder, self).__init__()
         if isinstance(map_encoder,nn.Module):
@@ -907,12 +906,13 @@ class ConditionEncoder(nn.Module):
             self.map_encoder = None
         self.trajectory_shape = trajectory_shape
         self.goal_encoder = goal_encoder
+        goal_dim = 0 if goal_encoder is None else goal_encoder.output_shape()[0]
 
         # TODO: history encoder
         # self.hist_lstm = nn.LSTM(trajectory_shape[-1], hidden_size=rnn_hidden_size, batch_first=True)
         
         self.mlp = MLP(
-            input_dim=visual_feature_size,
+            input_dim=visual_feature_size+goal_dim,
             output_dim=condition_dim,
             layer_dims=mlp_layer_dims,
             output_activation=nn.ReLU
@@ -923,10 +923,10 @@ class ConditionEncoder(nn.Module):
             map_feat = condition_inputs["map_feature"]
         else:
             map_feat = self.map_encoder(condition_inputs["image"])
-        c_feat = self.mlp(map_feat)
         if self.goal_encoder is not None:
             goal_feat = self.goal_encoder(condition_inputs["goal"])
             c_feat = torch.cat([c_feat, goal_feat], dim=-1)
+        c_feat = self.mlp(map_feat)
         return c_feat
 
 class ECEncoder(nn.Module):
@@ -972,12 +972,12 @@ class ECEncoder(nn.Module):
             goal_feat = self.goal_encoder(condition_inputs["goal"])
             c_feat = torch.cat([c_feat, goal_feat], dim=-1)
         if "cond_traj" in condition_inputs and condition_inputs["cond_traj"] is not None:
-            bs,Na = EC_feat.shape[:2]
-            EC_feat = self.traj_encoder(condition_inputs["cond_traj"])
-            EC_feat = torch.cat((EC_feat,torch.zeros(bs,1,self.EC_dim).to(EC_feat.device)),1)
+            bs,Na,T,D = condition_inputs["cond_traj"].shape
+            EC_feat = self.traj_encoder(condition_inputs["cond_traj"].reshape(-1,T,D)).reshape(bs,Na,-1)
+            EC_feat = torch.cat((EC_feat,torch.zeros([bs,1,self.EC_dim]).to(EC_feat.device)),1)
         else:
             bs = c_feat.shape[0]
-            EC_feat = np.zeros(bs,1,self.EC_dim).to(c_feat.device)
+            EC_feat = torch.zeros([bs,1,self.EC_dim]).to(c_feat.device)
         c_feat = c_feat.unsqueeze(1).repeat(1,EC_feat.shape[1],1)
         c_feat = torch.cat((c_feat,EC_feat),-1)
         c_feat = self.mlp(c_feat)

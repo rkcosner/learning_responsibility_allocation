@@ -383,8 +383,6 @@ class RasterizedVAEModel(nn.Module):
         self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
         prior = vaes.FixedGaussianPrior(latent_dim=algo_config.vae.latent_dim)
 
-        goal_dim = 0 if not algo_config.goal_conditional else algo_config.goal_feature_dim
-
         map_encoder = base_models.RasterizedMapEncoder(
             model_arch=algo_config.model_architecture,
             input_image_shape=modality_shapes["image"],
@@ -394,7 +392,7 @@ class RasterizedVAEModel(nn.Module):
         )
 
         traj_decoder = base_models.MLPTrajectoryDecoder(
-            feature_dim=algo_config.vae.condition_dim + goal_dim + algo_config.vae.latent_dim,
+            feature_dim=algo_config.vae.condition_dim + algo_config.vae.latent_dim,
             state_dim=trajectory_shape[-1],
             num_steps=algo_config.future_num_frames,
             dynamics_type=algo_config.dynamics.type,
@@ -422,7 +420,7 @@ class RasterizedVAEModel(nn.Module):
         )
 
         q_encoder = base_models.PosteriorEncoder(
-            condition_dim=algo_config.vae.condition_dim + goal_dim,
+            condition_dim=algo_config.vae.condition_dim,
             trajectory_shape=trajectory_shape,
             output_shapes=prior.posterior_param_shapes,
             mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
@@ -515,8 +513,6 @@ class RasterizedDiscreteVAEModel(nn.Module):
         trajectory_shape = (algo_config.future_num_frames, 3)
         self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
 
-        goal_dim = 0 if not algo_config.goal_conditional else algo_config.goal_feature_dim
-
         map_encoder = base_models.RasterizedMapEncoder(
             model_arch=algo_config.model_architecture,
             input_image_shape=modality_shapes["image"],
@@ -527,7 +523,7 @@ class RasterizedDiscreteVAEModel(nn.Module):
         if algo_config.vae.recon_loss_type=="MSE":
             algo_config.vae.decoder.Gaussian_var=False
         traj_decoder = base_models.MLPTrajectoryDecoder(
-            feature_dim=algo_config.vae.condition_dim + goal_dim + algo_config.vae.latent_dim,
+            feature_dim=algo_config.vae.condition_dim + algo_config.vae.latent_dim,
             state_dim=trajectory_shape[-1],
             num_steps=algo_config.future_num_frames,
             dynamics_type=algo_config.dynamics.type,
@@ -546,24 +542,33 @@ class RasterizedDiscreteVAEModel(nn.Module):
             )
         else:
             goal_encoder = None
-
-        c_encoder = base_models.ConditionEncoder(
-            map_encoder=map_encoder,
-            trajectory_shape=trajectory_shape,
-            condition_dim=algo_config.vae.condition_dim,
-            mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
-            goal_encoder=goal_encoder,
-            rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
-        )
+        if algo_config.ego_conditioning:
+            c_encoder = base_models.ECEncoder(
+                map_encoder=map_encoder,
+                trajectory_shape=trajectory_shape,  # [T, D]
+                EC_dim=algo_config.EC_feat_dim,
+                condition_dim=algo_config.vae.condition_dim, 
+                mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
+                goal_encoder=goal_encoder,
+                rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size)
+        else:
+            c_encoder = base_models.ConditionEncoder(
+                map_encoder=map_encoder,
+                trajectory_shape=trajectory_shape,
+                condition_dim=algo_config.vae.condition_dim,
+                mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
+                goal_encoder=goal_encoder,
+                rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
+            )
         q_encoder = base_models.PosteriorEncoder(
-            condition_dim=algo_config.vae.condition_dim + goal_dim,
+            condition_dim=algo_config.vae.condition_dim,
             trajectory_shape=trajectory_shape,
             output_shapes=OrderedDict(logq=(algo_config.vae.latent_dim,)),
             mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
             rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
         )
         p_encoder = base_models.SplitMLP(
-            input_dim=algo_config.vae.condition_dim+goal_dim,
+            input_dim=algo_config.vae.condition_dim,
             layer_dims=algo_config.vae.encoder.mlp_layer_dims,
             output_shapes=OrderedDict(logp=(algo_config.vae.latent_dim,))
         )
@@ -572,7 +577,11 @@ class RasterizedDiscreteVAEModel(nn.Module):
             logpi_clamp = algo_config.vae.logpi_clamp
         else:
             logpi_clamp=None
-        self.vae = vaes.DiscreteCVAE(
+        if algo_config.ego_conditioning:
+            vae_model = vaes.ECDiscreteCVAE
+        else:
+            vae_model = vaes.DiscreteCVAE
+        self.vae = vae_model(
             q_net=q_encoder,
             p_net=p_encoder,
             c_net=c_encoder,
@@ -610,46 +619,59 @@ class RasterizedDiscreteVAEModel(nn.Module):
         decoder_kwargs = dict()
         if self.dyn is not None:
             current_states = L5Utils.get_current_states(batch_inputs, self.dyn.type())
-            decoder_kwargs["current_states"] = current_states.tile(self.vae.K,1)
-        
-        outs = self.vae.forward(inputs=inputs, condition_inputs=condition_inputs, decoder_kwargs=decoder_kwargs)
+            decoder_kwargs["current_states"] = current_states
+        cond_traj = torch.cat((batch_inputs["all_other_agents_future_positions"],batch_inputs["all_other_agents_future_yaws"]),-1)
+        outs = self.vae.forward(inputs=inputs, condition_inputs=condition_inputs, cond_traj=cond_traj, decoder_kwargs=decoder_kwargs)
         outs.update(self._traj_to_preds(outs["x_recons"]["trajectories"]))
         if self.dyn is not None:
             outs["controls"] = outs["x_recons"]["controls"]
-        return outs
+        pred = TensorUtils.join_dimensions(TensorUtils.slice_tensor(outs,1,0,1),0,2)
+        if outs["p"].shape[1]>1:
+            EC_pred = TensorUtils.slice_tensor(outs,1,1,outs["p"].shape[1])
+            EC_pred["cond_traj"] = cond_traj
+            pred["EC_pred"] = EC_pred
 
-    def sample(self, batch_inputs: dict, n: int):
+        return pred
+
+    def sample(self, batch_inputs: dict, n: int,cond_traj = None):
         condition_inputs = OrderedDict(image=batch_inputs["image"], goal=self._get_goal_states(batch_inputs))
-
         decoder_kwargs = dict()
         if self.dyn is not None:
-            curr_states = L5Utils.get_current_states(batch_inputs, self.dyn.type())
-            decoder_kwargs["current_states"] = TensorUtils.repeat_by_expand_at(curr_states, repeats=n, dim=0)
+            decoder_kwargs["current_states"] = L5Utils.get_current_states(batch_inputs, self.dyn.type())
 
-        outs = self.vae.sample(condition_inputs=condition_inputs, n=n, decoder_kwargs=decoder_kwargs)
-        return self._traj_to_preds(outs["trajectories"])
+        outs = self.vae.sample(condition_inputs=condition_inputs, n=n, cond_traj=cond_traj, decoder_kwargs=decoder_kwargs)
+        outs = self._traj_to_preds(outs["trajectories"])
+        pred = TensorUtils.join_dimensions(TensorUtils.slice_tensor(outs,1,0,1),0,2)
+        if outs["trajectories"].shape[1]>1:
+            EC_pred = TensorUtils.slice_tensor(outs,1,1,outs["trajectories"].shape[1])
+            pred["EC_pred"] = EC_pred
 
-    def predict(self, batch_inputs: dict):
+        return pred
+
+    def predict(self, batch_inputs: dict,cond_traj=None):
         condition_inputs = OrderedDict(image=batch_inputs["image"], goal=self._get_goal_states(batch_inputs))
-
+        if cond_traj is not None:
+            condition_inputs["cond_traj"] = cond_traj
         decoder_kwargs = dict()
         if self.dyn is not None:
             decoder_kwargs["current_states"] = L5Utils.get_current_states(batch_inputs, self.dyn.type())
 
         outs = self.vae.predict(condition_inputs=condition_inputs, decoder_kwargs=decoder_kwargs)
-        return self._traj_to_preds(outs["trajectories"])
-
-    def compute_losses(self, pred_batch, data_batch):
-        kl_loss = self.vae.compute_kl_loss(pred_batch)
-        target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=2)
+        outs = self._traj_to_preds(outs["trajectories"])
+        pred = TensorUtils.join_dimensions(TensorUtils.slice_tensor(outs,1,0,1),0,2)
+        if outs["trajectories"].shape[1]>1:
+            EC_pred = TensorUtils.slice_tensor(outs,1,1,outs["trajectories"].shape[1])
+            pred["EC_pred"] = EC_pred
+        return pred
+    
+    def compute_pred_loss(self,pred_batch,target_traj,avails,prob):
         z1 = torch.argmax(pred_batch["z"],dim=-1)
-        prob = torch.gather(pred_batch["q"],1,z1)
         if self.recon_loss_type=="NLL":
             assert "logvar" in pred_batch["x_recons"]
             bs, M, T, D = pred_batch["trajectories"].shape
             var = (torch.exp(pred_batch["x_recons"]["logvar"])+torch.ones_like(pred_batch["x_recons"]["logvar"])*1e-4).reshape(bs,M,-1)
             var = torch.gather(var,1,z1.unsqueeze(-1).repeat(1,1,var.size(-1)))
-            avails = data_batch["target_availabilities"].unsqueeze(-1).repeat(1, 1, target_traj.shape[-1]).reshape(bs, -1)
+            avails = avails.unsqueeze(-1).repeat(1, 1, target_traj.shape[-1]).reshape(bs, -1)
             pred_loss = NLL_GMM_loss(
                 x=target_traj.reshape(bs,-1),
                 m=pred_batch["trajectories"].reshape(bs,M,-1),
@@ -664,6 +686,7 @@ class RasterizedDiscreteVAEModel(nn.Module):
             # Use torch distribution family to calculate likelihood
             means = pred_batch["trajectories"].reshape(bs, num_modes, -1)
             scales = torch.exp(pred_batch["x_recons"]["logvar"]).reshape(bs, num_modes, -1)
+            
             scales = torch.gather(scales,1,z1.unsqueeze(-1).repeat(1,1,scales.size(-1)))
             mode_probs = prob
             # Calculate scale
@@ -691,16 +714,47 @@ class RasterizedDiscreteVAEModel(nn.Module):
             pred_loss = MultiModal_trajectory_loss(
                 predictions=pred_batch["trajectories"],
                 targets=target_traj,
-                availabilities=data_batch["target_availabilities"],
+                availabilities=avails,
                 prob = prob,
                 weights_scaling=self.weights_scaling,
             )
         else:
             raise NotImplementedError("{} is not implemented".format(self.recon_loss_type))
+        return pred_loss
+
+    def compute_losses(self, pred_batch, data_batch):
+        kl_loss = self.vae.compute_kl_loss(pred_batch)
+        target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=2)
+        z1 = torch.argmax(pred_batch["z"],dim=-1)
+        prob = torch.gather(pred_batch["q"],1,z1)
+        pred_loss = self.compute_pred_loss(pred_batch,target_traj,data_batch["target_availabilities"],prob)
+        
         losses = OrderedDict(prediction_loss=pred_loss, kl_loss=kl_loss)
+        if "EC_pred" in pred_batch:
+            EC_pred = pred_batch["EC_pred"]
+            EC_edges,type_mask = L5Utils.gen_EC_edges(
+                EC_pred["trajectories"],
+                EC_pred["cond_traj"],
+                data_batch["extent"][...,:2],
+                data_batch["all_other_agents_future_extents"][...,:2].max(dim=2)[0],
+                data_batch["all_other_agents_types"]
+            )
+            EC_coll_loss = collision_loss_masked(EC_edges,type_mask)
+
+            Na = EC_pred["trajectories"].shape[1]
+            EC_batch = TensorUtils.join_dimensions(EC_pred,0,2)
+            target_traj_tiled = TensorUtils.join_dimensions(TensorUtils.unsqueeze_expand_at(target_traj,Na,1),0,2)
+            avails = TensorUtils.join_dimensions(TensorUtils.unsqueeze_expand_at(data_batch["target_availabilities"],Na,1),0,2)
+
+            EC_z1 = torch.argmax(EC_batch["z"],dim=-1)
+            EC_prob = torch.gather(EC_batch["q"],1,EC_z1)
+            deviation_loss = self.compute_pred_loss(EC_batch,target_traj_tiled,avails,EC_prob)
+
+            EC_losses = OrderedDict(EC_coll_loss=EC_coll_loss,deviation_loss=deviation_loss)
+            losses.update(EC_losses)
+
         if self.dyn is not None:
             losses["yaw_reg_loss"] = torch.mean(pred_batch["controls"][..., 1] ** 2)
-
         return losses
 
 
@@ -712,7 +766,6 @@ class RasterizedTreeVAEModel(nn.Module):
         trajectory_shape = (algo_config.num_frames_per_stage, 3)
         self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
 
-        goal_dim = 0 if not algo_config.goal_conditional else algo_config.goal_feature_dim
 
         self.map_encoder = base_models.RasterizedMapEncoder(
             model_arch=algo_config.model_architecture,
@@ -725,28 +778,18 @@ class RasterizedTreeVAEModel(nn.Module):
         self.num_frames_per_stage=algo_config.num_frames_per_stage
         if algo_config.vae.recon_loss_type=="MSE":
             algo_config.vae.decoder.Gaussian_var=False
-        if algo_config.EC:
-            self.traj_decoder = base_models.MLPECTrajectoryDecoder(
-                feature_dim=algo_config.map_feature_dim + goal_dim,
-                state_dim=trajectory_shape[-1],
-                num_steps=algo_config.future_num_frames,
-                dynamics_type=algo_config.dynamics.type,
-                dynamics_kwargs=algo_config.dynamics,
-                EC_feature_dim = algo_config.EC.feature_dim,
-                network_kwargs=algo_config.decoder,
-                step_time=algo_config.step_time,
-            )
-        else:
-            traj_decoder = base_models.MLPTrajectoryDecoder(
-                feature_dim=algo_config.vae.condition_dim + goal_dim + algo_config.vae.latent_dim,
-                state_dim=trajectory_shape[-1],
-                num_steps=algo_config.num_frames_per_stage,
-                dynamics_type=algo_config.dynamics.type,
-                dynamics_kwargs=algo_config.dynamics,
-                network_kwargs=algo_config.decoder,
-                step_time=algo_config.step_time,
-                Gaussian_var=algo_config.vae.decoder.Gaussian_var
-            )
+
+
+        traj_decoder = base_models.MLPTrajectoryDecoder(
+            feature_dim=algo_config.vae.condition_dim + algo_config.vae.latent_dim,
+            state_dim=trajectory_shape[-1],
+            num_steps=algo_config.num_frames_per_stage,
+            dynamics_type=algo_config.dynamics.type,
+            dynamics_kwargs=algo_config.dynamics,
+            network_kwargs=algo_config.decoder,
+            step_time=algo_config.step_time,
+            Gaussian_var=algo_config.vae.decoder.Gaussian_var
+        )
         self.recon_loss_type = algo_config.vae.recon_loss_type
         
         if algo_config.goal_conditional:
@@ -757,24 +800,34 @@ class RasterizedTreeVAEModel(nn.Module):
             )
         else:
             goal_encoder = None
-
-        c_encoder = base_models.ConditionEncoder(
-            map_encoder=self.map_encoder.output_shape()[0],
-            trajectory_shape=trajectory_shape,
-            condition_dim=algo_config.vae.condition_dim,
-            mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
-            goal_encoder=goal_encoder,
-            rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
-        )
+        self.EC = algo_config.ego_conditioning
+        if self.EC:
+            c_encoder = base_models.ECEncoder(
+                map_encoder=self.map_encoder.output_shape()[0],
+                trajectory_shape=trajectory_shape,  # [T, D]
+                EC_dim=algo_config.EC_feat_dim,
+                condition_dim=algo_config.vae.condition_dim, 
+                mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
+                goal_encoder=goal_encoder,
+                rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size)
+        else:
+            c_encoder = base_models.ConditionEncoder(
+                map_encoder=self.map_encoder.output_shape()[0],
+                trajectory_shape=trajectory_shape,
+                condition_dim=algo_config.vae.condition_dim,
+                mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
+                goal_encoder=goal_encoder,
+                rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
+            )
         q_encoder = base_models.PosteriorEncoder(
-            condition_dim=algo_config.vae.condition_dim + goal_dim,
+            condition_dim=algo_config.vae.condition_dim,
             trajectory_shape=trajectory_shape,
             output_shapes=OrderedDict(logq=(algo_config.vae.latent_dim,)),
             mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
             rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
         )
         p_encoder = base_models.SplitMLP(
-            input_dim=algo_config.vae.condition_dim+goal_dim,
+            input_dim=algo_config.vae.condition_dim,
             layer_dims=algo_config.vae.encoder.mlp_layer_dims,
             output_shapes=OrderedDict(logp=(algo_config.vae.latent_dim,))
         )
@@ -834,6 +887,11 @@ class RasterizedTreeVAEModel(nn.Module):
         preds = list()
         decoder_kwargs = dict()
         bs = batch_inputs["image"].shape[0]
+        if self.EC:
+            cond_traj_total = torch.cat((batch_inputs["all_other_agents_future_positions"],batch_inputs["all_other_agents_future_yaws"]),-1)
+            cond_traj = list()
+            for t in range(self.stage):
+                cond_traj.append(TensorUtils.slice_tensor(cond_traj_total,2,t*H,(t+1)*H))
         for t in range(self.stage):
             
             
@@ -845,8 +903,8 @@ class RasterizedTreeVAEModel(nn.Module):
                 else:
                     current_states = outs["x_recons"]["terminal_state"]
                     # current_states = TensorUtils.reshape_dimensions_single(current_states,0,2,batch_shape)
-                repeats = [1]*(t+1)+[self.vae.K]+[1]
-                decoder_kwargs["current_states"] = current_states.unsqueeze(-2).repeat(*repeats).reshape(-1,current_states.shape[-1])
+                # repeats = [1]*(t+1)+[self.vae.K]+[1]
+                # decoder_kwargs["current_states"] = current_states.unsqueeze(-2).repeat(*repeats).reshape(-1,current_states.shape[-1])
             if t>0:
                 if goal is not None:
                     goal = TensorUtils.expand_at_single(goal.unsqueeze(-2),self.vae.K,-2)
@@ -863,7 +921,8 @@ class RasterizedTreeVAEModel(nn.Module):
 
             outs = self.vae.forward(inputs=inputs, condition_inputs=condition_inputs, decoder_kwargs=decoder_kwargs)
             curr_map_feat = TensorUtils.reshape_dimensions_single(curr_map_feat,0,1,batch_shape)
-            
+            import pdb
+            pdb.set_trace()
             
             if self.dyn is not None:
                 outs["controls"] = outs["x_recons"]["controls"]

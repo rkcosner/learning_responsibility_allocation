@@ -306,6 +306,9 @@ class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
         self.goal_conditional = True
         self.goal_feature_dim = 32
 
+
+        self.ego_conditioning = True
+        self.EC_feat_dim = 64
         self.vae.latent_dim = 10
         self.vae.condition_dim = 128
         self.vae.num_eval_samples = 10
@@ -317,7 +320,9 @@ class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
         self.vae.recon_loss_type = "NLL"
         self.vae.logpi_clamp = -6.0
 
-        self.loss_weights.kl_loss = 1
+        self.loss_weights.kl_loss = 10
+        self.loss_weights.EC_coll_loss = 10
+        self.loss_weights.deviation_loss = 0.5
         self.eval.mode = "mean"
 
         self.min_std = 0.1

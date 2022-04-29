@@ -540,7 +540,7 @@ class DiscreteCVAE(nn.Module):
 
         z = torch.arange(self.K).to(q.device).tile(*q.shape[:-1],1)
         z = F.one_hot(z,self.K)
-        decoder_kwargs = dict() if decoder_kwargs is None else decoder_kwargs
+        decoder_kwargs = dict() if decoder_kwargs is None else TensorUtils.unsqueeze_expand_at(decoder_kwargs,self.K,1)
         c_tiled = c.unsqueeze(1).repeat(1,self.K,1)
         x_out = self.decoder(latents=z.reshape(-1,self.K), condition_features=c_tiled.reshape(-1,c.shape[-1]), **decoder_kwargs)
         x_out = TensorUtils.reshape_dimensions(x_out,0,1,(z.shape[0],self.K))
@@ -580,41 +580,7 @@ class DiscreteCVAE(nn.Module):
 
 
 class ECDiscreteCVAE(DiscreteCVAE):
-    def __init__(
-            self,
-            q_net: nn.Module,
-            p_net: nn.Module,
-            c_net: nn.Module,
-            decoder: nn.Module,
-            K: int,
-            recon_loss_fun=None,
-            logpi_clamp = None,
-    ):
-        """
-        A basic Conditional Variational Autoencoder Network (C-VAE)
-
-        Args:
-            q_net (nn.Module): a model that encodes data (x) and condition inputs (x_c) to posterior (q) parameters
-            p_net (nn.Module): a model that encodes condition feature (c) to latent (p) parameters
-            c_net (nn.Module): a model that encodes condition inputs (x_c) into condition feature (c)
-            decoder (nn.Module): a model that decodes latent (z) and condition feature (c) to data (x')
-            K (int): cardinality of the discrete latent
-            recon_loss: loss function handle for reconstruction loss
-            logpi_clamp (float): lower bound of the logpis, for numerical stability
-        """
-        super(DiscreteCVAE, self).__init__()
-        self.q_net = q_net
-        self.p_net = p_net
-        self.c_net = c_net
-        self.decoder = decoder
-        self.K = K
-        self.logpi_clamp= logpi_clamp
-        if recon_loss_fun is None:
-            self.recon_loss_fun = nn.MSELoss(reduction="none")
-        else:
-            self.recon_loss_fun = recon_loss_fun
-
-    def sample(self, condition_inputs, n: int, condition_feature=None, decoder_kwargs=None):
+    def sample(self, condition_inputs, n: int,cond_traj = None, condition_feature=None, decoder_kwargs=None):
         """
         Draw data samples (x') given a batch of condition inputs (x_c) and the VAE prior.
 
@@ -632,22 +598,34 @@ class ECDiscreteCVAE(DiscreteCVAE):
         if condition_feature is not None:
             c = condition_feature
         else:
+            if cond_traj is not None:
+                condition_inputs["cond_traj"] = cond_traj
             c = self.c_net(condition_inputs)  # [B, ...]
-        logp = self.p_net(c)["logp"]
+        
+        bs,Na = c.shape[:2]
+        c_joined = TensorUtils.join_dimensions(c,0,2)
+        logp = self.p_net(c_joined)["logp"]
         p = torch.exp(logp)
         p = p/p.sum(dim=-1,keepdim=True)
         # z = (-logp).argsort()[...,:n]
         # z = F.one_hot(z,self.K)
 
         dis_p = Categorical(probs=p)  # [n_sample, batch] -> [batch, n_sample]
+        
         z = dis_p.sample((n,)).permute(1, 0)
         z = F.one_hot(z, self.K)
 
-        z_samples = TensorUtils.join_dimensions(z, begin_axis=0, end_axis=2)  # [B * N, ...]
-        c_samples = TensorUtils.repeat_by_expand_at(c, repeats=n, dim=0)  # [B * N, ...]
-        decoder_kwargs = dict() if decoder_kwargs is None else decoder_kwargs
+        z_samples = TensorUtils.join_dimensions(z, begin_axis=0, end_axis=2)  # [B * Na * n, ...]
+        c_samples = TensorUtils.repeat_by_expand_at(c_joined, repeats=n, dim=0)  # [B * Na * n, ...]
+        if decoder_kwargs is None:
+            decoder_kwargs = dict()
+        else:
+            decoder_kwargs = TensorUtils.unsqueeze_expand_at(decoder_kwargs,Na,1)
+            decoder_kwargs = TensorUtils.unsqueeze_expand_at(decoder_kwargs,n,2)
+            decoder_kwargs = TensorUtils.join_dimensions(decoder_kwargs,0,3)
         x_out = self.decoder(latents=z_samples, condition_features=c_samples, **decoder_kwargs)
-        x_out = TensorUtils.reshape_dimensions(x_out, begin_axis=0, end_axis=1, target_dims=(c.shape[0], n))
+        x_out = TensorUtils.reshape_dimensions(x_out, begin_axis=0, end_axis=1, target_dims=(bs,Na,n))
+        
         return x_out
 
     def predict(self, condition_inputs, condition_feature=None, cond_traj = None, decoder_kwargs=None):
@@ -666,13 +644,21 @@ class ECDiscreteCVAE(DiscreteCVAE):
         if condition_feature is not None:
             c = condition_feature
         else:
-            c = self.c_net(condition_inputs,cond_traj)  # [B, ...]
-
-        logp = self.p_net(c)["logp"]
+            if cond_traj is not None:
+                condition_inputs["cond_traj"] = cond_traj
+            c = self.c_net(condition_inputs)  # [B, ...]
+        bs,Na = c.shape[:2]
+        c_joined = TensorUtils.join_dimensions(c,0,2)
+        logp = self.p_net(c_joined)["logp"]
         z = logp.argmax(dim=-1)
         
-        decoder_kwargs = dict() if decoder_kwargs is None else decoder_kwargs
-        x_out = self.decoder(latents=F.one_hot(z,self.K), condition_features=c, **decoder_kwargs)
+        if decoder_kwargs is None:
+            decoder_kwargs = dict()
+        else:
+            decoder_kwargs = TensorUtils.unsqueeze_expand_at(decoder_kwargs,Na,1)
+            decoder_kwargs = TensorUtils.join_dimensions(decoder_kwargs,0,2)
+        x_out = self.decoder(latents=F.one_hot(z,self.K), condition_features=c_joined, **decoder_kwargs)
+        x_out = TensorUtils.reshape_dimensions(x_out, begin_axis=0, end_axis=1, target_dims=(bs,Na))
         return x_out
 
     def forward(self, inputs, condition_inputs, cond_traj, decoder_kwargs=None):
@@ -687,11 +673,16 @@ class ECDiscreteCVAE(DiscreteCVAE):
         Returns:
             dictionary of batched samples (x')
         """
-
-        c = self.c_net(condition_inputs,cond_traj)  # [B, ...]
-        logp = self.p_net(c)["logp"]
+        condition_inputs["cond_traj"] = cond_traj
+        c = self.c_net(condition_inputs)  # [B, ...]
+        c_joined = TensorUtils.join_dimensions(c,0,2)
+        bs,Na = c.shape[:2]
+        logp = TensorUtils.reshape_dimensions(self.p_net(c_joined)["logp"],0,1,(bs,Na))
+        
         if inputs is not None:
-            logq = self.q_net(inputs=inputs, condition_features=c)["logq"]
+            inputs_tiled = TensorUtils.unsqueeze_expand_at(inputs,Na,1)
+            inputs_joined = TensorUtils.join_dimensions(inputs_tiled,0,2)
+            logq = TensorUtils.reshape_dimensions(self.q_net(inputs=inputs_joined, condition_features=c_joined)["logq"],0,1,(bs,Na))
         else:
             logq = logp
         if self.logpi_clamp is not None:
@@ -707,10 +698,16 @@ class ECDiscreteCVAE(DiscreteCVAE):
 
         z = torch.arange(self.K).to(q.device).tile(*q.shape[:-1],1)
         z = F.one_hot(z,self.K)
-        decoder_kwargs = dict() if decoder_kwargs is None else decoder_kwargs
-        c_tiled = c.unsqueeze(1).repeat(1,self.K,1)
-        x_out = self.decoder(latents=z.reshape(-1,self.K), condition_features=c_tiled.reshape(-1,c.shape[-1]), **decoder_kwargs)
-        x_out = TensorUtils.reshape_dimensions(x_out,0,1,(z.shape[0],self.K))
+        if decoder_kwargs is None:
+            decoder_kwargs = dict()
+        else:
+            decoder_kwargs = TensorUtils.unsqueeze_expand_at(decoder_kwargs,Na,1)
+            decoder_kwargs = TensorUtils.unsqueeze_expand_at(decoder_kwargs,self.K,2)
+            decoder_kwargs = TensorUtils.join_dimensions(decoder_kwargs,0,3)
+        
+        c_tiled = c[:,:,None].repeat(1,1,self.K,1)
+        x_out = self.decoder(latents=z.reshape(-1,self.K), condition_features=TensorUtils.join_dimensions(c_tiled,0,3), **decoder_kwargs)
+        x_out = TensorUtils.reshape_dimensions(x_out,0,1,(bs,Na,self.K))
         return {"x_recons": x_out, "q": q, "p": p, "z": z, "c": c}
 
     def compute_kl_loss(self, outputs: dict):

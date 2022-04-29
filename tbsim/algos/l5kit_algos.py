@@ -1017,6 +1017,8 @@ class L5ECTrafficModel(L5TrafficModel):
     def get_EC_pred(self,obs,cond_traj,goal_state=None):
         return self.nets["policy"].EC_predict(obs,cond_traj,goal_state)
 
+
+
 class GANTrafficModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):
         super(GANTrafficModel, self).__init__()

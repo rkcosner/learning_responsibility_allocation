@@ -3,6 +3,7 @@ A collection of utilities for working with nested tensor structures consisting
 of numpy arrays and torch tensors.
 """
 import collections
+from tracemalloc import start
 import numpy as np
 import torch
 import torch.nn as nn
@@ -796,6 +797,40 @@ def gather_sequence(seq, indices):
         y (dict or list or tuple): new nested dict-list-tuple with tensors of shape [B, ...]
     """
     return gather_along_dim_with_dim(seq, target_dim=1, source_dim=0, indices=indices)
+
+def slice_tensor_single(x,dim,start_idx,end_idx):
+    """select a slice of the tensor
+
+    Args:
+        x (torch.Tensor or np.array): the tensor
+        dim (int): dimension to select
+        start_idx (int): starting index
+        end_idx (int): ending index
+    """
+    assert start_idx>=0 and start_idx<= end_idx and end_idx<=x.shape[dim]
+    if isinstance(x,np.ndarray):
+        return x.take(np.arange(start_idx,end_idx),dim)
+    elif isinstance(x,torch.Tensor):
+        return torch.index_select(x,dim,torch.arange(start_idx,end_idx).to(x.device))
+
+def slice_tensor(tensor,dim,start_idx,end_idx):
+    """recursively select a slice of the tensor or its field if tensor is a dict
+
+    Args:
+        tensor (torch.Tensor or dict): the tensor
+        dim (int): dimension to select
+        start_idx (int): starting index
+        end_idx (int): ending index
+    """
+
+    return recursive_dict_list_tuple_apply(
+        tensor,
+        {
+            torch.Tensor: lambda x: slice_tensor_single(x,dim,start_idx,end_idx),
+            np.ndarray: lambda x: slice_tensor_single(x,dim,start_idx,end_idx),
+            type(None): lambda x: x,
+        }
+    )
 
 
 def pad_sequence_single(seq, padding, batched=False, pad_same=False, pad_values=0.):

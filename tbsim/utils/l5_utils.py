@@ -607,17 +607,30 @@ def gen_EC_edges(ego_trajectories,agent_trajectories,ego_extents, agent_extents,
         edges (torch.Tensor): [B,N,A,T,10]
         type_mask (dict)
     """
-    B,A,T = ego_trajectories.shape[:3]
+    
+    B,A = ego_trajectories.shape[:2]
+    T = ego_trajectories.shape[-2]
 
     veh_mask = (raw_types >= 3) & (raw_types <= 13)
     ped_mask = (raw_types == 14) | (raw_types == 15)
 
-    edges = torch.zeros([B,A,T,10]).to(ego_trajectories.device)
-
-    edges[...,:3] = ego_trajectories
-    edges[...,3:6] = agent_trajectories
-    edges[...,6:8] = ego_extents.reshape(B,1,1,2).repeat(1,A,T,1)
-    edges[...,8:] = agent_extents.unsqueeze(2).repeat(1,1,T,1)
+    
+    if ego_trajectories.ndim==4:
+        edges = torch.zeros([B,A,T,10]).to(ego_trajectories.device)
+        edges[...,:3] = ego_trajectories
+        edges[...,3:6] = agent_trajectories
+        edges[...,6:8] = ego_extents.reshape(B,1,1,2).repeat(1,A,T,1)
+        edges[...,8:] = agent_extents.unsqueeze(2).repeat(1,1,T,1)
+    elif ego_trajectories.ndim==5:
+        
+        K = ego_trajectories.shape[2]
+        edges = torch.zeros([B,A*K,T,10]).to(ego_trajectories.device)
+        edges[...,:3] = TensorUtils.join_dimensions(ego_trajectories,1,3)
+        edges[...,3:6] = agent_trajectories.repeat(1,K,1,1)
+        edges[...,6:8] = ego_extents.reshape(B,1,1,2).repeat(1,A*K,T,1)
+        edges[...,8:] = agent_extents.unsqueeze(2).repeat(1,K,T,1)
+        veh_mask = veh_mask.tile(1,K)
+        ped_mask = ped_mask.tile(1,K)
     type_mask = {"VV":veh_mask,"VP":ped_mask}
     return edges,type_mask
     
