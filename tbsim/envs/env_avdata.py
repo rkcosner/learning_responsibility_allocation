@@ -77,8 +77,8 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
     @property
     def current_agent_scene_index(self):
         si = []
-        for i, scene in enumerate(self._current_scenes):
-            si.extend([i] * len(scene.agents))
+        for scene_i, scene in zip(self.current_scene_index, self._current_scenes):
+            si.extend([scene_i] * len(scene.agents))
         return np.array(si, dtype=np.int64)
 
     @property

@@ -55,7 +55,7 @@ def rasterize_agents(
 
 
 def get_drivable_region_map(maps: torch.Tensor):
-    drivable = torch.amax(maps[..., :3, :, :], dim=-3).bool()
+    drivable = torch.amax(maps[..., -7:-4, :, :], dim=-3).bool()
     return drivable
 
 
@@ -99,7 +99,7 @@ def parse_avdata_batch(batch: dict):
     )
     drivable_map = get_drivable_region_map(batch["maps"])
 
-    extent_scale = 1.1
+    extent_scale = 1.0
 
     d = dict(
         image=maps,

@@ -13,7 +13,6 @@ from collections import defaultdict
 from tbsim.models.cnn_roi_encoder import obtain_lane_flag
 from torchvision.ops.roi_align import RoIAlign
 import tbsim.utils.geometry_utils as GeoUtils
-from tbsim.utils.l5_utils import get_current_states, get_drivable_region_map
 from pyemd import emd
 
 
@@ -545,7 +544,7 @@ class Occupancymet(EnvMetrics):
     def add_step(self, state_info: dict, all_scene_index: np.ndarray):
         self._per_step.append(0)
         self._per_step_mask.append(1)
-        drivable_area = get_drivable_region_map(state_info["image"])
+        drivable_area = batch_utils().get_drivable_region_map(state_info["image"])
         coords = state_info["history_positions"][:,-1]
         coords = GeoUtils.batch_nd_transform_points_np(coords,state_info["world_from_agent"])
         for scene_idx in all_scene_index:
@@ -584,7 +583,7 @@ class OccupancyDiversity(Occupancymet):
     def add_step(self, state_info: dict, all_scene_index: np.ndarray):
         self._per_step.append(0)
         self._per_step_mask.append(1)
-        drivable_area = get_drivable_region_map(state_info["image"])
+        drivable_area = batch_utils().get_drivable_region_map(state_info["image"])
         coords = state_info["history_positions"][:,-1]
         coords = GeoUtils.batch_nd_transform_points_np(coords,state_info["world_from_agent"])
         for scene_idx in all_scene_index:

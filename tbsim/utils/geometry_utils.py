@@ -353,7 +353,6 @@ def detect_collision(
     for i in range(other_pos.shape[0]):
         agent_bbox = utils._get_bounding_box(other_pos[i], other_yaw[i], other_extent[i])
         if ego_bbox.intersects(agent_bbox):
-
             front_side, rear_side, left_side, right_side = utils._get_sides(ego_bbox)
 
             intersection_length_per_side = np.asarray(
