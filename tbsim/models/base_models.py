@@ -920,13 +920,13 @@ class ConditionEncoder(nn.Module):
 
     def forward(self, condition_inputs):
         if self.map_encoder is None:
-            map_feat = condition_inputs["map_feature"]
+            c_feat = condition_inputs["map_feature"]
         else:
-            map_feat = self.map_encoder(condition_inputs["image"])
+            c_feat = self.map_encoder(condition_inputs["image"])
         if self.goal_encoder is not None:
             goal_feat = self.goal_encoder(condition_inputs["goal"])
             c_feat = torch.cat([c_feat, goal_feat], dim=-1)
-        c_feat = self.mlp(map_feat)
+        c_feat = self.mlp(c_feat)
         return c_feat
 
 class ECEncoder(nn.Module):
@@ -978,7 +978,10 @@ class ECEncoder(nn.Module):
         else:
             bs = c_feat.shape[0]
             EC_feat = torch.zeros([bs,1,self.EC_dim]).to(c_feat.device)
-        c_feat = c_feat.unsqueeze(1).repeat(1,EC_feat.shape[1],1)
+        if c_feat.ndim==2:
+            c_feat = c_feat.unsqueeze(1).repeat(1,EC_feat.shape[1],1)
+        else: 
+            assert c_feat.ndim==3 and c_feat.shape[1]==EC_feat.shape[1]
         c_feat = torch.cat((c_feat,EC_feat),-1)
         c_feat = self.mlp(c_feat)
         
@@ -1164,6 +1167,7 @@ class MLPTrajectoryDecoder(TrajectoryDecoder):
     def _forward_networks(self, inputs, current_states=None, num_steps=None):
         if self._network_kwargs["state_as_input"] and self.dyn is not None:
             inputs = torch.cat((inputs, current_states), dim=-1)
+
 
         if inputs.ndim == 2:
             # [B, D]

@@ -553,3 +553,38 @@ def collision_loss_masked(edges, type_mask, col_funcs=None):
 def discriminator_loss(likelihood_pred,likelihood_GT):
     label = torch.cat((torch.zeros_like(likelihood_pred),torch.ones_like(likelihood_GT)),0)
     return F.binary_cross_entropy(torch.cat((likelihood_pred,likelihood_GT)),label)
+
+def compute_pred_loss(recon_loss_type,pred_batch,target_traj,avails,prob,weights_scaling=None):
+    if "z" in pred_batch:
+        z1 = torch.argmax(pred_batch["z"],dim=-1)
+    else:
+        z1 = None
+    if recon_loss_type=="NLL":
+        assert "logvar" in pred_batch["x_recons"]
+        bs, M, T, D = pred_batch["trajectories"].shape
+        var = (torch.exp(pred_batch["x_recons"]["logvar"])+torch.ones_like(pred_batch["x_recons"]["logvar"])*1e-4).reshape(bs,M,-1)
+        if z1 is not None:
+            var = torch.gather(var,1,z1.unsqueeze(-1).repeat(1,1,var.size(-1)))
+        avails = avails.unsqueeze(-1).repeat(1, 1, target_traj.shape[-1]).reshape(bs, -1)
+        pred_loss = NLL_GMM_loss(
+            x=target_traj.reshape(bs,-1),
+            m=pred_batch["trajectories"].reshape(bs,M,-1),
+            v=var,
+            pi=prob,
+            avails=avails
+        )
+        pred_loss = pred_loss.mean()
+
+
+    elif recon_loss_type=="MSE":
+        
+        pred_loss = MultiModal_trajectory_loss(
+            predictions=pred_batch["trajectories"],
+            targets=target_traj,
+            availabilities=avails,
+            prob = prob,
+            weights_scaling=weights_scaling,
+        )
+    else:
+        raise NotImplementedError("{} is not implemented".format(recon_loss_type))
+    return pred_loss

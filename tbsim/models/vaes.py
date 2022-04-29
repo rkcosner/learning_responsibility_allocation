@@ -397,7 +397,7 @@ class CVAE(nn.Module):
         z = self.prior.sample_with_parameters(q_params, n=1).squeeze(dim=1)
         decoder_kwargs = dict() if decoder_kwargs is None else decoder_kwargs
         x_out = self.decoder(latents=z, condition_features=c, **decoder_kwargs)
-        return {"x_recons": x_out, "q_params": q_params, "z": z, "c": c}
+        return {"x_recons": x_out, "q_params": q_params, "z": z}
 
     def compute_kl_loss(self, outputs: dict):
         """
@@ -540,11 +540,15 @@ class DiscreteCVAE(nn.Module):
 
         z = torch.arange(self.K).to(q.device).tile(*q.shape[:-1],1)
         z = F.one_hot(z,self.K)
-        decoder_kwargs = dict() if decoder_kwargs is None else TensorUtils.unsqueeze_expand_at(decoder_kwargs,self.K,1)
+        if decoder_kwargs is None:
+            decoder_kwargs = dict()
+        else:
+            decoder_kwargs = TensorUtils.unsqueeze_expand_at(decoder_kwargs,self.K,1)
+            decoder_kwargs = TensorUtils.join_dimensions(decoder_kwargs,0,2)
         c_tiled = c.unsqueeze(1).repeat(1,self.K,1)
         x_out = self.decoder(latents=z.reshape(-1,self.K), condition_features=c_tiled.reshape(-1,c.shape[-1]), **decoder_kwargs)
         x_out = TensorUtils.reshape_dimensions(x_out,0,1,(z.shape[0],self.K))
-        return {"x_recons": x_out, "q": q, "p": p, "z": z, "c": c}
+        return {"x_recons": x_out, "q": q, "p": p, "z": z}
 
     def compute_kl_loss(self, outputs: dict):
         """
@@ -617,10 +621,15 @@ class ECDiscreteCVAE(DiscreteCVAE):
 
         z_samples = TensorUtils.join_dimensions(z, begin_axis=0, end_axis=2)  # [B * Na * n, ...]
         c_samples = TensorUtils.repeat_by_expand_at(c_joined, repeats=n, dim=0)  # [B * Na * n, ...]
+
         if decoder_kwargs is None:
             decoder_kwargs = dict()
         else:
-            decoder_kwargs = TensorUtils.unsqueeze_expand_at(decoder_kwargs,Na,1)
+            
+            if decoder_kwargs["current_states"].ndim==2:
+                decoder_kwargs = TensorUtils.unsqueeze_expand_at(decoder_kwargs,Na,1)
+            else:
+                assert decoder_kwargs["current_states"].ndim==3 and decoder_kwargs["current_states"].shape[1]==Na
             decoder_kwargs = TensorUtils.unsqueeze_expand_at(decoder_kwargs,n,2)
             decoder_kwargs = TensorUtils.join_dimensions(decoder_kwargs,0,3)
         x_out = self.decoder(latents=z_samples, condition_features=c_samples, **decoder_kwargs)
@@ -655,7 +664,10 @@ class ECDiscreteCVAE(DiscreteCVAE):
         if decoder_kwargs is None:
             decoder_kwargs = dict()
         else:
-            decoder_kwargs = TensorUtils.unsqueeze_expand_at(decoder_kwargs,Na,1)
+            if decoder_kwargs["current_states"].ndim==2:
+                decoder_kwargs = TensorUtils.unsqueeze_expand_at(decoder_kwargs,Na,1)
+            else:
+                assert decoder_kwargs["current_states"].ndim==3 and decoder_kwargs["current_states"].shape[1]==Na
             decoder_kwargs = TensorUtils.join_dimensions(decoder_kwargs,0,2)
         x_out = self.decoder(latents=F.one_hot(z,self.K), condition_features=c_joined, **decoder_kwargs)
         x_out = TensorUtils.reshape_dimensions(x_out, begin_axis=0, end_axis=1, target_dims=(bs,Na))
@@ -678,7 +690,6 @@ class ECDiscreteCVAE(DiscreteCVAE):
         c_joined = TensorUtils.join_dimensions(c,0,2)
         bs,Na = c.shape[:2]
         logp = TensorUtils.reshape_dimensions(self.p_net(c_joined)["logp"],0,1,(bs,Na))
-        
         if inputs is not None:
             inputs_tiled = TensorUtils.unsqueeze_expand_at(inputs,Na,1)
             inputs_joined = TensorUtils.join_dimensions(inputs_tiled,0,2)
@@ -698,17 +709,21 @@ class ECDiscreteCVAE(DiscreteCVAE):
 
         z = torch.arange(self.K).to(q.device).tile(*q.shape[:-1],1)
         z = F.one_hot(z,self.K)
+
         if decoder_kwargs is None:
             decoder_kwargs = dict()
         else:
-            decoder_kwargs = TensorUtils.unsqueeze_expand_at(decoder_kwargs,Na,1)
+            if decoder_kwargs["current_states"].ndim==2:
+                decoder_kwargs = TensorUtils.unsqueeze_expand_at(decoder_kwargs,Na,1)
+            else:
+                assert decoder_kwargs["current_states"].ndim==3 and decoder_kwargs["current_states"].shape[1]==Na
             decoder_kwargs = TensorUtils.unsqueeze_expand_at(decoder_kwargs,self.K,2)
             decoder_kwargs = TensorUtils.join_dimensions(decoder_kwargs,0,3)
         
         c_tiled = c[:,:,None].repeat(1,1,self.K,1)
         x_out = self.decoder(latents=z.reshape(-1,self.K), condition_features=TensorUtils.join_dimensions(c_tiled,0,3), **decoder_kwargs)
         x_out = TensorUtils.reshape_dimensions(x_out,0,1,(bs,Na,self.K))
-        return {"x_recons": x_out, "q": q, "p": p, "z": z, "c": c}
+        return {"x_recons": x_out, "q": q, "p": p, "z": z}
 
     def compute_kl_loss(self, outputs: dict):
         """
