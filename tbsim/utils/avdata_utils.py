@@ -59,16 +59,51 @@ def get_drivable_region_map(maps: torch.Tensor):
     return drivable
 
 
+def maybe_pad_neighbor(batch):
+    hist_len = batch["agent_hist"].shape[1]
+    fut_len = batch["agent_fut"].shape[1]
+    b, a, neigh_len, _ = batch["neigh_hist"].shape
+    empty_neighbor = a == 0
+    if empty_neighbor:
+        batch["neigh_hist"] = torch.ones(b, 1, hist_len, batch["neigh_hist"].shape[-1]) * torch.nan
+        batch["neigh_fut"] = torch.ones(b, 1, fut_len, batch["neigh_fut"].shape[-1]) * torch.nan
+        batch["neigh_types"] = torch.zeros(b, 1)
+        batch["neigh_hist_extents"] = torch.zeros(b, 1, hist_len, batch["neigh_hist_extents"].shape[-1])
+        batch["neigh_fut_extents"] = torch.zeros(b, 1, fut_len, batch["neigh_hist_extents"].shape[-1])
+    elif neigh_len < hist_len:
+        print(hist_len - neigh_len)
+        hist_pad = torch.ones(b, a, hist_len - neigh_len, batch["neigh_hist"].shape[-1]) * torch.nan
+        batch["neigh_hist"] = torch.cat((hist_pad, batch["neigh_hist"]), dim=2)
+        hist_pad = torch.zeros(b, a, hist_len - neigh_len, batch["neigh_hist_extents"].shape[-1])
+        batch["neigh_hist_extents"] = torch.cat((hist_pad, batch["neigh_hist_extents"]), dim=2)
+
+
 @torch.no_grad()
 def parse_avdata_batch(batch: dict):
+    maybe_pad_neighbor(batch)
     fut_pos, fut_yaw, _, fut_mask = avdata2posyawspeed(batch["agent_fut"])
     hist_pos, hist_yaw, hist_speed, hist_mask = avdata2posyawspeed(batch["agent_hist"])
     curr_speed = hist_speed[..., -1]
     curr_state = batch["curr_agent_state"]
 
+    # convert nuscenes types to l5kit types
+    agent_type = batch["agent_type"]
+    agent_type[agent_type < 0] = 0
+    agent_type[agent_type == 1] = 3
+    # mask out invalid extents
+    agent_hist_extent = batch["agent_hist_extent"]
+    agent_hist_extent[torch.isnan(agent_hist_extent)] = 0.
+
     neigh_hist_pos, neigh_hist_yaw, neigh_hist_speed, neigh_hist_mask = avdata2posyawspeed(batch["neigh_hist"])
     neigh_fut_pos, neigh_fut_yaw, _, neigh_fut_mask = avdata2posyawspeed(batch["neigh_fut"])
     neigh_curr_speed = neigh_hist_speed[..., -1]
+    neigh_types = batch["neigh_types"]
+    # convert nuscenes types to l5kit types
+    neigh_types[neigh_types < 0] = 0
+    neigh_types[neigh_types == 1] = 3
+    # mask out invalid extents
+    neigh_hist_extents = batch["neigh_hist_extents"]
+    neigh_hist_extents[torch.isnan(neigh_hist_extents)] = 0.
 
     # map-related
     map_res = batch["maps_resolution"][0]
@@ -113,8 +148,8 @@ def parse_avdata_batch(batch: dict):
         curr_speed=curr_speed,
         centroid=curr_pos,
         yaw=curr_yaw,
-        type=batch["agent_type"],
-        extent=batch["agent_hist_extent"][:, -1] * extent_scale,
+        type=agent_type,
+        extent=agent_hist_extent.max(dim=-2)[0] * extent_scale,
         raster_from_agent=raster_from_agent,
         agent_from_raster=agent_from_raster,
         raster_from_world=raster_from_world,
@@ -126,9 +161,9 @@ def parse_avdata_batch(batch: dict):
         all_other_agents_target_positions=neigh_fut_pos,
         all_other_agents_target_yaws=neigh_fut_yaw,
         all_other_agents_target_availabilities=neigh_fut_mask,
-        all_other_agents_types=batch["neigh_types"],
-        all_other_agents_extents=batch["neigh_hist_extents"].max(dim=-2)[0] * extent_scale,
-        all_other_agents_history_extents=batch["neigh_hist_extents"] * extent_scale,
+        all_other_agents_types=neigh_types,
+        all_other_agents_extents=neigh_hist_extents.max(dim=-2)[0] * extent_scale,
+        all_other_agents_history_extents=neigh_hist_extents * extent_scale,
 
     )
     batch = dict(batch)
