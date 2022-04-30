@@ -608,7 +608,7 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
         losses = self.nets["policy"].compute_losses(pout, batch)
         # take samples to measure trajectory diversity
         with torch.no_grad():
-            samples = self.nets["policy"].sample(batch, n=self.algo_config.vae.num_eval_samples)
+            samples = self.nets["policy"].sample(batch, n=min(self.algo_config.vae.num_eval_samples,self.algo_config.vae.latent_dim))
         total_loss = 0.0
         for lk, l in losses.items():
             loss = l * self.algo_config.loss_weights[lk]
@@ -626,7 +626,8 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
         pout = self.nets["policy"](batch)
         losses = TensorUtils.detach(self.nets["policy"].compute_losses(pout, batch))
         with torch.no_grad():
-            samples = self.nets["policy"].sample(batch, n=self.algo_config.vae.num_eval_samples)
+            samples = self.nets["policy"].sample(batch, n=min(self.algo_config.vae.num_eval_samples,self.algo_config.vae.latent_dim))
+
         metrics = self._compute_metrics(pout, samples, batch)
         return {"losses": losses, "metrics": metrics}
 
@@ -665,9 +666,9 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
         ).mean()
 
         # compute ADE & FDE based on trajectory samples
-        
-        fake_prob = np.ones_like(prob)/prob.shape[1]
-        
+
+        fake_prob = np.ones(sample_preds.shape[:2])/sample_preds.shape[1]
+
         metrics["ego_avg_ADE"] = Metrics.batch_average_displacement_error(gt, sample_preds, fake_prob, avail, "mean").mean()
         metrics["ego_min_ADE"] = Metrics.batch_average_displacement_error(gt, sample_preds, fake_prob, avail, "oracle").mean()
         metrics["ego_avg_FDE"] = Metrics.batch_final_displacement_error(gt, sample_preds, fake_prob, avail, "mean").mean()

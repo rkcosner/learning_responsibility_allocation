@@ -626,6 +626,7 @@ class RasterizedDiscreteVAEModel(nn.Module):
             decoder_kwargs["current_states"] = TensorUtils.repeat_by_expand_at(curr_states, repeats=n, dim=0)
 
         outs = self.vae.sample(condition_inputs=condition_inputs, n=n, decoder_kwargs=decoder_kwargs)
+        
         return self._traj_to_preds(outs["trajectories"])
 
     def predict(self, batch_inputs: dict):
