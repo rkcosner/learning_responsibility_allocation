@@ -509,7 +509,7 @@ class OccupancyGrid():
         lane_flag = list()
         
         for k in range(raster_points.shape[0]):
-            lane_flag.append(np.array([lane_map[k,i,j] for i,j in zip(raster_points[k,:,0],raster_points[k,:,1])]))
+            lane_flag.append(np.array([lane_map[k,y,x] for x,y in zip(raster_points[k,:,0],raster_points[k,:,1])]))
         lane_flag = np.stack(lane_flag,0)
         # clear_flag = (raster_points[:,0]>=0) & (raster_points[:,0]<drivable_area_map.shape[0])& (raster_points[:,1]>=0) & (raster_points[:,1]<drivable_area_map.shape[1])
         return lane_flag
@@ -544,8 +544,7 @@ class Occupancymet(EnvMetrics):
         self._per_step.append(0)
         self._per_step_mask.append(1)
         drivable_area = batch_utils().get_drivable_region_map(state_info["image"])
-        coords = state_info["history_positions"][:,-1]
-        coords = GeoUtils.batch_nd_transform_points_np(coords,state_info["world_from_agent"])
+        coords = state_info["centroid"][:, :2]
         for scene_idx in all_scene_index:
             indices = np.where(state_info["scene_index"]==scene_idx)[0]
             if scene_idx not in self.og:
@@ -558,16 +557,23 @@ class Occupancymet(EnvMetrics):
 
 
 class OccupancyCoverage(Occupancymet):
-    def __init__(self, gridinfo, sigma=1.0, threshold=1e-2):
+    def __init__(self, gridinfo, sigma=1.0, threshold=1e-2, drivable_only=True):
         super(OccupancyCoverage,self).__init__(gridinfo, sigma)
         self.threshold = threshold
+        self.drivable_only = drivable_only
 
-    def get_episode_metrics(self):
+    def summarize_grid(self):
         coverage_num = list()
         for scene_idx,og in self.og.items():
             data = np.array(list(og.occupancy_grid.values()))
-            coverage_num.append((data>self.threshold).sum())
+            if self.drivable_only:
+                lane = np.array(list(og.lane_flag.values())).astype(np.float32)
+                data = data * lane
+            coverage_num.append((data > self.threshold).sum())
         return np.array(coverage_num)
+
+    def get_episode_metrics(self):
+        return self.summarize_grid()
 
 
 class OccupancyCoverageMultiEpisode(OccupancyCoverage):
@@ -578,11 +584,7 @@ class OccupancyCoverageMultiEpisode(OccupancyCoverage):
         return dict()
 
     def get_multi_episode_metrics(self):
-        coverage_num = list()
-        for scene_idx,og in self.og.items():
-            data = np.array(list(og.occupancy_grid.values()))
-            coverage_num.append((data > self.threshold).sum())
-        return np.array(coverage_num)
+        return self.summarize_grid()
 
 
 class OccupancyDiversity(Occupancymet):
@@ -602,8 +604,7 @@ class OccupancyDiversity(Occupancymet):
         self._per_step.append(0)
         self._per_step_mask.append(1)
         drivable_area = batch_utils().get_drivable_region_map(state_info["image"])
-        coords = state_info["history_positions"][:,-1]
-        coords = GeoUtils.batch_nd_transform_points_np(coords,state_info["world_from_agent"])
+        coords = state_info["centroid"][:, :2]
         for scene_idx in all_scene_index:
             indices = np.where(state_info["scene_index"]==scene_idx)[0]
             if scene_idx not in self.og:
