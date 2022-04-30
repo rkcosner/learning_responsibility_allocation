@@ -1,6 +1,6 @@
 import abc
 import numpy as np
-from typing import List, Dict
+from typing import List, Dict, OrderedDict
 
 import torch
 from l5kit.geometry import transform_points, angular_distance
@@ -14,7 +14,8 @@ from tbsim.models.cnn_roi_encoder import obtain_lane_flag
 from torchvision.ops.roi_align import RoIAlign
 import tbsim.utils.geometry_utils as GeoUtils
 from pyemd import emd
-
+import matplotlib.pyplot as plt
+import matplotlib
 
 class EnvMetrics(abc.ABC):
     def __init__(self):
@@ -479,7 +480,7 @@ class OccupancyGrid():
         self.gridinfo = gridinfo
         self.sigma = sigma
         self.occupancy_grid = defaultdict(lambda:0)
-        self.lane_flag = dict()
+        self.lane_flag = defaultdict(lambda:0)
 
     def get_neighboring_grid_points(self,coords,radius):
         
@@ -525,7 +526,15 @@ class OccupancyGrid():
         for i in range(XYi_flatten.shape[0]):
             self.occupancy_grid[(XYi_flatten[i,0],XYi_flatten[i,1])]+=weight*kernel_value_flatten[i]
             self.lane_flag[(XYi_flatten[i,0],XYi_flatten[i,1])]=lane_flag_flatten[i]
-
+    
+    def visualize(self):
+        fig, ax = plt.subplots(figsize=(20, 20))
+        for k in self.occupancy_grid.keys():
+            color = "gx" if self.lane_flag[k] else "ro"
+            xyi = np.array(k)
+            xy = xyi*self.gridinfo["step"]+self.gridinfo["offset"]
+            ax.plot(xy[1],xy[0],color)
+        plt.show()
 
 class Occupancymet(EnvMetrics):
     def __init__(self, gridinfo, sigma=1.0):
@@ -557,20 +566,37 @@ class Occupancymet(EnvMetrics):
 
 
 class OccupancyCoverage(Occupancymet):
-    def __init__(self, gridinfo, sigma=1.0, threshold=1e-2, drivable_only=True):
+    def __init__(self, gridinfo, sigma=1.0, threshold=1e-2, mode="unfiltered"):
         super(OccupancyCoverage,self).__init__(gridinfo, sigma)
         self.threshold = threshold
-        self.drivable_only = drivable_only
+        self.mode = mode
 
     def summarize_grid(self):
-        coverage_num = list()
+        if self.mode=="separate":
+            coverage_num = OrderedDict(Onroad=[],Offroad=[],Total=[])
+        else:
+            coverage_num = list()
         for scene_idx,og in self.og.items():
             data = np.array(list(og.occupancy_grid.values()))
-            if self.drivable_only:
+            if self.mode=="drivable_only":
                 lane = np.array(list(og.lane_flag.values())).astype(np.float32)
                 data = data * lane
-            coverage_num.append((data > self.threshold).sum())
-        return np.array(coverage_num)
+                coverage_num.append((data > self.threshold).sum())
+            elif self.mode=="unfiltered":
+                coverage_num.append((data > self.threshold).sum())
+            elif self.mode=="separate":
+                lane = np.array(list(og.lane_flag.values())).astype(np.float32)
+                data_onroad = data * lane
+                data_offroad = data * (1-lane)
+                coverage_num["Onroad"].append((data_onroad > self.threshold).sum())
+                coverage_num["Offroad"].append((data_offroad > self.threshold).sum())
+                coverage_num["Total"].append((data > self.threshold).sum())
+        if isinstance(coverage_num,list):
+            return np.array(coverage_num)
+        elif isinstance(coverage_num,dict):
+            return {k:np.array(v) for k,v in coverage_num.items()}
+            
+            
 
     def get_episode_metrics(self):
         return self.summarize_grid()
@@ -588,9 +614,10 @@ class OccupancyCoverageMultiEpisode(OccupancyCoverage):
 
 
 class OccupancyDiversity(Occupancymet):
-    def __init__(self, gridinfo, sigma=1.0):
+    def __init__(self, gridinfo, sigma=1.0,mode="unfiltered"):
         super(OccupancyDiversity, self).__init__(gridinfo, sigma)
         self.episode_index = 0
+        self.mode=mode
 
     def reset(self):
         self._per_step = []
@@ -629,6 +656,9 @@ class OccupancyDiversity(Occupancymet):
             wasser_dis = np.array([])
             for og in self.og[scene_index]:
                 distr_i = np.array([og.occupancy_grid[k] for k in keys_union])
+                if self.mode=="drivable_only":
+                    lane_flag = np.array([og.lane_flag[k] for k in keys_union])
+                    distr_i = distr_i*lane_flag
                 distr_i = distr_i/distr_i.sum()
                 for distr_j in distr:
                     wasser_dis = np.append(wasser_dis,emd(distr_i, distr_j, distance_matrix))

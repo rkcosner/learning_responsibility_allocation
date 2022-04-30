@@ -418,8 +418,9 @@ def create_env_l5kit(
             # all_off_road_rate=EnvMetrics.OffRoadRate(),
             # all_collision_rate=EnvMetrics.CollisionRate(),
             # all_occupancy = EnvMetrics.Occupancydistr(gridinfo,sigma=2.0)
-            cvae_metrics=cvae_metrics.get_metrics(),
-            ego_occupancy_diversity=EnvMetrics.OccupancyDiversity(gridinfo, sigma=2.0)
+            # cvae_metrics=cvae_metrics.get_metrics(),
+            ego_occupancy_diversity=EnvMetrics.OccupancyDiversity(gridinfo, sigma=2.0,mode="unfiltered"),
+            all_occupancy_coverage=EnvMetrics.OccupancyCoverage(gridinfo, sigma=2.0,mode="separate")
             # all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations),
         )
 
@@ -486,7 +487,7 @@ def create_env_nusc(
         metrics = dict(
             all_off_road_rate=EnvMetrics.OffRoadRate(),
             all_collision_rate=EnvMetrics.CollisionRate(),
-            all_coverage=EnvMetrics.OccupancyCoverageMultiEpisode(gridinfo={"offset": np.zeros(2), "step": 2.0*np.ones(2)})
+            all_coverage=EnvMetrics.OccupancyCoverage(gridinfo={"offset": np.zeros(2), "step": 2.0*np.ones(2)})
         )
 
     env = EnvUnifiedSimulation(

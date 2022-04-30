@@ -13,7 +13,7 @@ class EvaluationConfig(Dict):
         self.num_scenes_per_batch = 4
         self.num_scenes_to_evaluate = 100
 
-        self.num_episode_repeats = 1
+        self.num_episode_repeats = 4
         self.start_frame_index_each_episode = None  # same length as num_episode_repeats
         self.seed_each_episode = None  # same length as num_episode_repeats
 
@@ -23,15 +23,15 @@ class EvaluationConfig(Dict):
         self.experience_hdf5_path = None
         self.results_dir = "results/"
 
-        self.ckpt.policy.ngc_job_id = ""
-        self.ckpt.policy.ckpt_key = ""
-        self.ckpt.planner.ngc_job_id = ""
-        self.ckpt.planner.ckpt_key = ""
-        self.ckpt.predictor.ngc_job_id = ""
-        self.ckpt.predictor.ckpt_key = ""
+        self.ckpt.policy.ngc_job_id = "2732861"
+        self.ckpt.policy.ckpt_key = "iter20999"
+        self.ckpt.planner.ngc_job_id = "2573128"
+        self.ckpt.planner.ckpt_key = "iter55999_"
+        self.ckpt.predictor.ngc_job_id = "2732861"
+        self.ckpt.predictor.ckpt_key = "iter20999"
 
-        self.ckpt.cvae_metric.ngc_job_id = ""
-        self.ckpt.cvae_metric.ckpt_key = ""
+        self.ckpt.cvae_metric.ngc_job_id = "2780940"
+        self.ckpt.cvae_metric.ckpt_key = "iter43000"
 
         self.ckpt.occupancy_metric.ngc_job_id = ""
         self.ckpt.occupancy_metric.ckpt_key = ""
