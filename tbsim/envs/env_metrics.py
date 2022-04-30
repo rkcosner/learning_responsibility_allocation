@@ -575,6 +575,9 @@ class OccupancyCoverage(Occupancymet):
     def get_episode_metrics(self):
         return self.summarize_grid()
 
+    def multi_episode_reset(self):
+        self.og.clear()
+
 
 class OccupancyCoverageMultiEpisode(OccupancyCoverage):
     def reset(self):
