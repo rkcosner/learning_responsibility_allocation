@@ -180,9 +180,13 @@ def create_evaluation_configs(
         configs_to_search_fn,
         config_dir,
         cfg,
+        prefix=None,
         delete_config_dir=True,
 ):
     configs = configs_to_search_fn(base_cfg=cfg)
+    for c in configs:
+        if prefix is not None:
+            c.name = prefix + "_" + c.name
 
     config_fns = []
 
