@@ -12,6 +12,7 @@ from tbsim.models.multiagent_models import (
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.policies.common import Action, Plan, Trajectory
 from tbsim.utils.loss_utils import discriminator_loss
+from tbsim.utils.batch_utils import batch_utils
 
 
 class MATrafficModel(pl.LightningModule):
@@ -19,7 +20,6 @@ class MATrafficModel(pl.LightningModule):
         super(MATrafficModel, self).__init__()
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
-        assert modality_shapes["image"][0] == 15
 
         self.model = AgentAwareRasterizedModel(
             model_arch=algo_config.model_architecture,
@@ -50,6 +50,7 @@ class MATrafficModel(pl.LightningModule):
         return self.model(obs_dict, plan)
 
     def training_step(self, batch, batch_idx):
+        batch = batch_utils().parse_batch(batch)
         pout = self.model.forward(batch)
         losses = self.model.compute_losses(pout, batch)
         total_loss = 0.0
@@ -65,6 +66,7 @@ class MATrafficModel(pl.LightningModule):
         return total_loss
 
     def validation_step(self, batch, batch_idx):
+        batch = batch_utils().parse_batch(batch)
         pout = self.model.forward(batch)
         losses = TensorUtils.detach(self.model.compute_losses(pout, batch))
         metrics = self.model.compute_metrics(pout, batch)
@@ -116,7 +118,9 @@ class MATrafficModel(pl.LightningModule):
             plan_tiled = TensorUtils.join_dimensions(plan_samples.to_dict(), begin_axis=0, end_axis=2)
             plan_tiled = Plan.from_dict(plan_tiled)
 
-            obs_tiled = TensorUtils.repeat_by_expand_at(obs_dict, repeats=n, dim=0)
+            relevant_keys = ["curr_speed", "history_positions", "history_yaws", "extent"]
+            relevant_obs = {k: obs_dict[k] for k in relevant_keys}
+            obs_tiled = TensorUtils.repeat_by_expand_at(relevant_obs, repeats=n, dim=0)
             preds = self.model.forward_prediction(feats_tiled, obs_tiled, plan=plan_tiled)
         else:
             plan = kwargs.get("plan", None)
@@ -131,7 +135,13 @@ class MATrafficModel(pl.LightningModule):
 
     def get_prediction(self, obs_dict, **kwargs):
         """If using the model as a trajectory predictor (generating trajs for non-ego agents)"""
-        plan = kwargs.get("plan", None)
+        # Hack: ego can be goal-conditional - feed a fake goal here since we only care about other agents
+        dummy_plan = Plan(
+            positions=torch.zeros(obs_dict["image"].shape[0], 1, 2).to(self.device),
+            yaws=torch.zeros(obs_dict["image"].shape[0], 1, 1).to(self.device),
+            availabilities=torch.zeros(obs_dict["image"].shape[0], 1).to(self.device)
+        )
+        plan = kwargs.get("plan", dummy_plan)
         preds = self(obs_dict, plan)
         agent_preds = self.model.get_agents_predictions(preds)
         agent_trajs = Trajectory(
@@ -159,7 +169,7 @@ class MAGANTrafficModel(MATrafficModel):
         return d_loss
 
     def training_step(self, batch, batch_idx, optimizer_idx):
-
+        batch = batch_utils().parse_batch(batch)
         pout = self.model.forward(batch)
         if optimizer_idx == 0:
             losses = self.model.compute_losses(pout, batch)
@@ -182,6 +192,7 @@ class MAGANTrafficModel(MATrafficModel):
             return d_loss
 
     def validation_step(self, batch, batch_idx):
+        batch = batch_utils().parse_batch(batch)
         pout = self.model.forward(batch)
         losses = TensorUtils.detach(self.model.compute_losses(pout, batch))
         metrics = self.model.compute_metrics(pout, batch)

@@ -481,6 +481,7 @@ class DiscreteCVAE(nn.Module):
         decoder_kwargs = dict() if decoder_kwargs is None else decoder_kwargs
         x_out = self.decoder(latents=z_samples, condition_features=c_samples, **decoder_kwargs)
         x_out = TensorUtils.reshape_dimensions(x_out, begin_axis=0, end_axis=1, target_dims=(c.shape[0], n))
+        x_out["z"] = z_samples
         return x_out
 
     def predict(self, condition_inputs, condition_feature=None, decoder_kwargs=None):

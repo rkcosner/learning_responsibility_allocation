@@ -31,7 +31,8 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             prediction_only=False,
             metrics=None,
             skimp_rollout=False,
-            renderer=None
+            renderer=None,
+            start_frame_index = None,
     ):
         """
         A gym-like interface for simulating traffic behaviors (both ego and other agents) with L5Kit's SimulationDataset
@@ -42,12 +43,14 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             dataset (EgoDataset): an EgoDataset instance that contains scene data for simulation
             prediction_only (bool): if set to True, ignore the input action command and only record the predictions
         """
+        if start_frame_index is None:
+            start_frame_index = env_config.simulation.start_frame_index
         self._sim_cfg = SimulationConfig(
             disable_new_agents=True,
             distance_th_far=env_config.simulation.distance_th_far,
             distance_th_close=env_config.simulation.distance_th_close,
             num_simulation_steps=env_config.simulation.num_simulation_steps,
-            start_frame_index=env_config.simulation.start_frame_index,
+            start_frame_index=start_frame_index,
             show_info=True,
         )
 
@@ -84,7 +87,14 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self._metrics = dict() if metrics is None else metrics
         self._skimp = skimp_rollout
 
-    def reset(self, scene_indices: List = None):
+    def update_random_seed(self,seed):
+        self._npr = np.random.RandomState(seed=seed)
+    
+    def reset_multi_episodes_metrics(self):
+        for v in self._metrics.values():
+            v.multi_episode_reset()
+
+    def reset(self, scene_indices: List = None, start_frame_index = None):
         """
         Reset the previous simulation episode. Randomly sample a batch of new scenes unless specified in @scene_indices
 
@@ -105,6 +115,9 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             np.max(scene_indices) < self._num_total_scenes
             and np.min(scene_indices) >= 0
         )
+
+        if start_frame_index is not None:
+            self._sim_cfg.start_frame_index = start_frame_index
 
         self._current_scene_indices = scene_indices
         self._current_scene_dataset = SimulationDataset.from_dataset_indices(
@@ -200,6 +213,17 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
     def scene_to_ego_index(self):
         return np.split(np.arange(self.num_instances), self.num_instances)
 
+    def get_multi_episode_metrics(self):
+        metrics = dict()
+        for met_name, met in self._metrics.items():
+            met_vals = met.get_multi_episode_metrics()
+            if isinstance(met_vals, dict):
+                for k, v in met_vals.items():
+                    metrics[met_name + "_" + k] = v
+            elif met_vals is not None:
+                metrics[met_name] = met_vals
+        return metrics
+
     def get_metrics(self):
         """
         Get metrics of the current episode (may compute before is_done==True)
@@ -207,6 +231,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         Returns: a dictionary of metrics, each containing an array of measurement same length as the number of scenes
         """
         # TODO: phase out the dependencies on l5kit Metrics
+        
         met = DisplacementErrorL2Metric()
         sim_states = self._get_l5_sim_states()
         ego_ade = np.zeros(self._num_scenes)
@@ -222,17 +247,18 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             "ego_ADE": ego_ade,
             "ego_FDE": ego_fde,
         }
-
         # aggregate per-step metrics
         self._add_per_step_metrics(self.get_observation())
         for met_name, met in self._metrics.items():
+
             assert len(met) == self._frame_index + 1, len(met)
             met_vals = met.get_episode_metrics()
             if isinstance(met_vals, dict):
                 for k, v in met_vals.items():
                     metrics[met_name + "_" + k] = v
-            else:
+            elif met_vals is not None:
                 metrics[met_name] = met_vals
+
         return metrics
 
     def get_observation(self):
@@ -380,6 +406,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
     def _step(self, step_actions: RolloutAction):
         obs = self.get_observation()
         # record metrics
+        
         self._add_per_step_metrics(obs)
 
         # record observations and actions

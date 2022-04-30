@@ -14,7 +14,7 @@ class L5KitTrainConfig(TrainConfig):
         self.dataset_train_key = "scenes/train.zarr"
         self.dataset_meta_key = "meta.json"
         self.datamodule_class = "L5RasterizedDataModule"
-        self.dataset_mode = "ego"
+        self.dataset_mode = "agents"
 
         self.rollout.enabled = False
         self.rollout.every_n_steps = 500
@@ -279,6 +279,14 @@ class EBMMetricConfig(L5RasterizedPlanningConfig):
         self.loss_weights.infoNCE_loss = 1.0
 
 
+class OccupancyMetricConfig(L5RasterizedPlanningConfig):
+    def __init__(self):
+        super(OccupancyMetricConfig, self).__init__()
+        self.name = "occupancy"
+        self.loss_weights.pixel_bce_loss = 0.0
+        self.loss_weights.pixel_ce_loss = 1.0
+
+
 class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(L5RasterizedVAEConfig, self).__init__()
@@ -320,6 +328,7 @@ class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
         self.vae.recon_loss_type = "NLL"
         self.vae.logpi_clamp = -6.0
 
+<<<<<<< HEAD
         self.loss_weights.kl_loss = 10
         self.loss_weights.EC_coll_loss = 10
         self.loss_weights.deviation_loss = 0.5
@@ -352,6 +361,9 @@ class L5RasterizedTreeVAEConfig(L5RasterizedPlanningConfig):
         self.loss_weights.EC_coll_loss = 10
         self.loss_weights.deviation_loss = 0.5
         self.loss_weights.kl_loss = 1
+=======
+        self.loss_weights.kl_loss = 10.0
+>>>>>>> hierarchy_ongoing
         self.eval.mode = "sum"
 
         self.min_std = 0.1

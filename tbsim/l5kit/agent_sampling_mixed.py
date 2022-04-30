@@ -169,6 +169,7 @@ def generate_agent_sample_mixed(
             agent_yaw_rad,
         )
 
+
         # For vectorized version we require both ego and agent history to be a Tensor of same length
         # => fetch history_num_frames_max for both, and later zero out frames exceeding the set history length.
         # Use history_num_frames_max + 1 because it also includes the current frame.

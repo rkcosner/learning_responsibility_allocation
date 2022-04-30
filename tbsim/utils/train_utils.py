@@ -4,8 +4,7 @@ mainly consists of functions to assist with logging, rollouts, and the @run_epoc
 which is the core training logic for models in this repository.
 """
 import os
-import time
-import datetime
+import socket
 import shutil
 
 
@@ -68,8 +67,6 @@ def get_exp_dir(exp_name, output_dir, save_checkpoints=True, auto_remove_exp_dir
     os.makedirs(base_output_dir, exist_ok=True)
 
     # version the run
-    # t_now = time.time()
-    # version_str = datetime.datetime.fromtimestamp(t_now).strftime('%Y%m%d%H%M%S')
     existing_runs = [
         a
         for a in os.listdir(base_output_dir)

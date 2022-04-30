@@ -3,7 +3,7 @@ from torch import optim as optim
 
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim import dynamics as dynamics
-from tbsim.utils import l5_utils as L5Utils
+from tbsim.utils.batch_utils import batch_utils
 from tbsim.utils.geometry_utils import transform_points_tensor, calc_distance_map
 from tbsim.utils.l5_utils import get_last_available_index
 from tbsim.utils.loss_utils import goal_reaching_loss, trajectory_loss, collision_loss
@@ -125,6 +125,32 @@ def get_spatial_goal_supervision(data_batch):
     }
 
 
+def get_spatial_trajectory_supervision(data_batch):
+    b, _, h, w = data_batch["image"].shape  # [B, C, H, W]
+    t = data_batch["target_positions"].shape[-2]
+    # create spatial supervisions
+    pos_raster = transform_points_tensor(
+        data_batch["target_positions"],
+        data_batch["raster_from_agent"].float()
+    )  # [B, T, 2]
+    # make sure all pixels are within the raster image
+    pos_raster[..., 0] = pos_raster[..., 0].clip(0, w - 1e-5)
+    pos_raster[..., 1] = pos_raster[..., 1].clip(0, h - 1e-5)
+
+    pos_pixel = torch.floor(pos_raster).float()  # round down pixels
+
+    # compute flattened pixel location
+    pos_pixel_flat = pos_pixel[..., 1] * w + pos_pixel[..., 0]
+    raster_sup_flat = TensorUtils.to_one_hot(
+        pos_pixel_flat.long(), num_class=h * w)
+    raster_sup = raster_sup_flat.reshape(b, t, h, w)
+    return {
+        "traj_spatial_map": raster_sup,  # [B, T, H, W]
+        "traj_position_pixel": pos_pixel,  # [B, T, 2]
+        "traj_position_pixel_flat": pos_pixel_flat  # [B, T]
+    }
+
+
 def optimize_trajectories(
         init_u,
         init_x,
@@ -169,7 +195,7 @@ def optimize_trajectories(
             ) * traj_loss_weight
             if coll_loss_weight > 0:
                 assert data_batch is not None
-                coll_edges = L5Utils.get_edges_from_batch(
+                coll_edges = batch_utils().get_edges_from_batch(
                     data_batch,
                     ego_predictions=dict(positions=pos, yaws=yaw)
                 )
@@ -222,3 +248,25 @@ def combine_ego_agent_data(batch, ego_keys, agent_keys, mask=None):
             combined_batch[ego_key] = torch.cat((batch[ego_key], batch[agent_key][mask].reshape(
                 size_dim0, *batch[agent_key].shape[2:])), dim=0)
     return combined_batch
+
+
+def yaw_from_pos(pos: torch.Tensor, dt, yaw_correction_speed=0.):
+    """
+    Compute yaws from position sequences. Optionally suppress yaws computed from low-velocity steps
+
+    Args:
+        pos (torch.Tensor): sequence of positions [..., T, 2]
+        dt (float): delta timestep to compute speed
+        yaw_correction_speed (float): zero out yaw change when the speed is below this threshold (noisy heading)
+
+    Returns:
+        accum_yaw (torch.Tensor): sequence of yaws [..., T-1, 1]
+    """
+
+    pos_diff = pos[..., 1:, :] - pos[..., :-1, :]
+    yaw = torch.atan2(pos_diff[..., 1], pos_diff[..., 0])
+    delta_yaw = torch.cat((yaw[..., [0]], yaw[..., 1:] - yaw[..., :-1]), dim=-1)
+    speed = torch.norm(pos_diff, dim=-1) / dt
+    delta_yaw[speed < yaw_correction_speed] = 0.
+    accum_yaw = torch.cumsum(delta_yaw, dim=-1)
+    return accum_yaw[..., None]

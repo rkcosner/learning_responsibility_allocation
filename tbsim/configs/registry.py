@@ -18,22 +18,27 @@ from tbsim.configs.l5kit_config import (
     EBMMetricConfig,
     L5RasterizedGANConfig,
     L5RasterizedDiscreteVAEConfig,
+<<<<<<< HEAD
     L5RasterizedTreeVAEConfig
+=======
+    OccupancyMetricConfig
+>>>>>>> hierarchy_ongoing
 )
 
-from tbsim.configs.l5kit_online_config import (
-    L5KitOnlineTrainConfig,
-    SelfPlayHierarchicalConfig
+from tbsim.configs.nusc_config import (
+    NuscTrainConfig,
+    NuscEnvConfig
 )
+
 
 EXP_CONFIG_REGISTRY = dict()
 
-EXP_CONFIG_REGISTRY["l5_rasterized_plan"] = ExperimentConfig(
-    train_config=L5KitTrainConfig(),
-    env_config=L5KitEnvConfig(),
-    algo_config=L5RasterizedPlanningConfig(),
-    registered_name="l5_rasterized_plan",
-)
+# EXP_CONFIG_REGISTRY["l5_rasterized_plan"] = ExperimentConfig(
+#     train_config=L5KitTrainConfig(),
+#     env_config=L5KitEnvConfig(),
+#     algo_config=L5RasterizedPlanningConfig(),
+#     registered_name="l5_rasterized_plan",
+# )
 
 EXP_CONFIG_REGISTRY["l5_mixed_gc"] = ExperimentConfig(
     train_config=L5KitMixedTrainConfig(),
@@ -118,11 +123,54 @@ EXP_CONFIG_REGISTRY["l5_ebm"] = ExperimentConfig(
     registered_name="l5_ebm",
 )
 
+EXP_CONFIG_REGISTRY["l5_occupancy"] = ExperimentConfig(
+    train_config=L5KitMixedTrainConfig(),
+    env_config=L5KitMixedSemanticMapEnvConfig(),
+    algo_config=OccupancyMetricConfig(),
+    registered_name="l5_occupancy"
+)
+
 EXP_CONFIG_REGISTRY["l5_rasterized_ebm"] = ExperimentConfig(
     train_config=L5KitTrainConfig(),
     env_config=L5KitEnvConfig(),
     algo_config=EBMMetricConfig(),
     registered_name="l5_rasterized_ebm",
+)
+
+
+EXP_CONFIG_REGISTRY["nusc_rasterized_plan"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=L5RasterizedPlanningConfig(),
+    registered_name="nusc_rasterized_plan"
+)
+
+EXP_CONFIG_REGISTRY["nusc_spatial_planner"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=SpatialPlannerConfig(),
+    registered_name="nusc_spatial_planner"
+)
+
+EXP_CONFIG_REGISTRY["nusc_vae_plan"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=L5RasterizedVAEConfig(),
+    registered_name="nusc_vae_plan"
+)
+
+EXP_CONFIG_REGISTRY["nusc_ma_rasterized_plan"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=MARasterizedPlanningConfig(),
+    registered_name="nusc_ma_rasterized_plan"
+)
+
+EXP_CONFIG_REGISTRY["nusc_rasterized_gc"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=L5RasterizedGCConfig(),
+    registered_name="nusc_rasterized_gc"
 )
 
 

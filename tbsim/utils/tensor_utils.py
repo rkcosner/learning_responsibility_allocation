@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 
 
-def recursive_dict_list_tuple_apply(x, type_func_dict):
+def recursive_dict_list_tuple_apply(x, type_func_dict, ignore_if_unspecified=False):
     """
     Recursively apply functions to a nested dictionary or list or tuple, given a dictionary of
     {data_type: function_to_apply}.
@@ -18,6 +18,7 @@ def recursive_dict_list_tuple_apply(x, type_func_dict):
         x (dict or list or tuple): a possibly nested dictionary or list or tuple
         type_func_dict (dict): a mapping from data types to the functions to be
             applied for each data type.
+        ignore_if_unspecified (bool): ignore an item if its type is unspecified by the type_func_dict
 
     Returns:
         y (dict or list or tuple): new nested dict-list-tuple
@@ -35,10 +36,10 @@ def recursive_dict_list_tuple_apply(x, type_func_dict):
             else dict()
         )
         for k, v in x.items():
-            new_x[k] = recursive_dict_list_tuple_apply(v, type_func_dict)
+            new_x[k] = recursive_dict_list_tuple_apply(v, type_func_dict, ignore_if_unspecified)
         return new_x
     elif isinstance(x, (list, tuple, nn.ParameterList)):
-        ret = [recursive_dict_list_tuple_apply(v, type_func_dict) for v in x]
+        ret = [recursive_dict_list_tuple_apply(v, type_func_dict, ignore_if_unspecified) for v in x]
         if isinstance(x, tuple):
             ret = tuple(ret)
         return ret
@@ -47,7 +48,10 @@ def recursive_dict_list_tuple_apply(x, type_func_dict):
             if isinstance(x, t):
                 return f(x)
         else:
-            raise NotImplementedError("Cannot handle data type %s" % str(type(x)))
+            if ignore_if_unspecified:
+                return x
+            else:
+                raise NotImplementedError("Cannot handle data type %s" % str(type(x)))
 
 
 def map_tensor(x, func):
@@ -284,7 +288,7 @@ def contiguous(x):
     )
 
 
-def to_device(x, device):
+def to_device(x, device, ignore_if_unspecified=False):
     """
     Sends all torch tensors in nested dictionary or list or tuple to device
     @device, and returns a new nested structure.
@@ -292,6 +296,7 @@ def to_device(x, device):
     Args:
         x (dict or list or tuple): a possibly nested dictionary or list or tuple
         device (torch.Device): device to send tensors to
+        ignore_if_unspecified (bool): ignore an item if its type is unspecified by the type_func_dict
 
     Returns:
         y (dict or list or tuple): new nested dict-list-tuple
@@ -302,10 +307,11 @@ def to_device(x, device):
             torch.Tensor: lambda x, d=device: x.to(d),
             type(None): lambda x: x,
         },
+        ignore_if_unspecified=ignore_if_unspecified
     )
 
 
-def to_tensor(x):
+def to_tensor(x, ignore_if_unspecified=False):
     """
     Converts all numpy arrays in nested dictionary or list or tuple to
     torch tensors (and leaves existing torch Tensors as-is), and returns
@@ -313,6 +319,7 @@ def to_tensor(x):
 
     Args:
         x (dict or list or tuple): a possibly nested dictionary or list or tuple
+        ignore_if_unspecified (bool): ignore an item if its type is unspecified by the type_func_dict
 
     Returns:
         y (dict or list or tuple): new nested dict-list-tuple
@@ -324,10 +331,11 @@ def to_tensor(x):
             np.ndarray: lambda x: torch.from_numpy(x),
             type(None): lambda x: x,
         },
+        ignore_if_unspecified=ignore_if_unspecified
     )
 
 
-def to_numpy(x):
+def to_numpy(x, ignore_if_unspecified=False):
     """
     Converts all torch tensors in nested dictionary or list or tuple to
     numpy (and leaves existing numpy arrays as-is), and returns
@@ -335,6 +343,7 @@ def to_numpy(x):
 
     Args:
         x (dict or list or tuple): a possibly nested dictionary or list or tuple
+        ignore_if_unspecified (bool): ignore an item if its type is unspecified by the type_func_dict
 
     Returns:
         y (dict or list or tuple): new nested dict-list-tuple
@@ -353,6 +362,7 @@ def to_numpy(x):
             np.ndarray: lambda x: x,
             type(None): lambda x: x,
         },
+        ignore_if_unspecified=ignore_if_unspecified
     )
 
 
@@ -427,7 +437,7 @@ def to_uint8(x):
     )
 
 
-def to_torch(x, device):
+def to_torch(x, device, ignore_if_unspecified=False):
     """
     Converts all numpy arrays and torch tensors in nested dictionary or list or tuple to
     torch tensors on device @device and returns a new nested structure.
@@ -435,11 +445,16 @@ def to_torch(x, device):
     Args:
         x (dict or list or tuple): a possibly nested dictionary or list or tuple
         device (torch.Device): device to send tensors to
+        ignore_if_unspecified (bool): ignore an item if its type is unspecified by the type_func_dict
 
     Returns:
         y (dict or list or tuple): new nested dict-list-tuple
     """
-    return to_device(to_float(to_tensor(x)), device)
+    return to_device(
+        to_tensor(x, ignore_if_unspecified=ignore_if_unspecified),
+        device,
+        ignore_if_unspecified=ignore_if_unspecified
+    )
 
 
 def to_one_hot_single(tensor, num_class):

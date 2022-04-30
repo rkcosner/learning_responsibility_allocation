@@ -94,9 +94,12 @@ def rollout_episodes(
     n_step_action=1,
     render=False,
     scene_indices=None,
+    start_frame_index_each_episode=None,
     device=None,
     obs_to_torch=True,
     adjustment_plan=None,
+    horizon=None,
+    seed_each_episode=None,
 ):
     """
     Rollout an environment for a number of episodes
@@ -108,6 +111,12 @@ def rollout_episodes(
         n_step_action (int): number of steps to take between querying models
         render (bool): if True, return a sequence of rendered frames
         scene_indices (tuple, list): (Optional) scenes indices to rollout with
+        start_frame_index_each_episode (List): (Optional) which frame to start each simulation episode from,
+        device: device to cast observation to
+        obs_to_torch: whether to cast observation to torch
+        adjustment_plan (dict): (Optional) initialization condition
+        horizon (int): (Optional) override horizon of the simulation
+        seed_each_episode (List): (Optional) a list of seeds, one for each episode
 
     Returns:
         stats (dict): A dictionary of rollout stats for each episode (metrics, rewards, etc.)
@@ -120,8 +129,21 @@ def rollout_episodes(
     is_batched_env = isinstance(env, BatchedEnv)
     timers = Timers()
 
+    if seed_each_episode is not None:
+        assert len(seed_each_episode) == num_episodes
+    if start_frame_index_each_episode is not None:
+        assert len(start_frame_index_each_episode) == num_episodes
+
     for ei in range(num_episodes):
-        env.reset(scene_indices=scene_indices)
+        if start_frame_index_each_episode is not None:
+            start_frame_index = start_frame_index_each_episode[ei]
+        else:
+            start_frame_index = None
+
+        env.reset(scene_indices=scene_indices, start_frame_index=start_frame_index)
+
+        if seed_each_episode is not None:
+            env.update_random_seed(seed_each_episode[ei])
 
         done = env.is_done()
         counter = 0
@@ -130,22 +152,21 @@ def rollout_episodes(
             timers.tic("step")
             with timers.timed("obs"):
                 obs = env.get_observation()
-                # import pdb
-                # pdb.set_trace()
+
             with timers.timed("to_torch"):
                 if obs_to_torch:
                     device = policy.device if device is None else device
-                    obs_torch = TensorUtils.to_torch(obs, device=device)
+                    obs_torch = TensorUtils.to_torch(obs, device=device, ignore_if_unspecified=True)
                 else:
                     obs_torch = obs
 
             if counter < skip_first_n:
                 # skip the first N steps to warm up environment state (velocity, etc.)
-                # DIFF
                 env.step(RolloutAction(), num_steps_to_take=1, render=False)
                 if adjustment_plan is not None:
                     set_initial_states(env, obs, adjustment_plan ,device)
                 # env.step(env.get_gt_action(obs), num_steps_to_take=1, render=False)
+                counter += 1
             else:
                 with timers.timed("network"):
                     action = policy.get_action(obs_torch, step_index=counter)
@@ -155,16 +176,20 @@ def rollout_episodes(
                     )  # List of [num_scene, h, w, 3]
                 if render:
                     frames.extend(ims)
+                counter += n_step_action
             timers.toc("step")
             print(timers)
 
             done = env.is_done()
-            counter += 1
+            
+            if horizon is not None and counter >= horizon:
+                break
         metrics = env.get_metrics()
+
         for k, v in metrics.items():
             if k not in stats:
                 stats[k] = []
-            if is_batched_env:
+            if is_batched_env:  # concatenate by scene
                 stats[k] = np.concatenate([stats[k], v], axis=0)
             else:
                 stats[k].append(v)
@@ -184,6 +209,10 @@ def rollout_episodes(
                 # [step, scene] -> [scene, step]
                 frames = frames.transpose((1, 0, 2, 3, 4))
             renderings.append(frames)
+
+    multi_episodes_metrics = env.get_multi_episode_metrics()
+    stats.update(multi_episodes_metrics)
+    env.reset_multi_episodes_metrics()
 
     return stats, info, renderings
 

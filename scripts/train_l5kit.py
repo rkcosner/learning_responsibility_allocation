@@ -2,6 +2,7 @@ import argparse
 import sys
 import os
 import json
+import socket
 
 import wandb
 import pytorch_lightning as pl
@@ -12,14 +13,21 @@ import tbsim.utils.train_utils as TrainUtils
 from tbsim.envs.env_l5kit import EnvL5KitSimulation
 from tbsim.utils.env_utils import RolloutCallback
 from tbsim.configs.registry import get_registered_experiment_config
-from tbsim.utils.config_utils import get_experiment_config_from_file
 from tbsim.datasets.factory import datamodule_factory
 from tbsim.utils.config_utils import get_experiment_config_from_file
+from tbsim.utils.batch_utils import set_global_batch_type
 from tbsim.algos.factory import algo_factory
 
 
 def main(cfg, auto_remove_exp_dir=False, debug=False):
     pl.seed_everything(cfg.seed)
+
+    if cfg.env.name.startswith("l5_"):
+        set_global_batch_type("l5kit")
+    elif cfg.env.name.startswith("avdata_"):
+        set_global_batch_type("avdata")
+    else:
+        raise NotImplementedError("Env {} is not supported".format(cfg.env.name))
 
     print("\n============= New Training Run with Config =============")
     print(cfg)
@@ -28,7 +36,7 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         exp_name=cfg.name,
         output_dir=cfg.root_dir,
         save_checkpoints=cfg.train.save.enabled,
-        auto_remove_exp_dir=auto_remove_exp_dir,
+        auto_remove_exp_dir=auto_remove_exp_dir
     )
     # Save experiment config to the training dir
     cfg.dump(os.path.join(root_dir, version_key, "config.json"))
@@ -137,8 +145,8 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
 
     # Logging
     assert not (cfg.train.logging.log_tb and cfg.train.logging.log_wandb)
+    logger = None
     if debug:
-        logger = None
         print("Debugging mode, suppress logging.")
     elif cfg.train.logging.log_tb:
         logger = TensorBoardLogger(
@@ -158,9 +166,8 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         logger.experiment.config.update(cfg.to_dict())
         logger.watch(model=model)
     else:
-        logger = None
         print("WARNING: not logging training stats")
-    # logger = None
+
     # Train
     trainer = pl.Trainer(
         default_root_dir=root_dir,
@@ -275,6 +282,10 @@ if __name__ == "__main__":
 
     if args.wandb_project_name is not None:
         default_config.train.logging.wandb_project_name = args.wandb_project_name
+
+    if args.on_ngc:
+        ngc_job_id = socket.gethostname()
+        default_config.name = default_config.name + "_" + ngc_job_id
 
     default_config.train.on_ngc = args.on_ngc
 

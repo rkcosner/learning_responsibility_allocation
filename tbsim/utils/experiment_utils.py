@@ -1,7 +1,6 @@
 import json
 import os
 import itertools
-import sys
 from collections import namedtuple
 from typing import List
 from glob import glob
@@ -118,7 +117,12 @@ class ParamSearchPlan(object):
         """
         Generate configs from the parameter search plan, also rename the experiment by generating the correct alias.
         """
-        return [pc.generate_config(base_cfg) for pc in self.param_configs]
+        if len(self.param_configs) > 0:
+            return [pc.generate_config(base_cfg) for pc in self.param_configs]
+        else:
+            # constant-only
+            const_cfg = ParamConfig(self.const_params)
+            return [const_cfg.generate_config(base_cfg)]
 
 
 def create_configs(
@@ -174,24 +178,12 @@ def read_configs(config_dir):
 
 def create_evaluation_configs(
         configs_to_search_fn,
-        config_file,
         config_dir,
-        prefix,
+        cfg,
         delete_config_dir=True,
 ):
-    if config_file is not None:
-        # Update default config with external json file
-        ext_cfg = json.load(open(config_file, "r"))
-        cfg = EvaluationConfig()
-        cfg.update(**ext_cfg)
-        print("Generating configs with {} as template".format(config_file))
-    else:
-        cfg = EvaluationConfig()
-
     configs = configs_to_search_fn(base_cfg=cfg)
-    for c in configs:
-        pfx = "{}_".format(prefix) if prefix is not None else ""
-        c.name = pfx + c.name
+
     config_fns = []
 
     if delete_config_dir and os.path.exists(config_dir):
@@ -248,6 +240,9 @@ def launch_experiments_ngc(
             "export WANDB_APIKEY={};".format(ngc_config["wandb_apikey"]),
             "cd {}/tbsim;".format(ngc_config["workspace_mounting_point"]),
             "pip install -e .; pip install numpy==1.21.4;",
+            "cd {}/uadl;".format(ngc_config["workspace_mounting_point"]),
+            "pip install -r requirements.txt; pip install -e .;",
+            "cd {}/tbsim;".format(ngc_config["workspace_mounting_point"]),
         ]
         py_cmd.extend(script_command)
         py_cmd.extend(["--config_file", cpath])
@@ -382,34 +377,37 @@ def get_local_checkpoint_dir(ngc_job_id, ckpt_root_dir):
 def get_checkpoint(
     ngc_job_id, ckpt_key, ckpt_root_dir="checkpoints/", download_tmp_dir="/tmp"
 ):
-    def ckpt_path_func(paths): return [p for p in paths if ckpt_key in p]
+    def ckpt_path_func(paths): return [p for p in paths if str(ckpt_key) in p]
     local_dir = get_local_checkpoint_dir(ngc_job_id, ckpt_root_dir)
     if local_dir is None:
         print("checkpoint does not exist, downloading ...")
         ckpt_dir = download_checkpoints_from_ngc(
-            ngc_job_id=ngc_job_id,
+            ngc_job_id=str(ngc_job_id),
             ckpt_root_dir=ckpt_root_dir,
             ckpt_path_func=ckpt_path_func,
             tmp_dir=download_tmp_dir,
         )
     else:
-        ckpt_paths = glob(local_dir + "/*.ckpt")
+        ckpt_paths = glob(local_dir + "/**/*.ckpt", recursive=True)
         if len(ckpt_path_func(ckpt_paths)) == 0:
             print("checkpoint does not exist, downloading ...")
             ckpt_dir = download_checkpoints_from_ngc(
-                ngc_job_id=ngc_job_id,
+                ngc_job_id=str(ngc_job_id),
                 ckpt_root_dir=ckpt_root_dir,
                 ckpt_path_func=ckpt_path_func,
                 tmp_dir=download_tmp_dir,
             )
         else:
             ckpt_dir = local_dir
-    ckpt_paths = ckpt_path_func(glob(ckpt_dir + "/*.ckpt"))
+
+    ckpt_paths = ckpt_path_func(glob(ckpt_dir + "/**/*.ckpt", recursive=True))
     assert len(ckpt_paths) > 0, "Could not find a checkpoint that has key {}".format(
         ckpt_key
     )
-    assert len(ckpt_paths) == 1, "More than one checkpoint found"
-    cfg_path = os.path.join(ckpt_dir, "config.json")
+    assert len(ckpt_paths) == 1, "More than one checkpoint found {}".format(ckpt_paths)
+    cfg_path = glob(ckpt_dir + "/**/config.json", recursive=True)[0]
+    print("Checkpoint path: {}".format(ckpt_paths[0]))
+    print("Config path: {}".format(cfg_path))
     return ckpt_paths[0], cfg_path
 
 

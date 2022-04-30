@@ -523,3 +523,19 @@ def GMM_loglikelihood(x, m, v, pi, avails=None, mode="mean"):
     elif mode=="max":
         loglikelihood = (pi*log_prob).max(1)
     return loglikelihood
+
+
+class distance_buffer():
+    def __init__(self):
+        self._buffer = dict()
+    def __getitem__(self,key):
+        if key in self._buffer:
+            return self._buffer[key]
+        else:
+            return self.update(key)
+    def update(self,key):
+        dis = np.linalg.norm(key)
+        self._buffer[key] = dis
+        self._buffer[-key] = dis
+        return dis
+        

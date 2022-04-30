@@ -20,12 +20,11 @@ from tbsim.models.rasterized_models import (
 from tbsim.models.base_models import (
     MLPTrajectoryDecoder,
     RasterizedMapUNet,
-    RasterizedMapKeyPointNet,
 )
 from tbsim.models.transformer_model import TransformerModel
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.metrics as Metrics
-import tbsim.utils.l5_utils as L5Utils
+from tbsim.utils.batch_utils import batch_utils
 import tbsim.utils.loss_utils as LossUtils
 from tbsim.policies.common import Plan, Action
 import tbsim.algos.algo_utils as AlgoUtils
@@ -41,7 +40,6 @@ class L5TrafficModel(pl.LightningModule):
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
         self._do_log = do_log
-        assert modality_shapes["image"][0] == 15
 
         traj_decoder = MLPTrajectoryDecoder(
             feature_dim=algo_config.map_feature_dim,
@@ -87,13 +85,13 @@ class L5TrafficModel(pl.LightningModule):
         metrics["ego_ADE"] = np.mean(ade)
         metrics["ego_FDE"] = np.mean(fde)
 
-        # targets_all = L5Utils.batch_to_target_all_agents(data_batch)
+        # targets_all = batch_utils().batch_to_target_all_agents(data_batch)
         # raw_type = torch.cat(
         #     (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
         #     dim=1,
         # ).type(torch.int64)
         #
-        # pred_edges = L5Utils.generate_edges(
+        # pred_edges = batch_utils().generate_edges(
         #     raw_type,
         #     targets_all["extents"],
         #     pos_pred=targets_all["target_positions"],
@@ -123,6 +121,7 @@ class L5TrafficModel(pl.LightningModule):
             info (dict): dictionary of relevant inputs, outputs, and losses
                 that might be relevant for logging
         """
+        batch = batch_utils().parse_batch(batch)
         pout = self.nets["policy"](batch)
         losses = self.nets["policy"].compute_losses(pout, batch)
         total_loss = 0.0
@@ -144,6 +143,7 @@ class L5TrafficModel(pl.LightningModule):
         }
 
     def validation_step(self, batch, batch_idx):
+        batch = batch_utils().parse_batch(batch)
         pout = self.nets["policy"](batch)
         losses = TensorUtils.detach(self.nets["policy"].compute_losses(pout, batch))
         metrics = self._compute_metrics(pout, batch)
@@ -194,7 +194,6 @@ class L5TrafficModelGC(L5TrafficModel):
         pl.LightningModule.__init__(self)
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
-        assert modality_shapes["image"][0] == 15
 
         traj_decoder = MLPTrajectoryDecoder(
             feature_dim=algo_config.map_feature_dim + algo_config.goal_feature_dim,
@@ -238,7 +237,6 @@ class SpatialPlanner(pl.LightningModule):
         super(SpatialPlanner, self).__init__()
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
-        assert modality_shapes["image"][0] == 15
 
         self.nets["policy"] = RasterizedMapUNet(
             model_arch=algo_config.model_architecture,
@@ -269,7 +267,10 @@ class SpatialPlanner(pl.LightningModule):
 
         if mask_drivable:
             # At test time: optionally mask out undrivable regions
-            drivable_map = L5Utils.get_drivable_region_map(obs_dict["image"])
+            if "drivable_map" not in obs_dict:
+                drivable_map = batch_utils().get_drivable_region_map(obs_dict["image"])
+            else:
+                drivable_map = obs_dict["drivable_map"]
             for i, m in enumerate(drivable_map):
                 if m.sum() == 0:  # if nowhere is drivable, set it to all True's to avoid decoding problems
                     drivable_map[i] = True
@@ -363,6 +364,7 @@ class SpatialPlanner(pl.LightningModule):
         return losses
 
     def training_step(self, batch, batch_idx):
+        batch = batch_utils().parse_batch(batch)
         pout = self.forward(batch)
         batch["goal"] = AlgoUtils.get_spatial_goal_supervision(batch)
         losses = self._compute_losses(pout, batch)
@@ -380,6 +382,7 @@ class SpatialPlanner(pl.LightningModule):
         return total_loss
 
     def validation_step(self, batch, batch_idx):
+        batch = batch_utils().parse_batch(batch)
         pout = self(batch)
         batch["goal"] = AlgoUtils.get_spatial_goal_supervision(batch)
         losses = TensorUtils.detach(self._compute_losses(pout, batch))
@@ -430,7 +433,6 @@ class SpatialPlanner(pl.LightningModule):
 class L5VAETrafficModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):
         super(L5VAETrafficModel, self).__init__()
-        assert modality_shapes["image"][0] == 15
 
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
@@ -493,6 +495,7 @@ class L5VAETrafficModel(pl.LightningModule):
             info (dict): dictionary of relevant inputs, outputs, and losses
                 that might be relevant for logging
         """
+        batch = batch_utils().parse_batch(batch)
         pout = self.nets["policy"](batch)
         losses = self.nets["policy"].compute_losses(pout, batch)
         # take samples to measure trajectory diversity
@@ -511,6 +514,7 @@ class L5VAETrafficModel(pl.LightningModule):
         return total_loss
 
     def validation_step(self, batch, batch_idx):
+        batch = batch_utils().parse_batch(batch)
         pout = self.nets["policy"](batch)
         losses = TensorUtils.detach(self.nets["policy"].compute_losses(pout, batch))
         with torch.no_grad():
@@ -569,7 +573,6 @@ class L5VAETrafficModel(pl.LightningModule):
 class L5DiscreteVAETrafficModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):
         super(L5DiscreteVAETrafficModel, self).__init__()
-        assert modality_shapes["image"][0] == 15
 
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
@@ -601,11 +604,12 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
             info (dict): dictionary of relevant inputs, outputs, and losses
                 that might be relevant for logging
         """
+        batch = batch_utils().parse_batch(batch)
         pout = self.nets["policy"](batch)
         losses = self.nets["policy"].compute_losses(pout, batch)
         # take samples to measure trajectory diversity
         with torch.no_grad():
-            samples = self.nets["policy"].sample(batch, n=self.algo_config.vae.num_eval_samples)
+            samples = self.nets["policy"].sample(batch, n=min(self.algo_config.vae.num_eval_samples,self.algo_config.vae.latent_dim))
         total_loss = 0.0
         for lk, l in losses.items():
             loss = l * self.algo_config.loss_weights[lk]
@@ -619,10 +623,12 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
         return total_loss
 
     def validation_step(self, batch, batch_idx):
+        batch = batch_utils().parse_batch(batch)
         pout = self.nets["policy"](batch)
         losses = TensorUtils.detach(self.nets["policy"].compute_losses(pout, batch))
         with torch.no_grad():
-            samples = self.nets["policy"].sample(batch, n=self.algo_config.vae.num_eval_samples)
+            samples = self.nets["policy"].sample(batch, n=min(self.algo_config.vae.num_eval_samples,self.algo_config.vae.latent_dim))
+
         metrics = self._compute_metrics(pout, samples, batch)
         return {"losses": losses, "metrics": metrics}
 
@@ -661,9 +667,9 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
         ).mean()
 
         # compute ADE & FDE based on trajectory samples
-        
-        fake_prob = np.ones_like(prob)/prob.shape[1]
-        
+
+        fake_prob = np.ones(sample_preds.shape[:2])/sample_preds.shape[1]
+
         metrics["ego_avg_ADE"] = Metrics.batch_average_displacement_error(gt, sample_preds, fake_prob, avail, "mean").mean()
         metrics["ego_min_ADE"] = Metrics.batch_average_displacement_error(gt, sample_preds, fake_prob, avail, "oracle").mean()
         metrics["ego_avg_FDE"] = Metrics.batch_final_displacement_error(gt, sample_preds, fake_prob, avail, "mean").mean()
@@ -696,9 +702,6 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
             loglikelihood = Metrics.GMM_loglikelihood(GT_traj, pred_traj, var, pout["p"],mode=self.algo_config.eval.mode)
 
         return OrderedDict(loglikelihood=loglikelihood)
-        
-
-
 
     def get_action(self, obs_dict, sample=True, num_action_samples=1, plan_samples=None, **kwargs):
         obs_dict = dict(obs_dict)
@@ -877,7 +880,6 @@ class L5TreeVAETrafficModel(pl.LightningModule):
 class L5ECTrafficModel(L5TrafficModel):
     def __init__(self, algo_config, modality_shapes):
         super(L5ECTrafficModel, self).__init__(algo_config, modality_shapes)
-        assert modality_shapes["image"][0] == 15
 
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
@@ -909,6 +911,7 @@ class L5ECTrafficModel(L5TrafficModel):
             info (dict): dictionary of relevant inputs, outputs, and losses
                 that might be relevant for logging
         """
+        batch = batch_utils().parse_batch(batch)
         pout = self.nets["policy"](batch)
         losses = self.nets["policy"].compute_losses(pout, batch)
         total_loss = 0.0
@@ -929,6 +932,7 @@ class L5ECTrafficModel(L5TrafficModel):
         }
 
     def validation_step(self, batch, batch_idx):
+        batch = batch_utils().parse_batch(batch)
         pout = self.nets["policy"](batch)
         batch["goal"] = AlgoUtils.get_spatial_goal_supervision(batch)
         losses = TensorUtils.detach(self.nets["policy"].compute_losses(pout, batch))
@@ -969,12 +973,12 @@ class L5ECTrafficModel(L5TrafficModel):
         metrics["ego_ADE"] = np.mean(ade)
         metrics["ego_FDE"] = np.mean(fde)
 
-        targets_all = L5Utils.batch_to_target_all_agents(data_batch)
+        targets_all = batch_utils().batch_to_target_all_agents(data_batch)
         raw_type = torch.cat(
             (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
             dim=1,
         ).type(torch.int64)
-        pred_edges = L5Utils.generate_edges(
+        pred_edges = batch_utils().generate_edges(
             raw_type,
             targets_all["extents"],
             pos_pred=targets_all["target_positions"],
@@ -984,7 +988,7 @@ class L5ECTrafficModel(L5TrafficModel):
         coll_rates = TensorUtils.to_numpy(
             Metrics.batch_pairwise_collision_rate(pred_edges))
 
-        EC_edges,type_mask = L5Utils.gen_EC_edges(
+        EC_edges,type_mask = batch_utils().gen_EC_edges(
             pred_batch["EC_trajectories"],
             pred_batch["cond_traj"],
             data_batch["extent"][...,:2],
@@ -1006,7 +1010,6 @@ class L5ECTrafficModel(L5TrafficModel):
 
         return metrics
 
-
     def get_action(self, obs_dict, sample=True, num_action_samples=1, plan=None, **kwargs):
         preds = self(obs_dict)
         action = Action(
@@ -1018,7 +1021,10 @@ class L5ECTrafficModel(L5TrafficModel):
         return self.nets["policy"].EC_predict(obs,cond_traj,goal_state)
 
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> hierarchy_ongoing
 class GANTrafficModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):
         super(GANTrafficModel, self).__init__()
@@ -1076,6 +1082,7 @@ class GANTrafficModel(pl.LightningModule):
     def training_step(self, batch, batch_idx, optimizer_idx):
         # pout = self.nets(batch)
         # losses = self.nets.compute_losses(pout, batch)
+        batch = batch_utils().parse_batch(batch)
 
         if optimizer_idx == 0:
             pout = self.nets.forward_generator(batch)
@@ -1099,6 +1106,7 @@ class GANTrafficModel(pl.LightningModule):
             return total_loss
 
     def validation_step(self, batch, batch_idx):
+        batch = batch_utils().parse_batch(batch)
         pout = TensorUtils.detach(self.nets.forward_generator(batch))
         losses = self.nets.compute_losses_generator(pout, batch)
         with torch.no_grad():
@@ -1186,7 +1194,7 @@ class L5TransformerTrafficModel(pl.LightningModule):
             info (dict): dictionary of relevant inputs, outputs, and losses
                 that might be relevant for logging
         """
-
+        batch = batch_utils().parse_batch(batch)
         pout = self.nets["policy"](batch, batch_idx)
         losses = self.nets["policy"].compute_losses(pout, batch)
         for lk, l in losses.items():
@@ -1206,6 +1214,7 @@ class L5TransformerTrafficModel(pl.LightningModule):
         return output
 
     def validation_step(self, batch, batch_idx):
+        batch = batch_utils().parse_batch(batch)
         pout = self.nets["policy"](batch, batch_idx)
         losses = TensorUtils.detach(self.nets["policy"].compute_losses(pout, batch))
         metrics = self._compute_metrics(pout["predictions"], batch)
@@ -1314,6 +1323,7 @@ class L5TransformerGANTrafficModel(pl.LightningModule):
             info (dict): dictionary of relevant inputs, outputs, and losses
                 that might be relevant for logging
         """
+        batch = batch_utils().parse_batch(batch)
         pout = self.nets["policy"](batch, batch_idx)
 
         # adversarial loss is binary cross-entropy
@@ -1352,6 +1362,7 @@ class L5TransformerGANTrafficModel(pl.LightningModule):
             return g_loss
 
     def validation_step(self, batch, batch_idx):
+        batch = batch_utils().parse_batch(batch)
         pout = self.nets["policy"](batch)
         losses = TensorUtils.detach(self.nets["policy"].compute_losses(pout, batch))
         metrics = self._compute_metrics(pout, batch)

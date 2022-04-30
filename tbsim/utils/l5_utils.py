@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import tbsim.dynamics as dynamics
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim import dynamics as dynamics
+from tbsim.configs.base import ExperimentConfig
 
 
 def get_agent_masks(raw_type):
@@ -563,7 +564,8 @@ def generate_edges(
             edges[et] = torch.cat(v, dim=1)
     return edges
 
-def gen_ego_edges(ego_trajectories,agent_trajectories,ego_extents, agent_extents, raw_types):
+
+def gen_ego_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types):
     """generate edges between ego trajectory samples and agent trajectories
 
     Args:
@@ -593,6 +595,7 @@ def gen_ego_edges(ego_trajectories,agent_trajectories,ego_extents, agent_extents
     edges[...,8:] = agent_extents.reshape(B,1,A,1,2).repeat(1,N,1,T,1)
     type_mask = {"VV":veh_mask,"VP":ped_mask}
     return edges,type_mask
+
 
 def gen_EC_edges(ego_trajectories,agent_trajectories,ego_extents, agent_extents, raw_types):
     """generate edges between ego trajectory samples and agent trajectories
@@ -708,3 +711,10 @@ def get_current_states_all_agents(batch: dict, step_time, dyn_type: dynamics.Dyn
 def get_drivable_region_map(rasterized_map):
     assert rasterized_map.shape[-3] in [3, 15]
     return rasterized_map[..., -3, :, :] < 1.
+
+
+def get_modality_shapes(cfg: ExperimentConfig):
+    assert cfg.env.rasterizer.map_type == "py_semantic"
+    num_channels = (cfg.algo.history_num_frames + 1) * 2 + 3
+    h, w = cfg.env.rasterizer.raster_size
+    return dict(image=(num_channels, h, w))

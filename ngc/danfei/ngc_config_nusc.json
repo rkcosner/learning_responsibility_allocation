@@ -1,0 +1,15 @@
+{
+  "wandb_apikey": null,
+  "wandb_project_name": null,
+  "workspace_mounting_point": "/workspace/ws_mount/",
+  "result_dir": "/workspace/result/",
+  "output_dir": "/workspace/ws_mount/tbsim/checkpoints/",
+  "eval_output_dir": "/workspace/ws_mount/tbsim/evaluation_results/",
+  "workspace_id": "OVG6VSVJRjq7TTKBpOdohg",
+  "dataset_id": "98618",
+  "dataset_mounting_point": "/workspace/nuscenes/",
+  "dataset_path": "/workspace/nuscenes/",
+  "docker_image": "nvcr.io/nvidian/nvr-av/tbsim:latest",
+  "total_runtime": "48h",
+  "workspace_mounting_point_local": "/Users/danfei/workspace/avg/dxdev/"
+}

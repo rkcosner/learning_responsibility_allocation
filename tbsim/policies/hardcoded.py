@@ -20,11 +20,13 @@ from tbsim.policies.base import Policy
 try:
     from Pplan.spline_planner import SplinePlanner
     from Pplan.trajectory_tree import TrajTree
-except:
-    print("Pplan not found")
+except ImportError:
+    print("Cannot import Pplan")
+
 import tbsim.utils.planning_utils as PlanUtils
 import tbsim.utils.geometry_utils as GeoUtils
 from tbsim.utils.timer import Timers
+
 
 class OptimController(Policy):
     """An optimization-based controller"""
@@ -89,44 +91,32 @@ class OptimController(Policy):
         return action, {}
 
 
-class GTPlanner(Policy):
-    """A (fake) planner tha sets ground truth trajectory as (sub)goal"""
-
+class GTPolicy(Policy):
     def __init__(self, device):
-        self.device = device
+        super(GTPolicy, self).__init__(device)
 
     def eval(self):
         pass
 
-    @staticmethod
-    def get_plan(obs, **kwargs) -> Tuple[Plan, Dict]:
+    def get_action(self, obs, **kwargs) -> Tuple[Action, Dict]:
+        action = Action(
+            positions=TensorUtils.to_torch(obs["target_positions"], device=self.device),
+            yaws=TensorUtils.to_torch(obs["target_yaws"], device=self.device),
+        )
+        return action, {}
+
+    def get_plan(self, obs, **kwargs) -> Tuple[Plan, Dict]:
         plan = Plan(
-            positions=obs["target_positions"],
-            yaws=obs["target_yaws"],
-            availabilities=obs["target_availabilities"],
+            positions=TensorUtils.to_torch(obs["target_positions"], device=self.device),
+            yaws=TensorUtils.to_torch(obs["target_yaws"], device=self.device),
+            availabilities=TensorUtils.to_torch(obs["target_availabilities"], self.device),
         )
         return plan, {}
 
 
-class GTPolicy(Policy):
-    def __init__(self, device):
-        self.device = device
-
-    def eval(self):
-        pass
-
-    @staticmethod
-    def get_action(obs, **kwargs) -> Tuple[Action, Dict]:
-        action = Action(
-            positions=obs["target_positions"],
-            yaws=obs["target_yaws"]
-        )
-        return action, {}
-
-
 class ReplayPolicy(Policy):
     def __init__(self, action_log, device):
-        self.device = device
+        super(ReplayPolicy, self).__init__(device)
         self.action_log = action_log
 
     def eval(self):
