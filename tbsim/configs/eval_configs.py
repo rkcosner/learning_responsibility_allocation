@@ -10,10 +10,10 @@ class EvaluationConfig(Dict):
         self.dataset_path = None
         self.eval_class = ""
         self.seed = 0
-        self.num_scenes_per_batch = 5
+        self.num_scenes_per_batch = 4
         self.num_scenes_to_evaluate = 100
 
-        self.num_episode_repeats = 2
+        self.num_episode_repeats = 1
         self.start_frame_index_each_episode = None  # same length as num_episode_repeats
         self.seed_each_episode = None  # same length as num_episode_repeats
 

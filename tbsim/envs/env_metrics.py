@@ -481,7 +481,6 @@ class OccupancyGrid():
         self.occupancy_grid = defaultdict(lambda:0)
         self.lane_flag = dict()
 
-    
     def get_neighboring_grid_points(self,coords,radius):
         
         x0,y0=self.gridinfo["offset"]
@@ -498,6 +497,7 @@ class OccupancyGrid():
 
         kernel_value= np.exp(-np.linalg.norm(coords[:,np.newaxis,np.newaxis]-grid_points,axis=-1)**2/2/self.sigma)
         return grid_points.reshape(bs,-1,2),XYi.reshape(bs,-1,2),kernel_value.reshape(bs,-1)
+
     def reset(self):
         self.occupancy_grid.clear()
     
@@ -514,7 +514,6 @@ class OccupancyGrid():
         # clear_flag = (raster_points[:,0]>=0) & (raster_points[:,0]<drivable_area_map.shape[0])& (raster_points[:,1]>=0) & (raster_points[:,1]<drivable_area_map.shape[1])
         return lane_flag
 
-
     def update(self,coords,raster_from_world,lane_map,threshold=0.1,weight=1):
         assert threshold<1.0
         radius = np.sqrt(-2*self.sigma*np.log(threshold))
@@ -526,20 +525,20 @@ class OccupancyGrid():
         for i in range(XYi_flatten.shape[0]):
             self.occupancy_grid[(XYi_flatten[i,0],XYi_flatten[i,1])]+=weight*kernel_value_flatten[i]
             self.lane_flag[(XYi_flatten[i,0],XYi_flatten[i,1])]=lane_flag_flatten[i]
+
+
 class Occupancymet(EnvMetrics):
-    def __init__(self,gridinfo,sigma=1.0):
+    def __init__(self, gridinfo, sigma=1.0):
         self.og = dict()
-        super(Occupancymet,self).__init__()
+        super(Occupancymet, self).__init__()
         self.gridinfo = gridinfo
         self.sigma=sigma
         self._per_step = []
         self._per_step_mask = []
 
-
     """Compute occupancy grid on the map for agents."""
     def reset(self):
         self.og.clear()
-
 
     def add_step(self, state_info: dict, all_scene_index: np.ndarray):
         self._per_step.append(0)
@@ -553,13 +552,16 @@ class Occupancymet(EnvMetrics):
                 self.og[scene_idx] = OccupancyGrid(self.gridinfo,self.sigma)
             
             self.og[scene_idx].update(coords[indices],state_info["raster_from_world"][indices],drivable_area[indices],threshold=0.1,weight=1)
+
     def get_episode_metrics(self):
         pass
 
+
 class OccupancyCoverage(Occupancymet):
-    def __init__(self,gridinfo,sigma=1.0,threshold = 1e-2):
-        super(OccupancyCoverage,self).__init__(gridinfo,sigma)
+    def __init__(self, gridinfo, sigma=1.0, threshold=1e-2):
+        super(OccupancyCoverage,self).__init__(gridinfo, sigma)
         self.threshold = threshold
+
     def get_episode_metrics(self):
         coverage_num = list()
         for scene_idx,og in self.og.items():
@@ -567,15 +569,31 @@ class OccupancyCoverage(Occupancymet):
             coverage_num.append((data>self.threshold).sum())
         return np.array(coverage_num)
 
+
+class OccupancyCoverageMultiEpisode(OccupancyCoverage):
+    def reset(self):
+        pass
+
+    def get_episode_metrics(self):
+        return dict()
+
+    def get_multi_episode_metrics(self):
+        coverage_num = list()
+        for scene_idx,og in self.og.items():
+            data = np.array(list(og.occupancy_grid.values()))
+            coverage_num.append((data > self.threshold).sum())
+        return np.array(coverage_num)
+
+
 class OccupancyDiversity(Occupancymet):
-    def __init__(self,gridinfo,sigma=1.0):
-        super(OccupancyDiversity,self).__init__(gridinfo,sigma)
+    def __init__(self, gridinfo, sigma=1.0):
+        super(OccupancyDiversity, self).__init__(gridinfo, sigma)
         self.episode_index = 0
+
     def reset(self):
         self._per_step = []
         self._per_step_mask = []
-        pass
-    
+
     def multi_episode_reset(self):
         self.episode_index = 0
         self.og.clear()
@@ -595,8 +613,8 @@ class OccupancyDiversity(Occupancymet):
             
             assert len(self.og[scene_idx])==self.episode_index+1
             self.og[scene_idx][self.episode_index].update(coords[indices],state_info["raster_from_world"][indices],drivable_area[indices],threshold=0.1,weight=1)
+
     def get_multi_episode_metrics(self):
-        
         result = []
         for scene_index in self.og:
             keys_union = set()
@@ -618,14 +636,9 @@ class OccupancyDiversity(Occupancymet):
             print("Wasserstein metric:",wasser_dis)
         return np.array(result)
 
-            
-
-
     def get_episode_metrics(self):
         self.episode_index+=1
         return
-
-
 
 
 if __name__=="__main__":
