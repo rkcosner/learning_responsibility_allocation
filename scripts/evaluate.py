@@ -338,6 +338,48 @@ class RandomPerturbation(object):
         return obs
 
 
+class MetricsComposer(object):
+    def __init__(self, eval_config, device, ckpt_root_dir="checkpoints/"):
+        self.device = device
+        self.ckpt_root_dir = ckpt_root_dir
+        self.eval_config = eval_config
+        self._exp_config = None
+
+    def get_modality_shapes(self, exp_cfg: ExperimentConfig):
+        return batch_utils().get_modality_shapes(exp_cfg)
+
+    def get_metrics(self):
+        raise NotImplementedError
+
+
+class CVAEMetrics(MetricsComposer):
+    def get_metrics(self, **kwargs):
+        # TODO: pass in perturbations through kwargs
+        perturbations = None
+
+        ckpt_path, config_path = get_checkpoint(
+            ngc_job_id="2780940",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
+            ckpt_key="iter43000",
+            # ngc_job_id=self.eval_config.ckpt.cvae_metric.ngc_job_id,
+            # ckpt_key=self.eval_config.ckpt.cvae_metric.ckpt_key,
+            ckpt_root_dir=self.eval_config.ckpt_root_dir
+        )
+        modality_shapes = batch_utils().get_modality_shapes(self._exp_config)
+        controller_cfg = get_experiment_config_from_file(config_path)
+        CVAE_model = L5DiscreteVAETrafficModel.load_from_checkpoint(
+            ckpt_path,
+            algo_config=controller_cfg.algo,
+            modality_shapes=modality_shapes
+        ).to(self.device).eval()
+        return EnvMetrics.LearnedCVAENLL(metric_algo=CVAE_model, perturbations=perturbations)
+
+
+class OccupancyMetrics(MetricsComposer):
+    def get_metrics(self, **kwargs):
+        pass
+
+
+
 def create_env_l5kit(
         exp_cfg,
         eval_cfg,
@@ -370,21 +412,14 @@ def create_env_l5kit(
 
     metrics = dict()
     if compute_metrics:
-        modality_shapes = batch_utils().get_modality_shapes(exp_cfg)
-        # ckpt_path, cfg_path = get_checkpoint("2761440", "69999_")
-        # metric_cfg = get_experiment_config_from_file(cfg_path, locked=True)
-        # metric_algo = EBMMetric.load_from_checkpoint(
-        #     checkpoint_path=ckpt_path,
-        #     algo_config=metric_cfg.algo,
-        #     modality_shapes=modality_shapes
-        # ).eval().to(device)
-
-        gridinfo = {"offset":np.zeros(2),"step":2.0*np.ones(2)}
+        gridinfo = {"offset": np.zeros(2), "step": 2.0*np.ones(2)}
+        cvae_metrics = CVAEMetrics(eval_config=eval_cfg, device=device, ckpt_root_dir=eval_cfg.ckpt_root_dir)
         metrics = dict(
             # all_off_road_rate=EnvMetrics.OffRoadRate(),
             # all_collision_rate=EnvMetrics.CollisionRate(),
             # all_occupancy = EnvMetrics.Occupancydistr(gridinfo,sigma=2.0)
-            ego_occupancy_diversity = EnvMetrics.OccupancyDiversity(gridinfo,sigma=2.0)
+            cvae_metrics=cvae_metrics.get_metrics(),
+            ego_occupancy_diversity=EnvMetrics.OccupancyDiversity(gridinfo, sigma=2.0)
             # all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations),
         )
 
@@ -451,7 +486,7 @@ def create_env_nusc(
         metrics = dict(
             all_off_road_rate=EnvMetrics.OffRoadRate(),
             all_collision_rate=EnvMetrics.CollisionRate(),
-            all_coverage=EnvMetrics.OccupancyCoverage(gridinfo={"offset":np.zeros(2),"step":2.0*np.ones(2)})
+            all_coverage=EnvMetrics.OccupancyCoverage(gridinfo={"offset": np.zeros(2), "step": 2.0*np.ones(2)})
         )
 
     env = EnvUnifiedSimulation(
@@ -524,24 +559,7 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
         compute_metrics=compute_metrics,
         seed=eval_cfg.seed
     )
-    if False:
-        env_delayed_start = deepcopy(env)
-        ckpt_path, config_path = get_checkpoint(
-            ngc_job_id="2780940",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
-            ckpt_key="iter43000",
-            ckpt_root_dir=eval_cfg.ckpt_dir
-        )
-        modality_shapes = batch_utils().get_modality_shapes(exp_config)
-        controller_cfg = get_experiment_config_from_file(config_path)
-        CVAE_model = L5DiscreteVAETrafficModel.load_from_checkpoint(
-                ckpt_path,
-                algo_config=controller_cfg.algo,
-                modality_shapes=modality_shapes
-            ).to(device).eval()
-        perturbations = None
-        env_delayed_start._metrics = dict(all_CVAE_score = EnvMetrics.LearnedCVAENLL(metric_algo=CVAE_model, perturbations=perturbations))
-    else:
-        env_delayed_start = None
+
     # eval loop
     obs_to_torch = eval_cfg.eval_class not in ["GroundTruth", "ReplayAction"]
 
@@ -556,42 +574,21 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
         stats, info, renderings = rollout_episodes(
             env,
             rollout_policy,
-            num_episodes=1,
+            num_episodes=eval_cfg.num_episode_repeats,
             n_step_action=eval_cfg.n_step_action,
             render=render_to_video,
             skip_first_n=eval_cfg.skip_first_n,
             scene_indices=scene_indices,
-            obs_to_torch=obs_to_torch
+            obs_to_torch=obs_to_torch,
+            start_frame_index_each_episode=eval_cfg.start_frame_index_each_episode,
+            seed_each_episode=eval_cfg.seed_each_episode,
+            horizon=eval_cfg.num_simulation_steps
         )
-        if env_delayed_start is not None:
-            Ts = np.random.choice(np.arange(eval_cfg.skip_first_n,200-exp_config.algo.future_num_frames-1),3,replace=False)
-            metric_trials = dict()
-            for T in Ts:
-                stats_trial_i, _, _ = rollout_episodes(
-                    env_delayed_start,
-                    rollout_policy,
-                    num_episodes=1,
-                    n_step_action=eval_cfg.n_step_action,
-                    render=False,
-                    skip_first_n=T,
-                    scene_indices=scene_indices,
-                    obs_to_torch=obs_to_torch,
-                    horizon=T+exp_config.algo.future_num_frames
-                )
-                for met in stats_trial_i:
-                    if met not in ["ego_ADE", "ego_FDE"]:
-                        if met not in metric_trials:
-                            metric_trials[met]=[]
-
-                        metric_trials[met].append(stats_trial_i[met])
-            for met in metric_trials:
-                metric_trials[met] = np.stack(metric_trials[met],0).mean(0)
-            stats.update(metric_trials)
-
 
         print(info["scene_index"])
         print(stats)
 
+        # aggregate metrics stats
         if result_stats is None:
             result_stats = stats
             result_stats["scene_index"] = np.array(info["scene_index"])
@@ -600,20 +597,22 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
                 result_stats[k] = np.concatenate([result_stats[k], stats[k]], axis=0)
             result_stats["scene_index"] = np.concatenate([result_stats["scene_index"], np.array(info["scene_index"])])
 
+        # write stats to disk
         with open(os.path.join(eval_cfg.results_dir, "stats.json"), "w+") as fp:
             stats_to_write = map_ndarray(result_stats, lambda x: x.tolist())
             json.dump(stats_to_write, fp)
 
         if render_to_video:
-            for i, scene_images in enumerate(renderings[0]):
-                video_dir = os.path.join(eval_cfg.results_dir, "videos/")
-                writer = get_writer(os.path.join(
-                    video_dir, "{}.mp4".format(info["scene_index"][i])), fps=10)
-                print("video to {}".format(os.path.join(
-                    video_dir, "{}.mp4".format(info["scene_index"][i]))))
-                for im in scene_images:
-                    writer.append_data(im)
-                writer.close()
+            for ei, episode_rendering in enumerate(renderings):
+                for i, scene_images in enumerate(episode_rendering):
+                    video_dir = os.path.join(eval_cfg.results_dir, "videos/")
+                    writer = get_writer(os.path.join(
+                        video_dir, "{}_{}.mp4".format(info["scene_index"][i], ei)), fps=10)
+                    print("video to {}".format(os.path.join(
+                        video_dir, "{}_{}.mp4".format(info["scene_index"][i], ei))))
+                    for im in scene_images:
+                        writer.append_data(im)
+                    writer.close()
 
         if data_to_disk:
             dump_episode_buffer(

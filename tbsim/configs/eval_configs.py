@@ -12,6 +12,11 @@ class EvaluationConfig(Dict):
         self.seed = 0
         self.num_scenes_per_batch = 5
         self.num_scenes_to_evaluate = 100
+
+        self.num_episode_repeats = 2
+        self.start_frame_index_each_episode = None  # same length as num_episode_repeats
+        self.seed_each_episode = None  # same length as num_episode_repeats
+
         self.ego_only = False
 
         self.ckpt_root_dir = "checkpoints/"
@@ -24,6 +29,12 @@ class EvaluationConfig(Dict):
         self.ckpt.planner.ckpt_key = ""
         self.ckpt.predictor.ngc_job_id = ""
         self.ckpt.predictor.ckpt_key = ""
+
+        self.ckpt.cvae_metric.ngc_job_id = ""
+        self.ckpt.cvae_metric.ckpt_key = ""
+
+        self.ckpt.occupancy_metric.ngc_job_id = ""
+        self.ckpt.occupancy_metric.ckpt_key = ""
 
         self.policy.mask_drivable = True
         self.policy.num_plan_samples = 50

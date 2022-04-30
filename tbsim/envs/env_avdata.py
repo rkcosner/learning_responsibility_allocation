@@ -74,6 +74,10 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
     def current_num_agents(self):
         return sum(len(scene.agents) for scene in self._current_scenes)
 
+    def reset_multi_episodes_metrics(self):
+        for v in self._metrics.values():
+            v.multi_episode_reset()
+
     @property
     def current_agent_scene_index(self):
         si = []
@@ -127,7 +131,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
         scene.agents = valid_agents
 
-    def reset(self, scene_indices: List = None):
+    def reset(self, scene_indices: List = None, start_frame_index = None):
         """
         Reset the previous simulation episode. Randomly sample a batch of new scenes unless specified in @scene_indices
 
@@ -150,7 +154,8 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 np.max(scene_indices) < self._num_total_scenes
                 and np.min(scene_indices) >= 0
         )
-
+        if start_frame_index is None:
+            start_frame_index = self._env_config.simulation.start_frame_index
         self._current_scenes = []
         for i, si in enumerate(scene_info):
             sim_scene: SimulationScene = SimulationScene(
@@ -158,7 +163,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 scene_name=si.name,
                 scene_info=si,
                 dataset=self.dataset,
-                init_timestep=self._env_config.simulation.start_frame_index,
+                init_timestep=start_frame_index,
                 freeze_agents=True,
                 return_dict=True
             )
@@ -207,6 +212,17 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         return {
             "scene_index": self.current_scene_names,
         }
+
+    def get_multi_episode_metrics(self):
+        metrics = dict()
+        for met_name, met in self._metrics.items():
+            met_vals = met.get_multi_episode_metrics()
+            if isinstance(met_vals, dict):
+                for k, v in met_vals.items():
+                    metrics[met_name + "_" + k] = v
+            elif met_vals is not None:
+                metrics[met_name] = met_vals
+        return metrics
 
     def get_metrics(self):
         """

@@ -94,7 +94,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         for v in self._metrics.values():
             v.multi_episode_reset()
 
-    def reset(self, scene_indices: List = None):
+    def reset(self, scene_indices: List = None, start_frame_index = None):
         """
         Reset the previous simulation episode. Randomly sample a batch of new scenes unless specified in @scene_indices
 
@@ -115,6 +115,9 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             np.max(scene_indices) < self._num_total_scenes
             and np.min(scene_indices) >= 0
         )
+
+        if start_frame_index is not None:
+            self._sim_cfg.start_frame_index = start_frame_index
 
         self._current_scene_indices = scene_indices
         self._current_scene_dataset = SimulationDataset.from_dataset_indices(
@@ -210,7 +213,18 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
     def scene_to_ego_index(self):
         return np.split(np.arange(self.num_instances), self.num_instances)
 
-    def get_metrics(self,multi_episodes=False):
+    def get_multi_episode_metrics(self):
+        metrics = dict()
+        for met_name, met in self._metrics.items():
+            met_vals = met.get_multi_episode_metrics()
+            if isinstance(met_vals, dict):
+                for k, v in met_vals.items():
+                    metrics[met_name + "_" + k] = v
+            elif met_vals is not None:
+                metrics[met_name] = met_vals
+        return metrics
+
+    def get_metrics(self):
         """
         Get metrics of the current episode (may compute before is_done==True)
 
@@ -218,45 +232,33 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         """
         # TODO: phase out the dependencies on l5kit Metrics
         
+        met = DisplacementErrorL2Metric()
+        sim_states = self._get_l5_sim_states()
+        ego_ade = np.zeros(self._num_scenes)
+        ego_fde = np.zeros(self._num_scenes)
+        for si, scene_states in enumerate(sim_states):
+            err = TensorUtils.to_numpy(met.compute(scene_states))
+            ego_ade[si] = np.mean(err)
+            ego_fde[si] = err[self._frame_index]
 
-        if multi_episodes:
-            metrics = dict()
-            for met_name, met in self._metrics.items():
-                met_vals = met.get_multi_episode_metrics()
-                if isinstance(met_vals, dict):
-                    for k, v in met_vals.items():
-                        metrics[met_name + "_" + k] = v
-                elif met_vals is not None:
-                    metrics[met_name] = met_vals
-        else:
-            met = DisplacementErrorL2Metric()
-            sim_states = self._get_l5_sim_states()
-            ego_ade = np.zeros(self._num_scenes)
-            ego_fde = np.zeros(self._num_scenes)
-            for si, scene_states in enumerate(sim_states):
-                err = TensorUtils.to_numpy(met.compute(scene_states))
-                ego_ade[si] = np.mean(err)
-                ego_fde[si] = err[self._frame_index]
+        # TODO: compute agent metrics
 
-            # TODO: compute agent metrics
+        metrics = {
+            "ego_ADE": ego_ade,
+            "ego_FDE": ego_fde,
+        }
+        # aggregate per-step metrics
+        self._add_per_step_metrics(self.get_observation())
+        for met_name, met in self._metrics.items():
 
-            metrics = {
-                "ego_ADE": ego_ade,
-                "ego_FDE": ego_fde,
-            }
-            # aggregate per-step metrics
-            self._add_per_step_metrics(self.get_observation())
-            for met_name, met in self._metrics.items():
-                
-                assert len(met) == self._frame_index + 1, len(met)
-                met_vals = met.get_episode_metrics()
-                if isinstance(met_vals, dict):
-                    for k, v in met_vals.items():
-                        metrics[met_name + "_" + k] = v
-                elif met_vals is not None:
-                    metrics[met_name] = met_vals
-            
-                
+            assert len(met) == self._frame_index + 1, len(met)
+            met_vals = met.get_episode_metrics()
+            if isinstance(met_vals, dict):
+                for k, v in met_vals.items():
+                    metrics[met_name + "_" + k] = v
+            elif met_vals is not None:
+                metrics[met_name] = met_vals
+
         return metrics
 
     def get_observation(self):
