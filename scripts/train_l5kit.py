@@ -2,6 +2,7 @@ import argparse
 import sys
 import os
 import json
+import socket
 
 import wandb
 import pytorch_lightning as pl
@@ -35,8 +36,7 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         exp_name=cfg.name,
         output_dir=cfg.root_dir,
         save_checkpoints=cfg.train.save.enabled,
-        auto_remove_exp_dir=auto_remove_exp_dir,
-        on_ngc=cfg.train.on_ngc
+        auto_remove_exp_dir=auto_remove_exp_dir
     )
     # Save experiment config to the training dir
     cfg.dump(os.path.join(root_dir, version_key, "config.json"))
@@ -282,6 +282,10 @@ if __name__ == "__main__":
 
     if args.wandb_project_name is not None:
         default_config.train.logging.wandb_project_name = args.wandb_project_name
+
+    if args.on_ngc:
+        ngc_job_id = socket.gethostname()
+        default_config.name = default_config.name + "_" + ngc_job_id
 
     default_config.train.on_ngc = args.on_ngc
 

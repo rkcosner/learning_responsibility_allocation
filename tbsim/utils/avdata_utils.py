@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.utils.geometry_utils import transform_points_tensor
@@ -54,8 +55,11 @@ def rasterize_agents(
     return maps
 
 
-def get_drivable_region_map(maps: torch.Tensor):
-    drivable = torch.amax(maps[..., -7:-4, :, :], dim=-3).bool()
+def get_drivable_region_map(maps):
+    if isinstance(maps, torch.Tensor):
+        drivable = torch.amax(maps[..., -7:-4, :, :], dim=-3).bool()
+    else:
+        drivable = np.amax(maps[..., -7:-4, :, :], axis=-3).astype(np.bool)
     return drivable
 
 
@@ -120,6 +124,7 @@ def parse_avdata_batch(batch: dict):
     curr_yaw = curr_state[:, -1]
     curr_pos = curr_state[:, :2]
     raster_from_world = torch.bmm(raster_from_agent, batch["agents_from_world_tf"])
+    world_from_agents = torch.inverse(batch["agents_from_world_tf"])
 
     all_hist_pos = torch.cat((hist_pos[:, None], neigh_hist_pos), dim=1)
     all_hist_yaw = torch.cat((hist_yaw[:, None], neigh_hist_yaw), dim=1)
@@ -154,6 +159,7 @@ def parse_avdata_batch(batch: dict):
         agent_from_raster=agent_from_raster,
         raster_from_world=raster_from_world,
         agent_from_world=batch["agents_from_world_tf"],
+        world_from_agent=world_from_agents,
         all_other_agents_history_positions=neigh_hist_pos,
         all_other_agents_history_yaws=neigh_hist_yaw,
         all_other_agents_history_availabilities=neigh_hist_mask,

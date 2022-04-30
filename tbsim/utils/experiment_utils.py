@@ -120,7 +120,9 @@ class ParamSearchPlan(object):
         if len(self.param_configs) > 0:
             return [pc.generate_config(base_cfg) for pc in self.param_configs]
         else:
-            return [base_cfg]
+            # constant-only
+            const_cfg = ParamConfig(self.const_params)
+            return [const_cfg.generate_config(base_cfg)]
 
 
 def create_configs(

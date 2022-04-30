@@ -29,12 +29,12 @@ from tbsim.configs.nusc_config import (
 
 EXP_CONFIG_REGISTRY = dict()
 
-EXP_CONFIG_REGISTRY["l5_rasterized_plan"] = ExperimentConfig(
-    train_config=L5KitTrainConfig(),
-    env_config=L5KitEnvConfig(),
-    algo_config=L5RasterizedPlanningConfig(),
-    registered_name="l5_rasterized_plan",
-)
+# EXP_CONFIG_REGISTRY["l5_rasterized_plan"] = ExperimentConfig(
+#     train_config=L5KitTrainConfig(),
+#     env_config=L5KitEnvConfig(),
+#     algo_config=L5RasterizedPlanningConfig(),
+#     registered_name="l5_rasterized_plan",
+# )
 
 EXP_CONFIG_REGISTRY["l5_mixed_gc"] = ExperimentConfig(
     train_config=L5KitMixedTrainConfig(),
@@ -120,13 +120,13 @@ EXP_CONFIG_REGISTRY["l5_occupancy"] = ExperimentConfig(
     registered_name="l5_occupancy"
 )
 
-
 EXP_CONFIG_REGISTRY["l5_rasterized_ebm"] = ExperimentConfig(
     train_config=L5KitTrainConfig(),
     env_config=L5KitEnvConfig(),
     algo_config=EBMMetricConfig(),
     registered_name="l5_rasterized_ebm",
 )
+
 
 EXP_CONFIG_REGISTRY["nusc_rasterized_plan"] = ExperimentConfig(
     train_config=NuscTrainConfig(),
@@ -140,6 +140,13 @@ EXP_CONFIG_REGISTRY["nusc_spatial_planner"] = ExperimentConfig(
     env_config=NuscEnvConfig(),
     algo_config=SpatialPlannerConfig(),
     registered_name="nusc_spatial_planner"
+)
+
+EXP_CONFIG_REGISTRY["nusc_vae_plan"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=L5RasterizedVAEConfig(),
+    registered_name="nusc_vae_plan"
 )
 
 EXP_CONFIG_REGISTRY["nusc_ma_rasterized_plan"] = ExperimentConfig(

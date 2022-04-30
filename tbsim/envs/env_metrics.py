@@ -563,7 +563,7 @@ class OccupancyCoverage(Occupancymet):
     def get_episode_metrics(self):
         coverage_num = list()
         for scene_idx,og in self.og.items():
-            data = np.array(list(og.values()))
+            data = np.array(list(og.occupancy_grid.values()))
             coverage_num.append((data>self.threshold).sum())
         return np.array(coverage_num)
 
