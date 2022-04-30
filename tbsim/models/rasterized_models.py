@@ -618,17 +618,10 @@ class RasterizedDiscreteVAEModel(nn.Module):
 
         decoder_kwargs = dict()
         if self.dyn is not None:
-<<<<<<< HEAD
-            current_states = L5Utils.get_current_states(batch_inputs, self.dyn.type())
-            decoder_kwargs["current_states"] = current_states
-        cond_traj = torch.cat((batch_inputs["all_other_agents_future_positions"],batch_inputs["all_other_agents_future_yaws"]),-1)
-        outs = self.vae.forward(inputs=inputs, condition_inputs=condition_inputs, cond_traj=cond_traj, decoder_kwargs=decoder_kwargs)
-=======
             current_states = batch_utils().get_current_states(batch_inputs, self.dyn.type())
             decoder_kwargs["current_states"] = current_states.tile(self.vae.K,1)
         
         outs = self.vae.forward(inputs=inputs, condition_inputs=condition_inputs, decoder_kwargs=decoder_kwargs)
->>>>>>> hierarchy_ongoing
         outs.update(self._traj_to_preds(outs["x_recons"]["trajectories"]))
         if self.dyn is not None:
             outs["controls"] = outs["x_recons"]["controls"]
@@ -644,23 +637,12 @@ class RasterizedDiscreteVAEModel(nn.Module):
         condition_inputs = OrderedDict(image=batch_inputs["image"], goal=self._get_goal_states(batch_inputs))
         decoder_kwargs = dict()
         if self.dyn is not None:
-<<<<<<< HEAD
-            decoder_kwargs["current_states"] = L5Utils.get_current_states(batch_inputs, self.dyn.type())
-
-        outs = self.vae.sample(condition_inputs=condition_inputs, n=n, cond_traj=cond_traj, decoder_kwargs=decoder_kwargs)
-        outs = self._traj_to_preds(outs["trajectories"])
-        pred = TensorUtils.join_dimensions(TensorUtils.slice_tensor(outs,1,0,1),0,2)
-        if outs["trajectories"].shape[1]>1:
-            EC_pred = TensorUtils.slice_tensor(outs,1,1,outs["trajectories"].shape[1])
-            pred["EC_pred"] = EC_pred
-=======
             curr_states = batch_utils().get_current_states(batch_inputs, self.dyn.type())
             decoder_kwargs["current_states"] = TensorUtils.repeat_by_expand_at(curr_states, repeats=n, dim=0)
 
         outs = self.vae.sample(condition_inputs=condition_inputs, n=n, decoder_kwargs=decoder_kwargs)
         
         return self._traj_to_preds(outs["trajectories"])
->>>>>>> hierarchy_ongoing
 
         return pred
 
