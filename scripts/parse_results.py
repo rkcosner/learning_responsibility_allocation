@@ -5,9 +5,13 @@ import numpy as np
 
 def parse(args):
     rjson = json.load(open(args.results_file, "r"))
+
     for k in rjson:
         if k != "scene_index":
-            print("{} = {}".format(k, np.mean(rjson[k])))
+            if args.num_scenes is None:
+                print("{} = {}".format(k, np.mean(rjson[k])))
+            else:
+                print("{} = {}".format(k, np.mean(rjson[k][:args.num_scenes])))
     print("num_scenes: {}".format(len(rjson["scene_index"])))
 
 
@@ -18,6 +22,12 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="A json file containing evaluation results"
+    )
+
+    parser.add_argument(
+        "--num_scenes",
+        type=int,
+        default=None
     )
 
     args = parser.parse_args()

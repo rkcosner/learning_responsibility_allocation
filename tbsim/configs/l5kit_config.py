@@ -24,7 +24,7 @@ class L5KitTrainConfig(TrainConfig):
 
         # training config
         self.training.batch_size = 100
-        self.training.num_steps = 200000
+        self.training.num_steps = 100000
         self.training.num_data_workers = 8
 
         self.save.every_n_steps = 1000
@@ -311,11 +311,10 @@ class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
         super(L5RasterizedDiscreteVAEConfig, self).__init__()
         self.name = "l5_rasterized_discrete_vae"
         self.map_feature_dim = 256
-        self.goal_conditional = True
+        self.goal_conditional = False
         self.goal_feature_dim = 32
 
-
-        self.ego_conditioning = True
+        self.ego_conditioning = False
         self.EC_feat_dim = 64
         self.vae.latent_dim = 10
         self.vae.condition_dim = 128
@@ -334,6 +333,7 @@ class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
         self.eval.mode = "mean"
 
         self.min_std = 0.1
+
 
 class L5RasterizedTreeVAEConfig(L5RasterizedPlanningConfig):
     def __init__(self):
