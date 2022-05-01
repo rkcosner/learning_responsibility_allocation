@@ -353,9 +353,9 @@ class LearnedMetric(EnvMetrics):
         for k in ep_metrics:
             met = np.stack(ep_metrics[k], axis=1)  # [num_scene, T, ...]
             ep_metrics_agg[k] = np.mean(met, axis=1)
-            # for met_horizon in [10, 50, 100, 150]:
-            #     if met.shape[1] >= met_horizon:
-            #         ep_metrics_agg[k + "@{}".format(met_horizon)] = np.mean(met[:, :met_horizon], axis=1)
+            for met_horizon in [10, 50, 100, 150]:
+                if met.shape[1] >= met_horizon:
+                    ep_metrics_agg[k + "@{}".format(met_horizon)] = np.mean(met[:, :met_horizon], axis=1)
         return ep_metrics_agg
 
 
@@ -378,7 +378,6 @@ class LearnedCVAENLL(EnvMetrics):
         return self.total_steps
 
     def add_step(self, state_info: dict, all_scene_index: np.ndarray):
-        
         state_info = dict(state_info)
         state_info["image"] = (state_info["image"] * 255.).astype(np.uint8)
         self.state_buffer.append(state_info)
@@ -415,6 +414,7 @@ class LearnedCVAENLL(EnvMetrics):
         traj_to_eval = dict()
         traj_to_eval["target_positions"] = agent_traj_pos
         traj_to_eval["target_yaws"] = agent_traj_yaw[:, :, None]
+
         state_torch = TensorUtils.to_torch(state, self.metric_algo.device)
         metrics = dict()
 
@@ -424,18 +424,17 @@ class LearnedCVAENLL(EnvMetrics):
             metrics["gt_{}".format(mk)] = m[mk]
         traj_torch = TensorUtils.to_torch(traj_to_eval, self.metric_algo.device)
         m = self.metric_algo.get_metrics(state_torch,traj_torch)
-        
         for mk in m:
             metrics["pred_{}".format(mk)] = m[mk]
         
 
-        for k, v in self.perturbations.items():
-            traj_perturbed = TensorUtils.to_torch(v.perturb(traj_to_eval), self.metric_algo.device)
-            state_perturbed = dict(state_torch)
-            state_perturbed.update(traj_perturbed)
-            m = self.metric_algo.get_metrics(state_perturbed)
-            for mk in m:
-                metrics["{}_{}".format(k, mk)] = m[mk]
+        # for k, v in self.perturbations.items():
+        #     traj_perturbed = TensorUtils.to_torch(v.perturb(traj_to_eval), self.metric_algo.device)
+        #     state_perturbed = dict(state_torch)
+        #     state_perturbed.update(traj_perturbed)
+        #     m = self.metric_algo.get_metrics(state_perturbed)
+        #     for mk in m:
+        #         metrics["{}_{}".format(k, mk)] = m[mk]
 
         metrics= TensorUtils.to_numpy(metrics)
         step_metrics = dict()
@@ -452,18 +451,7 @@ class LearnedCVAENLL(EnvMetrics):
         ep_metrics = self.compute_metric(self.state_buffer[-self.traj_len-1:], all_scene_index)
 
 
-<<<<<<< HEAD
-        ep_metrics_agg = dict()
-        for k in ep_metrics:
-            met = np.stack(ep_metrics[k], axis=1)  # [num_scene, T, ...]
-            ep_metrics_agg[k] = np.mean(met, axis=1)
-            # for met_horizon in [10, 50, 100, 150]:
-            #     if met.shape[1] >= met_horizon:
-            #         ep_metrics_agg[k + "@{}".format(met_horizon)] = np.mean(met[:, :met_horizon], axis=1)
-        return ep_metrics_agg
-=======
         return ep_metrics
->>>>>>> hierarchy_ongoing
 
 def obtain_active_agent_index(state_buffer):
     agents_indices = dict()
