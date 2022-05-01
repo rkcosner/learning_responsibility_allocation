@@ -651,7 +651,7 @@ class RasterizedDiscreteVAEModel(nn.Module):
         if self.recon_loss_type=="NLL":
             assert "logvar" in pred_batch["x_recons"]
             bs, M, T, D = pred_batch["trajectories"].shape
-            var = torch.exp(pred_batch["x_recons"]["logvar"]).reshape(bs,M,-1)
+            var = (torch.exp(pred_batch["x_recons"]["logvar"])+torch.ones_like(pred_batch["x_recons"]["logvar"])*1e-4).reshape(bs,M,-1)
             var = torch.gather(var,1,z1.unsqueeze(-1).repeat(1,1,var.size(-1)))
             avails = data_batch["target_availabilities"].unsqueeze(-1).repeat(1, 1, target_traj.shape[-1]).reshape(bs, -1)
             pred_loss = NLL_GMM_loss(
