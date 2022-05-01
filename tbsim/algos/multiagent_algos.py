@@ -118,7 +118,10 @@ class MATrafficModel(pl.LightningModule):
             plan_tiled = TensorUtils.join_dimensions(plan_samples.to_dict(), begin_axis=0, end_axis=2)
             plan_tiled = Plan.from_dict(plan_tiled)
 
-            relevant_keys = ["curr_speed", "history_positions", "history_yaws", "extent"]
+            relevant_keys = ["curr_speed", "history_positions", "history_yaws", "extent","all_other_agents_history_extents",\
+                "type","all_other_agents_types","all_other_agents_history_positions",\
+                    "all_other_agents_history_yaws","history_availabilities",\
+                        "all_other_agents_history_availability"]
             relevant_obs = {k: obs_dict[k] for k in relevant_keys}
             obs_tiled = TensorUtils.repeat_by_expand_at(relevant_obs, repeats=n, dim=0)
             preds = self.model.forward_prediction(feats_tiled, obs_tiled, plan=plan_tiled)

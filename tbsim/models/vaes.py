@@ -467,6 +467,8 @@ class DiscreteCVAE(nn.Module):
         else:
             c = self.c_net(condition_inputs)  # [B, ...]
         logp = self.p_net(c)["logp"]
+        if self.logpi_clamp is not None:
+            logp = logp.clamp(min=self.logpi_clamp,max=2.0)
         p = torch.exp(logp)
         p = p/p.sum(dim=-1,keepdim=True)
         # z = (-logp).argsort()[...,:n]

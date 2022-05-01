@@ -438,6 +438,7 @@ class RasterizedVAEModel(nn.Module):
         )
 
         self.dyn = traj_decoder.dyn
+        self.algo_config = algo_config
 
     def _traj_to_preds(self, traj):
         pred_positions = traj[..., :2]
@@ -460,7 +461,8 @@ class RasterizedVAEModel(nn.Module):
     def forward(self, batch_inputs: dict):
         trajectories = torch.cat((batch_inputs["target_positions"], batch_inputs["target_yaws"]), dim=-1)
         inputs = OrderedDict(trajectories=trajectories)
-        condition_inputs = OrderedDict(image=batch_inputs["image"], goal=self._get_goal_states(batch_inputs))
+        goal = self._get_goal_states(batch_inputs) if self.algo_config.goal_conditional else None
+        condition_inputs = OrderedDict(image=batch_inputs["image"], goal=goal)
 
         decoder_kwargs = dict()
         if self.dyn is not None:
@@ -473,7 +475,8 @@ class RasterizedVAEModel(nn.Module):
         return outs
 
     def sample(self, batch_inputs: dict, n: int):
-        condition_inputs = OrderedDict(image=batch_inputs["image"], goal=self._get_goal_states(batch_inputs))
+        goal = self._get_goal_states(batch_inputs) if self.algo_config.goal_conditional else None
+        condition_inputs = OrderedDict(image=batch_inputs["image"], goal=goal)
 
         decoder_kwargs = dict()
         if self.dyn is not None:
@@ -484,7 +487,8 @@ class RasterizedVAEModel(nn.Module):
         return self._traj_to_preds(outs["trajectories"])
 
     def predict(self, batch_inputs: dict):
-        condition_inputs = OrderedDict(image=batch_inputs["image"], goal=self._get_goal_states(batch_inputs))
+        goal = self._get_goal_states(batch_inputs) if self.algo_config.goal_conditional else None
+        condition_inputs = OrderedDict(image=batch_inputs["image"], goal=goal)
 
         decoder_kwargs = dict()
         if self.dyn is not None:
