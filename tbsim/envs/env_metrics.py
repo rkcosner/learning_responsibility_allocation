@@ -564,9 +564,9 @@ class OccupancyGrid():
         """
         self.gridinfo = gridinfo
         self.sigma = sigma
-        self.occupancy_grid = defaultdict(lambda:0)
-        self.lane_flag = defaultdict(lambda:0)
-        self.agent_ids = defaultdict(lambda:0)
+        self.occupancy_grid = defaultdict(lambda: 0)
+        self.lane_flag = defaultdict(lambda: 0)
+        self.agent_ids = defaultdict(lambda: set())
 
     def get_neighboring_grid_points(self,coords,radius):
         
@@ -617,7 +617,7 @@ class OccupancyGrid():
         for i in range(XYi_flatten.shape[0]):
             self.occupancy_grid[(XYi_flatten[i,0],XYi_flatten[i,1])] += weight*kernel_value_flatten[i]
             self.lane_flag[(XYi_flatten[i,0],XYi_flatten[i,1])] = lane_flag_flatten[i]
-            self.agent_ids[(XYi_flatten[i,0],XYi_flatten[i,1])] = agent_ids[i]
+            self.agent_ids[(XYi_flatten[i,0],XYi_flatten[i,1])].add(agent_ids[i])
     
     def visualize(self):
         fig, ax = plt.subplots(figsize=(20, 20))
@@ -688,9 +688,11 @@ class OccupancyCoverage(Occupancymet):
         for scene_idx, og in self.og.items():
             data = np.array(list(og.occupancy_grid.values()))
             lane = np.array(list(og.lane_flag.values())).astype(np.float32)
-            agent_ids = np.array(list(og.agent_ids.values()))
-            success_mask = ~np.isin(agent_ids, failed_agent_ids)
-
+            success_mask = np.zeros_like(lane)
+            for i, aid in enumerate(og.agent_ids.values()):
+                # if any of the successful agent covers a grid, count it as a successful coverage
+                # conversely, if all the agents that cover the grid ended up failing, do not count the coverage.
+                success_mask[i] = ~np.all(np.isin(list(aid), failed_agent_ids))
             data_onroad = data * lane
             data_success = data * lane * success_mask.astype(np.float32)
             coverage_num["onroad"].append((data_onroad > self.threshold).sum())
