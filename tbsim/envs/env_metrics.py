@@ -566,7 +566,6 @@ class Occupancymet(EnvMetrics):
 
 
 class OccupancyCoverage(Occupancymet):
-<<<<<<< HEAD
     def __init__(self, gridinfo, sigma=1.0, threshold=1e-2, mode="unfiltered"):
         super(OccupancyCoverage,self).__init__(gridinfo, sigma)
         self.threshold = threshold
@@ -598,21 +597,6 @@ class OccupancyCoverage(Occupancymet):
             return {k:np.array(v) for k,v in coverage_num.items()}
             
             
-=======
-    def __init__(self, gridinfo, sigma=1.0, threshold=1e-2):
-        super(OccupancyCoverage,self).__init__(gridinfo, sigma)
-        self.threshold = threshold
-
-    def summarize_grid(self):
-        coverage_num = list()
-        coverage_num_drivable = list()
-        for scene_idx, og in self.og.items():
-            data = np.array(list(og.occupancy_grid.values()))
-            lane = np.array(list(og.lane_flag.values())).astype(np.float32)
-            coverage_num.append((data > self.threshold).sum())
-            coverage_num_drivable.append(((data * lane) > self.threshold).sum())
-        return {"cov": np.array(coverage_num), "cov_drivable": np.array(coverage_num_drivable)}
->>>>>>> 7ce4a65b11aa42a8c9b3b3563ec12028949f9618
 
     def get_episode_metrics(self):
         return self.summarize_grid()
