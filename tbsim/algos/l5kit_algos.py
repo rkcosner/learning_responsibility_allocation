@@ -1021,10 +1021,6 @@ class L5ECTrafficModel(L5TrafficModel):
         return self.nets["policy"].EC_predict(obs,cond_traj,goal_state)
 
 
-<<<<<<< HEAD
-
-=======
->>>>>>> hierarchy_ongoing
 class GANTrafficModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):
         super(GANTrafficModel, self).__init__()
