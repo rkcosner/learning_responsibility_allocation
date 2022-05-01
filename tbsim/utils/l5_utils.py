@@ -696,7 +696,6 @@ def get_current_states_all_agents(batch: dict, step_time, dyn_type: dynamics.Dyn
 
 
 def get_drivable_region_map(rasterized_map):
-    assert rasterized_map.shape[-3] in [3, 15]
     return rasterized_map[..., -3, :, :] < 1.
 
 

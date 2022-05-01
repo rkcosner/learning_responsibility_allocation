@@ -248,10 +248,9 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             "ego_FDE": ego_fde,
         }
         # aggregate per-step metrics
-        self._add_per_step_metrics(self.get_observation())
+        # self._add_per_step_metrics(self.get_observation())
         for met_name, met in self._metrics.items():
 
-            assert len(met) == self._frame_index + 1, len(met)
             met_vals = met.get_episode_metrics()
             if isinstance(met_vals, dict):
                 for k, v in met_vals.items():
@@ -368,8 +367,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
     def _add_per_step_metrics(self, obs):
         for k, v in self._metrics.items():
-            if len(v) >= self._frame_index + 1:
-                return
             if k.startswith("ego"):
                 v.add_step(obs["ego"], self.current_scene_indices)
             elif k.startswith("agents"):
