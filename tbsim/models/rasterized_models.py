@@ -696,7 +696,7 @@ class RasterizedDiscreteVAEModel(nn.Module):
                 predictions=pred_batch["trajectories"],
                 targets=target_traj,
                 availabilities=data_batch["target_availabilities"],
-                prob = prob,
+                prob=prob,
                 weights_scaling=self.weights_scaling,
             )
         else:

@@ -337,6 +337,25 @@ class RandomPerturbation(object):
         obs["target_yaws"] = target_traj[..., :1]
         return obs
 
+class OrnsteinUhlenbeckPerturbation(object):
+    def __init__(self,theta,sigma,bs,x0=None):
+        assert theta.shape == (3,) and sigma.shape == (3,)
+        self.bs = bs
+        if x0 is None:
+            self.x = [np.zeros([bs,3])]
+        else:
+            assert x0.shape==(bs,3)
+            self.x = [x0]
+    def perturb(self,obs):
+        target_traj = np.concatenate((obs["target_positions"], obs["target_yaws"]), axis=-1)
+        while len(self.x)<target_traj.shape[-2]:
+            self.x.append(-self.theta*self.x[-1]+np.randn(self.bs,3)*self.sigma)
+        noise = np.stack(self.x,axis=1)
+        target_traj += noise
+        obs["target_positions"] = target_traj[..., :2]
+        obs["target_yaws"] = target_traj[..., :1]
+        self.x.pop(0)
+        return obs
 
 class MetricsComposer(object):
     def __init__(self, eval_config, device, ckpt_root_dir="checkpoints/"):
@@ -414,11 +433,12 @@ def create_env_l5kit(
     if compute_metrics:
         gridinfo = {"offset": np.zeros(2), "step": 2.0*np.ones(2)}
         cvae_metrics = CVAEMetrics(eval_config=eval_cfg, device=device, ckpt_root_dir=eval_cfg.ckpt_root_dir)
+        cvae_metrics._exp_config = exp_cfg
         metrics = dict(
             # all_off_road_rate=EnvMetrics.OffRoadRate(),
             # all_collision_rate=EnvMetrics.CollisionRate(),
             # all_occupancy = EnvMetrics.Occupancydistr(gridinfo,sigma=2.0)
-            # cvae_metrics=cvae_metrics.get_metrics(),
+            ego_cvae_metrics=cvae_metrics.get_metrics(),
             ego_occupancy_diversity=EnvMetrics.OccupancyDiversity(gridinfo, sigma=2.0,mode="unfiltered"),
             all_occupancy_coverage=EnvMetrics.OccupancyCoverage(gridinfo, sigma=2.0,mode="separate")
             # all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations),
