@@ -443,7 +443,7 @@ class L5VAETrafficModel(pl.LightningModule):
 
     @property
     def checkpoint_monitor_keys(self):
-        return {"valLoss": "val/losses_prediction_loss"}
+        return {"valLoss": "val/losses_prediction_loss", "minADE": "val/metrics_ego_avg_ADE"}
 
     def forward(self, obs_dict):
         return self.nets["policy"].predict(obs_dict)["predictions"]
@@ -582,7 +582,7 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
         )
     @property
     def checkpoint_monitor_keys(self):
-        return {"valLoss": "val/losses_prediction_loss"}
+        return {"valLoss": "val/losses_prediction_loss", "minADE": "val/metrics_ego_avg_ADE"}
 
     def forward(self, obs_dict):
         return self.nets["policy"].predict(obs_dict)["predictions"]
