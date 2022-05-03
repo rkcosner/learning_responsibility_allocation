@@ -397,7 +397,7 @@ class CVAE(nn.Module):
         z = self.prior.sample_with_parameters(q_params, n=1).squeeze(dim=1)
         decoder_kwargs = dict() if decoder_kwargs is None else decoder_kwargs
         x_out = self.decoder(latents=z, condition_features=c, **decoder_kwargs)
-        return {"x_recons": x_out, "q_params": q_params, "z": z}
+        return {"x_recons": x_out, "q_params": q_params, "z": z, "c": c}
 
     def compute_kl_loss(self, outputs: dict):
         """
