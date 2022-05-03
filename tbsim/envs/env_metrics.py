@@ -407,11 +407,17 @@ class LearnedMetric(EnvMetrics):
             traj_torch = TensorUtils.to_torch(traj_to_eval, self.metric_algo.device)
             state_to_eval = dict(state_torch)
             state_to_eval.update(traj_torch)
+            state_to_eval = TensorUtils.recursive_dict_list_tuple_apply(
+                state_to_eval,
+                {
+                    torch.Tensor: lambda x:x.type(torch.float),
+                    type(None): lambda x: x,
+                },
+            )
             m = self.metric_algo.get_metrics(state_to_eval)
             for mk in m:
                 metrics["comp_{}".format(mk)] = (metrics["gt_{}".format(mk)] < m[mk]).float()
             metrics.update(m)
-
         for k, v in self.perturbations.items():
             traj_perturbed = TensorUtils.to_torch(v.perturb(traj_to_eval), self.metric_algo.device)
             state_perturbed = dict(state_torch)
@@ -515,15 +521,15 @@ class LearnedCVAENLL(EnvMetrics):
         m = self.metric_algo.get_metrics(state_torch,traj_torch)
         for mk in m:
             metrics["pred_{}".format(mk)] = m[mk]
-        
 
-        # for k, v in self.perturbations.items():
-        #     traj_perturbed = TensorUtils.to_torch(v.perturb(traj_to_eval), self.metric_algo.device)
-        #     state_perturbed = dict(state_torch)
-        #     state_perturbed.update(traj_perturbed)
-        #     m = self.metric_algo.get_metrics(state_perturbed)
-        #     for mk in m:
-        #         metrics["{}_{}".format(k, mk)] = m[mk]
+        for k, v in self.perturbations.items():
+            
+            traj_perturbed = TensorUtils.to_torch(v.perturb(traj_to_eval), self.metric_algo.device)
+            state_perturbed = dict(state_torch)
+            state_perturbed.update(traj_perturbed)
+            m = self.metric_algo.get_metrics(state_perturbed)
+            for mk in m:
+                metrics["{}_{}".format(k, mk)] = m[mk]
 
         metrics= TensorUtils.to_numpy(metrics)
         step_metrics = dict()

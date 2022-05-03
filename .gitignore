@@ -13,7 +13,9 @@ ma_rasterized_trained_models/
 spatial_planner_trained_models/
 results/
 scripts/create_experiment.py
-
+scripts/create_evaluation.py
+tbsim/configs/eval_configs.py
+scripts/evaluate.py
 ## config files
 #*.yaml
 
@@ -75,3 +77,8 @@ coverage.xml
 
 # Sphinx documentation
 docs/_build/
+scripts/create_evaluation.py
+scripts/evaluate.py
+tbsim/configs/eval_configs.py
+
+l5_rasterized_tree_vae_trained_models/test/run0/logs/log.txt

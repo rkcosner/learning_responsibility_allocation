@@ -502,9 +502,16 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                 # some agents might get dropped in the middle,
                 # index actions by the current agent track ids and scene index
                 active_agent_index = np.zeros(obs["agents"]["scene_index"].shape[0], dtype=np.int64)
+                newly_added = list()
                 for i, (tid, sid) in enumerate(zip(obs["agents"]["track_id"], obs["agents"]["scene_index"])):
                     action_index = np.bitwise_and(tid == agent_track_ids, sid == agent_scene_indices)
-                    active_agent_index[i] = np.where(action_index)[0][0]
+                    if action_index.any():
+                        active_agent_index[i] = np.where(action_index)[0][0]
+                    else:
+                        # accounting for newly added agents that do not have a rollout action
+                        active_agent_index[i] = i
+                        newly_added.append(i)
+
                 actions_world_d["agents"] = TensorUtils.map_ndarray(
                     actions_world_d["agents"], lambda x: x[active_agent_index]
                 )
@@ -512,10 +519,17 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                     actions_world_d["agents_info"], lambda x: x[active_agent_index]
                 )
 
-            step_actions_world = RolloutAction.from_dict(
-                TensorUtils.map_ndarray(
+            actions_world_d = TensorUtils.map_ndarray(
                     actions_world_d, lambda x: x[:, step_i:])
+            if actions.has_agents:
+                if len(newly_added)>0:
+                    T = actions_world_d["agents"]["positions"].shape[1]
+                    actions_world_d["agents"]["positions"][newly_added,:T] = obs["agents"]["target_positions"][newly_added,:T]
+                    actions_world_d["agents"]["yaws"][newly_added,:T] = obs["agents"]["target_yaws"][newly_added,:T]
+            step_actions_world = RolloutAction.from_dict(
+                actions_world_d
             )
+
 
             step_actions = step_actions_world.transform(
                 ego_trans_mats=obs["ego"]["agent_from_world"],

@@ -10,5 +10,6 @@
   "docker_image": "nvcr.io/nvidian/nvr-av/tbsim:latest",
   "total_runtime": "48h",
   "workspace_mounting_point_local": "/home/yuxiaoc/repos/ngc_workspace",
-  "output_dir": "/workspace/tbsim-ws/result/"
+  "output_dir": "/workspace/tbsim-ws/result/",
+  "eval_output_dir": "/workspace/tbsim-ws/eval_result"
 }

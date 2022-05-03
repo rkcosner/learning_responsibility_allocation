@@ -12,6 +12,7 @@ from tbsim.algos.l5kit_algos import (
     SpatialPlanner,
     GANTrafficModel,
     L5ECTrafficModel,
+    L5TreeVAETrafficModel
 )
 
 from tbsim.algos.multiagent_algos import (
@@ -56,6 +57,10 @@ def algo_factory(config: ExperimentConfig, modality_shapes: dict, data_module: L
         )
     elif algo_name == "l5_rasterized_discrete_vae":
         algo = L5DiscreteVAETrafficModel(
+            algo_config=algo_config, modality_shapes=modality_shapes
+        )
+    elif algo_name == "l5_rasterized_tree_vae":
+        algo = L5TreeVAETrafficModel(
             algo_config=algo_config, modality_shapes=modality_shapes
         )
     elif algo_name == "l5_rasterized_ec":

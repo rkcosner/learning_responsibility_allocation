@@ -23,7 +23,7 @@ def configs_to_search_nusc(base_cfg):
 
 def configs_to_search_l5kit(base_cfg):
     plan = ParamSearchPlan()
-    base_cfg.train.training.num_data_workers = 24
+    base_cfg.train.training.num_data_workers = 8
     base_cfg.train.validation.num_data_workers = 8
 
     plan.extend(plan.compose_zip([
