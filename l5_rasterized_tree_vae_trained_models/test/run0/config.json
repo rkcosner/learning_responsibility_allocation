@@ -29,7 +29,7 @@
             "n_step_action": 10
         },
         "training": {
-            "batch_size": 100,
+            "batch_size": 64,
             "num_steps": 200000,
             "num_data_workers": 8
         },
@@ -47,7 +47,7 @@
         "dataset_train_key": "scenes/train.zarr",
         "dataset_meta_key": "meta.json",
         "datamodule_class": "L5MixedDataModule",
-        "dataset_mode": "ego"
+        "dataset_mode": "agents"
     },
     "env": {
         "name": "l5_mixed",
@@ -137,6 +137,8 @@
             "goal_loss": 0.0,
             "collision_loss": 0.0,
             "yaw_reg_loss": 0.1,
+            "EC_coll_loss": 10,
+            "deviation_loss": 0.5,
             "kl_loss": 1
         },
         "optim_params": {
@@ -177,6 +179,8 @@
             "recon_loss_type": "NLL",
             "logpi_clamp": -6.0
         },
+        "ego_conditioning": true,
+        "EC_feat_dim": 64,
         "eval": {
             "mode": "sum"
         },

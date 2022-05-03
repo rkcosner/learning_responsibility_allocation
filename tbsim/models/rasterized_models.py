@@ -678,7 +678,7 @@ class RasterizedDiscreteVAEModel(nn.Module):
         losses = OrderedDict(prediction_loss=pred_loss, kl_loss=kl_loss)
         if "EC_pred" in pred_batch:
             EC_pred = pred_batch["EC_pred"]
-            EC_edges,type_mask = L5Utils.gen_EC_edges(
+            EC_edges,type_mask = batch_utils().gen_EC_edges(
                 EC_pred["trajectories"],
                 EC_pred["cond_traj"],
                 data_batch["extent"][...,:2],
@@ -813,7 +813,7 @@ class RasterizedTreeVAEModel(nn.Module):
 
     def _get_goal_states(self, data_batch) -> torch.Tensor:
         target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=-1)
-        goal_inds = L5Utils.get_last_available_index(data_batch["target_availabilities"])  # [B]
+        goal_inds = batch_utils().get_last_available_index(data_batch["target_availabilities"])  # [B]
         goal_state = torch.gather(
             target_traj,  # [B, T, 3]
             dim=1,
@@ -851,7 +851,7 @@ class RasterizedTreeVAEModel(nn.Module):
             
             if self.dyn is not None:
                 if t==0:
-                    current_states = L5Utils.get_current_states(batch_inputs, self.dyn.type())
+                    current_states = batch_utils().get_current_states(batch_inputs, self.dyn.type())
                     decoder_kwargs["current_states"] = current_states
                 else:
                     current_states = outs["x_recons"]["terminal_state"]
@@ -908,8 +908,10 @@ class RasterizedTreeVAEModel(nn.Module):
                 outs["controls"] = outs["x_recons"]["controls"]
             
             preds.append(outs)
-        pred_batch = self._batching_from_stages(preds)
-        pred_batch.update(self._traj_to_preds(pred_batch["trajectories"]))
+        x_recons = self._batching_from_stages(preds)
+        pred_batch = OrderedDict(x_recons=x_recons)
+        pred_batch.update(self._traj_to_preds(x_recons["trajectories"]))
+        
 
         p = preds[-1]["p"]
         for t in range(self.stage-1):
@@ -935,6 +937,7 @@ class RasterizedTreeVAEModel(nn.Module):
             EC_pred = TensorUtils.slice_tensor(pred_batch,1,1,Na+1)
             EC_pred["cond_traj"] = cond_traj_total
             pred["EC_pred"] = EC_pred
+
         return pred
 
     def sample(self, batch_inputs: dict, n: int):
@@ -973,6 +976,7 @@ class RasterizedTreeVAEModel(nn.Module):
             outs[k]=v_cat.reshape(bs,-1,*v_cat.shape[self.stage+1:])
             if self.EC:
                 outs[k] = outs[k].transpose(1,2)
+        
         return outs
 
 
@@ -990,7 +994,7 @@ class RasterizedTreeVAEModel(nn.Module):
         for t in range(self.stage):
             if self.dyn is not None:
                 if t==0:
-                    current_states = L5Utils.get_current_states(batch_inputs, self.dyn.type())
+                    current_states = batch_utils().get_current_states(batch_inputs, self.dyn.type())
                 else:
                     current_states = outs["terminal_state"]
                 decoder_kwargs["current_states"] = current_states
@@ -1021,7 +1025,7 @@ class RasterizedTreeVAEModel(nn.Module):
         losses = OrderedDict(prediction_loss=pred_loss, kl_loss=kl_loss)
         if "EC_pred" in pred_batch:
             EC_pred = pred_batch["EC_pred"]
-            EC_edges,type_mask = L5Utils.gen_EC_edges(
+            EC_edges,type_mask = batch_utils().gen_EC_edges(
                 EC_pred["trajectories"],
                 EC_pred["cond_traj"],
                 data_batch["extent"][...,:2],
@@ -1042,7 +1046,7 @@ class RasterizedTreeVAEModel(nn.Module):
             losses.update(EC_losses)
 
         if self.dyn is not None:
-            losses["yaw_reg_loss"] = torch.mean(pred_batch["controls"][..., 1] ** 2)
+            losses["yaw_reg_loss"] = torch.mean(pred_batch["x_recons"]["controls"][..., 1] ** 2)
 
         return losses
 

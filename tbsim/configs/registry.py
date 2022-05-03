@@ -18,7 +18,8 @@ from tbsim.configs.l5kit_config import (
     EBMMetricConfig,
     L5RasterizedGANConfig,
     L5RasterizedDiscreteVAEConfig,
-    L5RasterizedTreeVAEConfig
+    L5RasterizedTreeVAEConfig,
+    OccupancyMetricConfig
 )
 
 from tbsim.configs.nusc_config import (

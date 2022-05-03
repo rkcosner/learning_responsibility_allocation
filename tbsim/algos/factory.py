@@ -12,10 +12,7 @@ from tbsim.algos.l5kit_algos import (
     SpatialPlanner,
     GANTrafficModel,
     L5ECTrafficModel,
-<<<<<<< HEAD
     L5TreeVAETrafficModel
-=======
->>>>>>> hierarchy_ongoing
 )
 
 from tbsim.algos.multiagent_algos import (
