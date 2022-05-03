@@ -15,7 +15,6 @@ from tbsim.models.rasterized_models import (
     RasterizedGANModel,
     RasterizedDiscreteVAEModel,
     RasterizedECModel,
-    RasterizedTreeVAEModel
 )
 from tbsim.models.base_models import (
     MLPTrajectoryDecoder,

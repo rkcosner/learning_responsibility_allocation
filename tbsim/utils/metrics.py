@@ -517,14 +517,12 @@ def GMM_loglikelihood(x, m, v, pi, avails=None, mode="mean"):
     if avails is not None:
         avails = avails.unsqueeze(1)
     log_prob = log_normal(x, m, v, avails=avails)
-    if mode=="sum":
+    if mode == "sum":
         loglikelihood = (pi*log_prob).sum(1)
-    if mode=="mean":
+    elif mode == "mean":
         loglikelihood = (pi*log_prob).mean(1)
-    elif mode=="max":
+    elif mode == "max":
         loglikelihood = (pi*log_prob).max(1)
-    elif mode=="mean":
-        loglikelihood = (pi*log_prob).mean(1)
     return loglikelihood
 
 
