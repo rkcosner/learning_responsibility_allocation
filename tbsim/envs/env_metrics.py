@@ -283,6 +283,10 @@ class CriticalFailure(EnvMetrics):
     def all_agent_ids(self):
         return self._agent_track_id
 
+    @property
+    def all_scene_index(self):
+        return self._agent_scene_index
+
     def add_step(self, state_info: dict, all_scene_index: np.ndarray):
         if self._all_scene_index is None:  # start of an episode
             self._all_scene_index = all_scene_index
@@ -681,9 +685,9 @@ class OccupancyCoverage(Occupancymet):
 
     def summarize_grid(self):
         per_agent_failure = self._failure_metric.get_per_agent_metrics()["any"]
-        all_agent_ids = self._failure_metric.all_agent_ids
-        failed_agent_ids = all_agent_ids[per_agent_failure > 0]
-        
+        failed_agent_ids = self._failure_metric.all_agent_ids[per_agent_failure > 0]
+        failed_scene_index = self._failure_metric.all_scene_index[per_agent_failure > 0]
+
         coverage_num = OrderedDict(total=[], onroad=[], success=[])
         for scene_idx, og in self.og.items():
             data = np.array(list(og.occupancy_grid.values()))
@@ -692,7 +696,8 @@ class OccupancyCoverage(Occupancymet):
             for i, aid in enumerate(og.agent_ids.values()):
                 # if any of the successful agent covers a grid, count it as a successful coverage
                 # conversely, if all the agents that cover the grid ended up failing, do not count the coverage.
-                success_mask[i] = ~np.all(np.isin(list(aid), failed_agent_ids))
+                failed_agent_ids_in_scene = failed_agent_ids[failed_scene_index == scene_idx]
+                success_mask[i] = ~np.all(np.isin(list(aid), failed_agent_ids_in_scene))
             data_onroad = data * lane
             data_success = data * lane * success_mask.astype(np.float32)
             coverage_num["onroad"].append((data_onroad > self.threshold).sum())
