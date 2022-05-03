@@ -81,3 +81,4 @@ scripts/create_evaluation.py
 scripts/evaluate.py
 tbsim/configs/eval_configs.py
 
+l5_rasterized_tree_vae_trained_models/test/run0/logs/log.txt
