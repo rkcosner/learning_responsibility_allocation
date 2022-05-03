@@ -13,6 +13,8 @@ ma_rasterized_trained_models/
 spatial_planner_trained_models/
 results/
 scripts/create_experiment.py
+scripts/create_evaluation.py
+tbsim/configs/eval_configs.py
 
 ## config files
 *.yaml

@@ -416,4 +416,5 @@ def get_checkpoint(
 
 
 if __name__ == "__main__":
-    print(get_checkpoint("2546043", ckpt_key="iter87999_"))
+    # print(get_checkpoint("2546043", ckpt_key="iter87999_"))
+    ckpt_path,cfg_path=get_checkpoint("2865346", ckpt_key="iter14000",ckpt_root_dir="/home/yuxiaoc/repos/ngc_workspace/result")

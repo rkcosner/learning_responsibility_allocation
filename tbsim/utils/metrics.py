@@ -508,6 +508,7 @@ def GMM_loglikelihood(x, m, v, pi, avails=None, mode="sum"):
     Returns:
         -log_prob (torch.Tensor): log probabilities of shape (B,)
     """
+
     if v is None:
         v = torch.ones_like(m)
 
@@ -521,6 +522,8 @@ def GMM_loglikelihood(x, m, v, pi, avails=None, mode="sum"):
         loglikelihood = (pi*log_prob).sum(1)
     elif mode=="max":
         loglikelihood = (pi*log_prob).max(1)
+    elif mode=="mean":
+        loglikelihood = (pi*log_prob).mean(1)
     return loglikelihood
 
 
@@ -537,4 +540,41 @@ class distance_buffer():
         self._buffer[key] = dis
         self._buffer[-key] = dis
         return dis
-        
+
+class RandomPerturbation(object):
+    def __init__(self, std: np.ndarray):
+        assert std.shape == (3,) and np.all(std >= 0)
+        self.std = std
+
+    def perturb(self, obs):
+        obs = dict(obs)
+        target_traj = np.concatenate((obs["target_positions"], obs["target_yaws"]), axis=-1)
+        std = np.ones_like(target_traj) * self.std[None, :]
+        noise = np.random.normal(np.zeros_like(target_traj), std)
+        target_traj += noise
+        obs["target_positions"] = target_traj[..., :2]
+        obs["target_yaws"] = target_traj[..., :1]
+        return obs
+
+class OrnsteinUhlenbeckPerturbation(object):
+    def __init__(self,theta,sigma):
+        assert theta.shape == (3,) and sigma.shape == (3,)
+        self.theta = theta
+        self.sigma = sigma
+        self.buffers=dict()
+    def perturb(self,obs):
+        target_traj = np.concatenate((obs["target_positions"], obs["target_yaws"]), axis=-1)
+        bs = target_traj.shape[0]
+        if bs in self.buffers:
+            buffer = self.buffers[bs]
+        else:
+            buffer = [np.zeros([bs,3])]
+            self.buffers[bs]=buffer
+        while len(buffer)<target_traj.shape[-2]:
+            buffer.append(buffer[-1]-self.theta*buffer[-1]+np.random.randn(bs,3)*self.sigma)
+        noise = np.stack(buffer,axis=1)
+        target_traj += noise
+        obs["target_positions"] = target_traj[..., :2].astype(np.float32)
+        obs["target_yaws"] = target_traj[..., :1].astype(np.float32)
+        buffer.pop(0)
+        return obs
