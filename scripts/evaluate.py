@@ -507,7 +507,11 @@ def create_env_nusc(
         metrics = dict(
             all_off_road_rate=EnvMetrics.OffRoadRate(),
             all_collision_rate=EnvMetrics.CollisionRate(),
-            all_coverage=EnvMetrics.OccupancyCoverage(gridinfo={"offset": np.zeros(2), "step": 2.0*np.ones(2)})
+            all_coverage=EnvMetrics.OccupancyCoverage(
+                gridinfo={"offset": np.zeros(2), "step": 2.0*np.ones(2)},
+                failure_metric=EnvMetrics.CriticalFailure(num_offroad_frames=2)
+            ),
+            all_failure=EnvMetrics.CriticalFailure(num_offroad_frames=2)
         )
 
     env = EnvUnifiedSimulation(

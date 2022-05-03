@@ -95,7 +95,9 @@ if __name__ == "__main__":
         "--dataset_path",
         ngc_cfg["dataset_path"],
         "--ckpt_root_dir",
-        args.ckpt_root_dir
+        args.ckpt_root_dir,
+        "--env",
+        cfgs[0].env
     ]
 
     if args.render:

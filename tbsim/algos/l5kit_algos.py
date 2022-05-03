@@ -443,7 +443,7 @@ class L5VAETrafficModel(pl.LightningModule):
 
     @property
     def checkpoint_monitor_keys(self):
-        return {"valLoss": "val/losses_prediction_loss"}
+        return {"valLoss": "val/losses_prediction_loss", "minADE": "val/metrics_ego_avg_ADE"}
 
     def forward(self, obs_dict):
         return self.nets["policy"].predict(obs_dict)["predictions"]
@@ -582,7 +582,7 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
         )
     @property
     def checkpoint_monitor_keys(self):
-        return {"valLoss": "val/losses_prediction_loss"}
+        return {"valLoss": "val/losses_prediction_loss", "minADE": "val/metrics_ego_avg_ADE"}
 
     def forward(self, obs_dict):
         return self.nets["policy"].predict(obs_dict)["predictions"]
@@ -717,7 +717,7 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
                 action_samples=Action(
                     positions=preds["positions"],
                     yaws=preds["yaws"]
-                )
+                ).to_dict()
             )
         else:
             # otherwise, sample action from posterior
@@ -844,9 +844,6 @@ class L5TreeVAETrafficModel(pl.LightningModule):
         metrics["mode_max"] = prob.max(1).mean()-1/prob.shape[1]
 
         return metrics
-
-        
-
 
     def get_action(self, obs_dict, sample=True, num_action_samples=1, plan_samples=None, **kwargs):
         obs_dict = dict(obs_dict)
