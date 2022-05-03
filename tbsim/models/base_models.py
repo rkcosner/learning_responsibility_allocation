@@ -891,43 +891,36 @@ class ConditionEncoder(nn.Module):
 
     def __init__(
             self,
-            map_encoder,
+            map_encoder: nn.Module,
             trajectory_shape: tuple,  # [T, D]
             condition_dim: int,
             mlp_layer_dims: tuple = (128, 128),
             goal_encoder=None,
+            rnn_hidden_size: int = 100
     ) -> None:
         super(ConditionEncoder, self).__init__()
-        if isinstance(map_encoder,nn.Module):
-            self.map_encoder = map_encoder
-            visual_feature_size = self.map_encoder.output_shape()[0]
-        elif isinstance(map_encoder,int):
-            visual_feature_size = map_encoder
-            self.map_encoder = None
+        self.map_encoder = map_encoder
         self.trajectory_shape = trajectory_shape
         self.goal_encoder = goal_encoder
-        goal_dim = 0 if goal_encoder is None else goal_encoder.output_shape()[0]
 
         # TODO: history encoder
         # self.hist_lstm = nn.LSTM(trajectory_shape[-1], hidden_size=rnn_hidden_size, batch_first=True)
-        
+        visual_feature_size = self.map_encoder.output_shape()[0]
         self.mlp = MLP(
-            input_dim=visual_feature_size+goal_dim,
+            input_dim=visual_feature_size,
             output_dim=condition_dim,
             layer_dims=mlp_layer_dims,
             output_activation=nn.ReLU
         )
 
     def forward(self, condition_inputs):
-        if self.map_encoder is None:
-            c_feat = condition_inputs["map_feature"]
-        else:
-            c_feat = self.map_encoder(condition_inputs["image"])
+        map_feat = self.map_encoder(condition_inputs["image"])
+        c_feat = self.mlp(map_feat)
         if self.goal_encoder is not None:
             goal_feat = self.goal_encoder(condition_inputs["goal"])
             c_feat = torch.cat([c_feat, goal_feat], dim=-1)
-        c_feat = self.mlp(c_feat)
         return c_feat
+
 
 class ECEncoder(nn.Module):
     """Condition Encoder (x -> c) for CVAE"""
