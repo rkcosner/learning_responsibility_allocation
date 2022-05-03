@@ -24,13 +24,14 @@ def parse(args):
 
     pprint(cfg["ckpt"])
     results_str = [
-        results["all_failure_any"],
+        results["all_failure_any"] * 100,
         results["all_coverage_success"],
         results["all_coverage_total"],
-        results["all_collision_rate_coll_any"],
-        results["all_collision_rate_CollisionType.REAR"],
-        results["all_collision_rate_CollisionType.FRONT"],
-        results["all_collision_rate_CollisionType.SIDE"]
+        results["all_collision_rate_coll_any"] * 100,
+        results["all_collision_rate_CollisionType.REAR"] * 100,
+        results["all_collision_rate_CollisionType.FRONT"] * 100,
+        results["all_collision_rate_CollisionType.SIDE"] * 100,
+        results["all_off_road_rate_rate"] * 100
     ]
 
     results_str = ["{:.3f}".format(r) for r in results_str]

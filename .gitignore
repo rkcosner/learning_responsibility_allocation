@@ -15,7 +15,7 @@ results/
 scripts/create_experiment.py
 
 ## config files
-*.yaml
+#*.yaml
 
 ## local test files
 
