@@ -25,6 +25,7 @@ from tbsim.algos.l5kit_algos import (
     L5ECTrafficModel
 )
 from tbsim.algos.metric_algos import EBMMetric
+from tbsim.utils.metrics import OrnsteinUhlenbeckPerturbation
 from tbsim.utils.batch_utils import set_global_batch_type, batch_utils
 from tbsim.algos.multiagent_algos import MATrafficModel
 from tbsim.configs.eval_configs import EvaluationConfig
@@ -353,13 +354,13 @@ class MetricsComposer(object):
 
 
 class CVAEMetrics(MetricsComposer):
-    def get_metrics(self, **kwargs):
+    def get_metrics(self, perturbations = None, **kwargs):
         # TODO: pass in perturbations through kwargs
-        perturbations = None
+        
 
         ckpt_path, config_path = get_checkpoint(
-            ngc_job_id="2873777",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
-            ckpt_key="iter2000",
+            ngc_job_id="2874790",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
+            ckpt_key="iter3000_ep0_minADE0.42",
             # ngc_job_id=self.eval_config.ckpt.cvae_metric.ngc_job_id,
             # ckpt_key=self.eval_config.ckpt.cvae_metric.ckpt_key,
             ckpt_root_dir=self.eval_config.ckpt_root_dir
@@ -414,13 +415,15 @@ def create_env_l5kit(
     metrics = dict()
     if compute_metrics:
         gridinfo = {"offset": np.zeros(2), "step": 2.0*np.ones(2)}
-        # cvae_metrics = CVAEMetrics(eval_config=eval_cfg, device=device, ckpt_root_dir=eval_cfg.ckpt_root_dir)
+        cvae_metrics = CVAEMetrics(eval_config=eval_cfg, device=device, ckpt_root_dir=eval_cfg.ckpt_root_dir)
         failure_metric = EnvMetrics.CriticalFailure()
+        OU_pert = OrnsteinUhlenbeckPerturbation(theta=eval_cfg.perturb.OU.theta*np.ones(3),
+                                                sigma=eval_cfg.perturb.OU.sigma*np.array(eval_cfg.perturb.OU.scale))
         metrics = dict(
             # all_off_road_rate=EnvMetrics.OffRoadRate(),
             # all_collision_rate=EnvMetrics.CollisionRate(),
             # all_occupancy = EnvMetrics.Occupancydistr(gridinfo,sigma=2.0)
-            # ego_cvae_metrics=cvae_metrics.get_metrics(),
+            ego_cvae_metrics=cvae_metrics.get_metrics(perturbations={"OU":OU_pert}),
             ego_occupancy_diversity=EnvMetrics.OccupancyDiversity(gridinfo, sigma=2.0),
             all_occupancy_coverage=EnvMetrics.OccupancyCoverage(gridinfo,failure_metric, sigma=2.0)
             # all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations),
