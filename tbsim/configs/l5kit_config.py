@@ -259,6 +259,16 @@ class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
         self.optim_params.GAN.regularization.L2 = 0.00  # L2 regularization strength
 
 
+class HierachicalAgentAwareConfig(MARasterizedPlanningConfig):
+    def __init__(self):
+        super(HierachicalAgentAwareConfig, self).__init__()
+        self.name = "hier_agent_aware"
+        self.loss_weights.pixel_bce_loss = 0.0
+        self.loss_weights.pixel_ce_loss = 1.0
+        self.loss_weights.pixel_res_loss = 1.0
+        self.loss_weights.pixel_yaw_loss = 1.0
+
+
 class L5RasterizedGCConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(L5RasterizedGCConfig, self).__init__()

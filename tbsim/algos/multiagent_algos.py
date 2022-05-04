@@ -13,6 +13,11 @@ import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.policies.common import Action, Plan, Trajectory
 from tbsim.utils.loss_utils import discriminator_loss
 from tbsim.utils.batch_utils import batch_utils
+from tbsim.models.base_models import RasterizedMapUNet
+from tbsim.algos.l5kit_algos import SpatialPlanner
+from tbsim.utils.geometry_utils import calc_distance_map
+from tbsim.utils.planning_utils import ego_sample_planning
+import tbsim.algos.algo_utils as AlgoUtils
 
 
 class MATrafficModel(pl.LightningModule):
@@ -272,3 +277,210 @@ class MAGANTrafficModel(MATrafficModel):
             yaws=agent_preds["predictions"]["yaws"]
         )
         return agent_trajs, {}
+
+
+class HierarchicalAgentAware(pl.LightningModule):
+    def __init__(self, algo_config, modality_shapes):
+        super(HierarchicalAgentAware, self).__init__()
+        self.algo_config = algo_config
+        self.nets = nn.ModuleDict()
+
+        assert not algo_config.use_GAN  # TODO: fix forward
+        self.predictor = AgentAwareRasterizedModel(
+            model_arch=algo_config.model_architecture,
+            input_image_shape=modality_shapes["image"],  # [C, H, W]
+            global_feature_dim=algo_config.global_feature_dim,
+            agent_feature_dim=algo_config.agent_feature_dim,
+            roi_size=algo_config.context_size,
+            future_num_frames=algo_config.future_num_frames,
+            dynamics_type=algo_config.dynamics.type,
+            dynamics_kwargs=algo_config.dynamics,
+            step_time=algo_config.step_time,
+            decoder_kwargs=algo_config.decoder,
+            goal_conditional=algo_config.goal_conditional,
+            goal_feature_dim=algo_config.goal_feature_dim,
+            use_rotated_roi=algo_config.use_rotated_roi,
+            use_transformer=algo_config.use_transformer,
+            roi_layer_key=algo_config.roi_layer_key,
+            use_gan=algo_config.use_GAN
+        )
+
+        self.planner = RasterizedMapUNet(
+            model_arch=algo_config.model_architecture,
+            input_image_shape=modality_shapes["image"],  # [C, H, W]
+            output_channel=4,  # (pixel, x_residual, y_residual, yaw)
+            use_spatial_softmax=algo_config.spatial_softmax.enabled,
+            spatial_softmax_kwargs=algo_config.spatial_softmax.kwargs,
+        )
+        self.planner.encoder_heads = None  # we are going to use the feature from the predictor
+
+    @property
+    def checkpoint_monitor_keys(self):
+        return {
+            "valLoss": "val/losses_prediction_loss"
+        }
+
+    def forward(self, obs_dict):
+        all_feats, encoder_feats = self.predictor.extract_features(obs_dict, return_encoder_feats=True)
+        pred_maps = self.planner.forward(None, encoder_feats=encoder_feats)
+        planner_preds = SpatialPlanner.forward_prediction(pred_map=pred_maps, obs_dict=obs_dict)
+        predictor_preds = self.predictor.forward_prediction(all_feats, data_batch=obs_dict, plan=None)
+        return planner_preds, predictor_preds
+
+    def training_step(self, batch, batch_idx):
+        batch = batch_utils().parse_batch(batch)
+        batch["goal"] = AlgoUtils.get_spatial_goal_supervision(batch)
+        planner_pout, predictor_pout = self.forward(batch)
+        predictor_losses = self.predictor.compute_losses(predictor_pout, batch)
+        planner_losses = SpatialPlanner.compute_losses(planner_pout, batch)
+        losses = dict()
+        losses.update(predictor_losses)
+        losses.update(planner_losses)
+
+        total_loss = 0.0
+        for lk, l in losses.items():
+            loss = l * self.algo_config.loss_weights[lk]
+            self.log("train/losses_" + lk, loss)
+            total_loss += loss
+
+        predictor_metrics = self.predictor.compute_metrics(predictor_pout, batch)
+        planner_metrics = SpatialPlanner.compute_metrics(planner_pout, batch)
+
+        metrics = dict()
+        metrics.update(predictor_metrics)
+        metrics.update(planner_metrics)
+        for mk, m in metrics.items():
+            self.log("train/metrics_" + mk, m)
+
+        return total_loss
+
+    def validation_step(self, batch, batch_idx):
+        batch = batch_utils().parse_batch(batch)
+        batch["goal"] = AlgoUtils.get_spatial_goal_supervision(batch)
+        planner_pout, predictor_pout = self.forward(batch)
+        with torch.no_grad():
+            predictor_losses = self.predictor.compute_losses(predictor_pout, batch)
+            planner_losses = SpatialPlanner.compute_losses(planner_pout, batch)
+        losses = dict()
+        losses.update(predictor_losses)
+        losses.update(planner_losses)
+
+        with torch.no_grad():
+            predictor_metrics = self.predictor.compute_metrics(predictor_pout, batch)
+            planner_metrics = SpatialPlanner.compute_metrics(planner_pout, batch)
+
+        metrics = dict()
+        metrics.update(predictor_metrics)
+        metrics.update(planner_metrics)
+
+        return {"losses": losses, "metrics": metrics}
+
+    def validation_epoch_end(self, outputs) -> None:
+        for k in outputs[0]["losses"]:
+            m = torch.stack([o["losses"][k] for o in outputs]).mean()
+            self.log("val/losses_" + k, m)
+
+        for k in outputs[0]["metrics"]:
+            m = np.stack([o["metrics"][k] for o in outputs]).mean()
+            self.log("val/metrics_" + k, m)
+
+    def configure_optimizers(self):
+        optim_params = self.algo_config.optim_params["policy"]
+        return optim.Adam(
+            params=self.parameters(),
+            lr=optim_params["learning_rate"]["initial"],
+            weight_decay=optim_params["regularization"]["L2"],
+        )
+
+    def get_plan(self, preds):
+        b, n = preds["predictions"]["positions"].shape[:2]
+        plan_dict = dict(
+            predictions=TensorUtils.unsqueeze(preds["predictions"], dim=1),  # [B, 1, num_sample...]
+            availabilities=torch.ones(b, 1, n).to(self.device),  # [B, 1, num_sample]
+        )
+        # pad plans to the same size as the future trajectories
+        n_steps_to_pad = self.algo_config.future_num_frames - 1
+        plan_dict = TensorUtils.pad_sequence(plan_dict, padding=(n_steps_to_pad, 0), batched=True, pad_values=0.)
+        plan_samples = Plan(
+            positions=plan_dict["predictions"]["positions"].permute(0, 2, 1, 3),  # [B, num_sample, T, 2]
+            yaws=plan_dict["predictions"]["yaws"].permute(0, 2, 1, 3),  # [B, num_sample, T, 1]
+            availabilities=plan_dict["availabilities"].permute(0, 2, 1)  # [B, num_sample, T]
+        )
+
+        return plan_samples, dict(location_map=preds["location_map"], plan_samples=plan_samples)
+
+    def get_action(self, obs_dict, **kwargs):
+        """If using the model as an actor (generating actions)"""
+        # extract agent features from obs
+        feats, encoder_feats = self.predictor.extract_features(obs_dict, return_encoder_feats=True)
+        pred_maps = self.planner.forward(None, encoder_feats=encoder_feats)
+        planner_preds = SpatialPlanner.forward_prediction(
+            pred_map=pred_maps,
+            obs_dict=obs_dict,
+            mask_drivable=kwargs.get("mask_drivable", False),
+            num_samples=kwargs.get("num_samples", None),
+            clearance=kwargs.get("clearance", None)
+        )
+
+        plan_samples, plan_info = self.get_plan(planner_preds)
+
+        # if evaluating multiple plan samples per obs
+        b, n = plan_samples.positions.shape[:2]
+        # reuse features by tiling the feature tensors to the same size as plan samples
+        feats_tiled = TensorUtils.repeat_by_expand_at(feats, repeats=n, dim=0)
+        # flatten the sample dimension to the batch dimension
+        plan_tiled = TensorUtils.join_dimensions(plan_samples.to_dict(), begin_axis=0, end_axis=2)
+        plan_tiled = Plan.from_dict(plan_tiled)
+
+        obs_tiled = TensorUtils.repeat_by_expand_at(obs_dict, repeats=n, dim=0)
+        preds = self.predictor.forward_prediction(feats_tiled, obs_tiled, plan=plan_tiled)
+
+        agent_preds = self.predictor.get_agents_predictions(preds)
+
+        agent_pred_trajs = Trajectory(
+            positions=agent_preds["predictions"]["positions"],
+            yaws=agent_preds["predictions"]["yaws"]
+        ).trajectories
+
+        ego_preds = self.predictor.get_ego_predictions(preds)
+        ego_preds = TensorUtils.unsqueeze(ego_preds, 1)
+        action_samples = Action(
+            positions=ego_preds["predictions"]["positions"],
+            yaws=ego_preds["predictions"]["yaws"]
+        )
+        action_sample_trajs = action_samples.trajectories
+
+        agent_extents = obs_dict["all_other_agents_history_extents"][..., :2].max(
+            dim=-2)[0]
+        drivable_map = batch_utils().get_drivable_region_map(obs_dict["image"]).float()
+        dis_map = calc_distance_map(drivable_map)
+        action_idx = ego_sample_planning(
+            ego_trajectories=action_sample_trajs,
+            agent_trajectories=agent_pred_trajs,
+            ego_extents=obs_dict["extent"][:, :2],
+            agent_extents=agent_extents,
+            raw_types=obs_dict["all_other_agents_types"],
+            raster_from_agent=obs_dict["raster_from_agent"],
+            dis_map=dis_map,
+            weights={
+                "collision_weight": kwargs.get("collision_weight", 1.0),
+                "lane_weight": kwargs.get("lane_weight", 1.0)
+            },
+        )
+
+        action_trajs_best = torch.gather(
+            action_sample_trajs,
+            dim=1,
+            index=action_idx[:, None, None, None].expand(-1, 1, *action_sample_trajs.shape[2:])
+        ).squeeze(1)
+
+        ego_actions = Action(
+            positions=action_trajs_best[..., :2], yaws=action_trajs_best[..., 2:])
+
+        action_info = dict(
+            plan_samples=plan_info["plan_samples"].to_dict(),
+            location_map=plan_info["location_map"],
+            action_samples=action_samples.to_dict()
+        )
+        return ego_actions, action_info
+

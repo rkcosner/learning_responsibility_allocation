@@ -244,7 +244,7 @@ class AgentAwareRasterizedModel(nn.Module):
                                       ).squeeze(-1)
         return lane_flags
 
-    def extract_features(self, data_batch):
+    def extract_features(self, data_batch, return_encoder_feats=False):
         image_batch = data_batch["image"]
         states_all = batch_utils().batch_to_raw_all_agents(
             data_batch, self.ego_decoder.step_time)
@@ -260,7 +260,7 @@ class AgentAwareRasterizedModel(nn.Module):
                 patch_size=self.roi_size
             )
 
-            all_feats, _, global_feats = self.map_encoder(
+            all_feats, _, global_feats, encoder_feats = self.map_encoder(
                 image_batch, rois=rois)  # approximately B * A
             split_sizes = [len(l) for l in indices]
             all_feats_list = torch.split(all_feats, split_sizes)
@@ -277,7 +277,7 @@ class AgentAwareRasterizedModel(nn.Module):
                 trans_mat=data_batch["raster_from_agent"],
                 patch_size=self.roi_size[[0, 2]]
             )
-            all_feats, _, global_feats = self.map_encoder(
+            all_feats, _, global_feats, encoder_feats = self.map_encoder(
                 image_batch, rois=rois)
 
         # tile global feature and concat w/ agent-wise features
@@ -293,8 +293,10 @@ class AgentAwareRasterizedModel(nn.Module):
                 states_all["history_positions"][:, :, -1]
             )
 
-
-        return all_feats
+        if not return_encoder_feats:
+            return all_feats
+        else:
+            return all_feats, encoder_feats
 
     def forward_prediction(self, all_feats, data_batch, plan=None):
         ego_feats = all_feats[:, [0]]

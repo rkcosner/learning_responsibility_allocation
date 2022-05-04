@@ -681,7 +681,7 @@ class RasterizeROIEncoder(nn.Module):
             use_rotated_roi=True
     ) -> None:
         super(RasterizeROIEncoder, self).__init__()
-        model = RasterizedMapEncoder(
+        encoder = RasterizedMapEncoder(
             model_arch=model_arch,
             input_image_shape=input_image_shape,
             feature_dim=global_feature_dim,
@@ -693,11 +693,11 @@ class RasterizeROIEncoder(nn.Module):
             'map_model.layer4': 'layer4',
             'map_model.fc': "final"
         }
-        self.encoder_heads = create_feature_extractor(model, feat_nodes)
+        self.encoder_heads = create_feature_extractor(encoder, feat_nodes)
 
         self.roi_layer_key = roi_layer_key
-        roi_scale = model.feature_scales()[roi_layer_key]
-        roi_channel = model.feature_channels()[roi_layer_key]
+        roi_scale = encoder.feature_scales()[roi_layer_key]
+        roi_channel = encoder.feature_channels()[roi_layer_key]
         if use_rotated_roi:
             self.roi_align = RotatedROIAlign(
                 roi_feature_size, roi_scale=roi_scale)
@@ -720,7 +720,7 @@ class RasterizeROIEncoder(nn.Module):
         else:
             self.agent_net = nn.Identity()
 
-    def forward(self, map_inputs: torch.Tensor, rois: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, map_inputs: torch.Tensor, rois: torch.Tensor):
         """
 
         Args:
@@ -738,7 +738,7 @@ class RasterizeROIEncoder(nn.Module):
         agent_feats = self.agent_net(roi_feats)
         global_feats = feats["final"]
 
-        return agent_feats, roi_feats, self.activation(global_feats)
+        return agent_feats, roi_feats, self.activation(global_feats), feats
 
 
 class RasterizedMapKeyPointNet(RasterizedMapEncoder):
@@ -776,7 +776,7 @@ class RasterizedMapUNet(nn.Module):
             spatial_softmax_kwargs=None
     ) -> None:
         super(RasterizedMapUNet, self).__init__()
-        model = RasterizedMapEncoder(
+        encoder = RasterizedMapEncoder(
             model_arch=model_arch,
             input_image_shape=input_image_shape,
             use_spatial_softmax=use_spatial_softmax,
@@ -790,8 +790,8 @@ class RasterizedMapUNet(nn.Module):
             'map_model.layer3': 'layer3',
             'map_model.layer4': 'layer4',
         }
-        self.encoder_heads = create_feature_extractor(model, feat_nodes)
-        encoder_channels = list(model.feature_channels().values())
+        self.encoder_heads = create_feature_extractor(encoder, feat_nodes)
+        encoder_channels = list(encoder.feature_channels().values())
         self.decoder = UNetDecoder(
             input_channel=encoder_channels[-1],
             encoder_channels=encoder_channels[:-1],
@@ -799,9 +799,10 @@ class RasterizedMapUNet(nn.Module):
             up_factor=2
         )
 
-    def forward(self, map_inputs):
-        encoder_feats = self.encoder_heads(map_inputs)
-        encoder_feats = list(encoder_feats.values())
+    def forward(self, map_inputs, encoder_feats=None):
+        if encoder_feats is None:
+            encoder_feats = self.encoder_heads(map_inputs)
+        encoder_feats = [encoder_feats[k] for k in ["layer1", "layer2", "layer3", "layer4"]]
         return self.decoder.forward(
             feat_to_decode=encoder_feats[-1],
             encoder_feats=encoder_feats[:-1],

@@ -256,6 +256,16 @@ class SpatialPlanner(pl.LightningModule):
 
     def forward(self, obs_dict, mask_drivable=False, num_samples=None, clearance=None):
         pred_map = self.nets["policy"](obs_dict["image"])
+        return self.forward_prediction(
+            pred_map,
+            obs_dict,
+            mask_drivable=mask_drivable,
+            num_samples=num_samples,
+            clearance=clearance
+        )
+
+    @staticmethod
+    def forward_prediction(pred_map, obs_dict, mask_drivable=False, num_samples=None, clearance=None):
         assert pred_map.shape[1] == 4  # [location_logits, residual_x, residual_y, yaw]
 
         pred_map[:, 1:3] = torch.sigmoid(pred_map[:, 1:3])
@@ -301,7 +311,8 @@ class SpatialPlanner(pl.LightningModule):
             location_prob_map=location_prob_map
         )
 
-    def _compute_metrics(self, pred_batch, data_batch):
+    @staticmethod
+    def compute_metrics(pred_batch, data_batch):
         metrics = dict()
         goal_sup = data_batch["goal"]
         goal_pred = TensorUtils.squeeze(pred_batch["predictions"], dim=1)
@@ -327,7 +338,8 @@ class SpatialPlanner(pl.LightningModule):
             metrics[k] = float(v)
         return metrics
 
-    def _compute_losses(self, pred_batch, data_batch):
+    @staticmethod
+    def compute_losses(pred_batch, data_batch):
         losses = dict()
         pred_map = pred_batch["spatial_prediction"]
         b, c, h, w = pred_map.shape
@@ -586,7 +598,6 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
 
     def forward(self, obs_dict):
         return self.nets["policy"].predict(obs_dict)["predictions"]
-
 
     def training_step(self, batch, batch_idx):
         """

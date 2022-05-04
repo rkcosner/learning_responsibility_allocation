@@ -19,7 +19,8 @@ from tbsim.configs.l5kit_config import (
     L5RasterizedGANConfig,
     L5RasterizedDiscreteVAEConfig,
     L5RasterizedTreeVAEConfig,
-    OccupancyMetricConfig
+    OccupancyMetricConfig,
+    HierachicalAgentAwareConfig
 )
 
 from tbsim.configs.nusc_config import (
@@ -168,6 +169,13 @@ EXP_CONFIG_REGISTRY["nusc_ma_rasterized_plan"] = ExperimentConfig(
     env_config=NuscEnvConfig(),
     algo_config=MARasterizedPlanningConfig(),
     registered_name="nusc_ma_rasterized_plan"
+)
+
+EXP_CONFIG_REGISTRY["nusc_hier_agent_aware"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=HierachicalAgentAwareConfig(),
+    registered_name="nusc_hier_agent_aware"
 )
 
 EXP_CONFIG_REGISTRY["nusc_rasterized_gc"] = ExperimentConfig(

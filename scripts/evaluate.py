@@ -24,9 +24,10 @@ from tbsim.algos.l5kit_algos import (
     L5DiscreteVAETrafficModel,
     L5ECTrafficModel
 )
+
 from tbsim.algos.metric_algos import EBMMetric
 from tbsim.utils.batch_utils import set_global_batch_type, batch_utils
-from tbsim.algos.multiagent_algos import MATrafficModel
+from tbsim.algos.multiagent_algos import MATrafficModel, HierarchicalAgentAware
 from tbsim.configs.eval_configs import EvaluationConfig
 from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.envs.env_l5kit import EnvL5KitSimulation
@@ -239,6 +240,28 @@ class HierAgentAware(Hierarchical):
 
         policy = SamplingPolicyWrapper(ego_action_sampler=sampler, agent_traj_predictor=predictor)
         return policy, exp_cfg
+
+
+class HierPnC(PolicyComposer):
+    def get_policy(self, **kwargs):
+        policy_ckpt_path, policy_cfg = get_checkpoint(
+            ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
+            ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+            ckpt_root_dir=self.ckpt_root_dir
+        )
+        policy = HierarchicalAgentAware.load_from_checkpoint(
+            policy_ckpt_path,
+            algo_config=policy_cfg.algo,
+            modality_shapes=self.get_modality_shapes(policy_cfg),
+        ).to(self.device).eval()
+        policy = PolicyWrapper.wrap_controller(
+            policy,
+            mask_drivable=kwargs.get("mask_drivable"),
+            sample=True,
+            num_plan_samples=kwargs.get("num_plan_samples"),
+            clearance=kwargs.get("diversification_clearance"),
+        )
+        return policy, policy_cfg
 
 
 class HierAgentAwareCVAE(Hierarchical):
