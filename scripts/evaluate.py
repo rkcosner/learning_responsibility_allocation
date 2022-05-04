@@ -360,7 +360,7 @@ class CVAEMetrics(MetricsComposer):
 
         ckpt_path, config_path = get_checkpoint(
             ngc_job_id="2874790",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
-            ckpt_key="iter3000_ep0_minADE0.42",
+            ckpt_key="iter27000_ep0_minADE0.61",
             # ngc_job_id=self.eval_config.ckpt.cvae_metric.ngc_job_id,
             # ckpt_key=self.eval_config.ckpt.cvae_metric.ckpt_key,
             ckpt_root_dir=self.eval_config.ckpt_root_dir
@@ -375,6 +375,27 @@ class CVAEMetrics(MetricsComposer):
         ).to(self.device).eval()
         return EnvMetrics.LearnedCVAENLL(metric_algo=CVAE_model, perturbations=perturbations)
 
+class learnedEBMMetric(MetricsComposer):
+    def get_metrics(self, perturbations = None, **kwargs):
+        # TODO: pass in perturbations through kwargs
+        
+
+        ckpt_path, config_path = get_checkpoint(
+            ngc_job_id="",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
+            ckpt_key="",
+            # ngc_job_id=self.eval_config.ckpt.cvae_metric.ngc_job_id,
+            # ckpt_key=self.eval_config.ckpt.cvae_metric.ckpt_key,
+            ckpt_root_dir=self.eval_config.ckpt_root_dir
+        )
+        
+        controller_cfg = get_experiment_config_from_file(config_path)
+        modality_shapes = batch_utils().get_modality_shapes(controller_cfg)
+        ebm_model = EBMMetric.load_from_checkpoint(
+            ckpt_path,
+            algo_config=controller_cfg.algo,
+            modality_shapes=modality_shapes
+        ).to(self.device).eval()
+        return EnvMetrics.LearnedCVAENLL(metric_algo=ebm_model, perturbations=perturbations)
 
 class OccupancyMetrics(MetricsComposer):
     def get_metrics(self, **kwargs):
@@ -425,7 +446,7 @@ def create_env_l5kit(
             # all_occupancy = EnvMetrics.Occupancydistr(gridinfo,sigma=2.0)
             ego_cvae_metrics=cvae_metrics.get_metrics(perturbations={"OU":OU_pert}),
             ego_occupancy_diversity=EnvMetrics.OccupancyDiversity(gridinfo, sigma=2.0),
-            all_occupancy_coverage=EnvMetrics.OccupancyCoverage(gridinfo,failure_metric, sigma=2.0)
+            all_occupancy_coverage=EnvMetrics.OccupancyCoverage(gridinfo,failure_metric, sigma=2.0),
             # all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations),
         )
 

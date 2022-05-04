@@ -91,5 +91,6 @@ if __name__ == "__main__":
         configs_to_search,
         args.config_dir,
         cfg,
+        args.prefix,
         delete_config_dir=False
     )
