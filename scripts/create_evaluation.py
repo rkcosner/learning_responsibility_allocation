@@ -11,7 +11,8 @@ from tbsim.utils.experiment_utils import create_evaluation_configs, ParamSearchP
 def configs_to_search(base_cfg):
     """Override this with your hyperparameter search plan"""
     plan = ParamSearchPlan()
-
+    
+    plan.extend(plan.compose_cartesian([ParamRange("perturb.OU.sigma", alias="sigma", range=[0.05,0.1,0.2])]))
     return plan.generate_configs(base_cfg=base_cfg)
 
 
@@ -62,6 +63,14 @@ if __name__ == "__main__":
         required=True
     )
 
+    parser.add_argument(
+        "--ckpt_root_dir",
+        type=str,
+        default=None,
+        help="root directory of checkpoints",
+        required=False
+    )
+
     args = parser.parse_args()
     cfg = EvaluationConfig()
 
@@ -72,7 +81,8 @@ if __name__ == "__main__":
 
     cfg.eval_class = args.eval_class
     cfg.env = args.env
-
+    if args.ckpt_root_dir is not None:
+        cfg.ckpt_root_dir = args.ckpt_root_dir
     with open(args.ckpt_yaml, "r") as f:
         ckpt_info = yaml.safe_load(f)
         cfg.ckpt.update(**ckpt_info)

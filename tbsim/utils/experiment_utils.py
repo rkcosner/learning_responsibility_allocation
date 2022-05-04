@@ -278,6 +278,10 @@ def launch_experiments_ngc(
             "--commandline",
             py_cmd,
         ]
+        if "second_workspace_id" in ngc_config and "second_workspace_mounting_point" in ngc_config:
+            cmd+=["--workspace",
+            "{}:{}".format(
+                ngc_config["second_workspace_id"], ngc_config["second_workspace_mounting_point"])]
         print(cmd)
         if not dry_run:
             subprocess.run(cmd)
