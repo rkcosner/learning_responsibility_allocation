@@ -44,6 +44,9 @@ class EvaluationConfig(Dict):
         self.policy.diversification_clearance = None
 
         self.perturb.std = [5.0, 5.0, np.pi / 2]
+        self.perturb.OU.theta = 0.8
+        self.perturb.OU.sigma = 0.1
+        
 
         self.nusc.eval_scenes = np.arange(100).tolist()
         self.nusc.n_step_action = 5
