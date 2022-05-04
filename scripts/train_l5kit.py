@@ -143,6 +143,18 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         )
         train_callbacks.append(ckpt_rollout_callback)
 
+    # a ckpt monitor to save at fixed interval
+    ckpt_fixed_callback = pl.callbacks.ModelCheckpoint(
+        dirpath=ckpt_dir,
+        filename="iter{step}",
+        auto_insert_metric_name=False,
+        save_top_k=-1,
+        monitor=None,
+        every_n_train_steps=10000,
+        verbose=True,
+    )
+    train_callbacks.append(ckpt_fixed_callback)
+
     # Logging
     assert not (cfg.train.logging.log_tb and cfg.train.logging.log_wandb)
     logger = None
