@@ -13,7 +13,7 @@ class EvaluationConfig(Dict):
         self.num_scenes_per_batch = 4
         self.num_scenes_to_evaluate = 100
 
-        self.num_episode_repeats = 1
+        self.num_episode_repeats = 3
         self.start_frame_index_each_episode = None  # same length as num_episode_repeats
         self.seed_each_episode = None  # same length as num_episode_repeats
 
@@ -46,6 +46,7 @@ class EvaluationConfig(Dict):
         self.perturb.std = [5.0, 5.0, np.pi / 2]
         self.perturb.OU.theta = 0.8
         self.perturb.OU.sigma = 0.1
+        self.perturb.OU.scale = [1.0,1.0,0.2]
         
 
         self.nusc.eval_scenes = np.arange(100).tolist()

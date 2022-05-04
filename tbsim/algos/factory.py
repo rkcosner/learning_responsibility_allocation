@@ -12,7 +12,6 @@ from tbsim.algos.l5kit_algos import (
     SpatialPlanner,
     GANTrafficModel,
     L5ECTrafficModel,
-    L5TreeVAETrafficModel
 )
 
 from tbsim.algos.multiagent_algos import (
