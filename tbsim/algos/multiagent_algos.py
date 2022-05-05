@@ -279,9 +279,9 @@ class MAGANTrafficModel(MATrafficModel):
         return agent_trajs, {}
 
 
-class HierarchicalAgentAware(pl.LightningModule):
+class HierarchicalAgentAwareModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):
-        super(HierarchicalAgentAware, self).__init__()
+        super(HierarchicalAgentAwareModel, self).__init__()
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
 

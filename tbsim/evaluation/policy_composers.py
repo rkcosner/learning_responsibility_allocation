@@ -8,7 +8,7 @@ from tbsim.algos.l5kit_algos import (
     L5ECTrafficModel
 )
 from tbsim.utils.batch_utils import batch_utils
-from tbsim.algos.multiagent_algos import MATrafficModel
+from tbsim.algos.multiagent_algos import MATrafficModel, HierarchicalAgentAwareModel
 from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.utils.config_utils import get_experiment_config_from_file
 from tbsim.policies.hardcoded import ReplayPolicy, GTPolicy, EC_sampling_controller
@@ -212,6 +212,29 @@ class HierAgentAware(Hierarchical):
         return policy, exp_cfg
 
 
+class HPnC(PolicyComposer):
+    def get_policy(self, **kwargs):
+        policy_ckpt_path, policy_config_path = get_checkpoint(
+            ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
+            ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+            ckpt_root_dir=self.ckpt_root_dir
+        )
+        policy_cfg = get_experiment_config_from_file(policy_config_path)
+        policy = HierarchicalAgentAwareModel.load_from_checkpoint(
+            policy_ckpt_path,
+            algo_config=policy_cfg.algo,
+            modality_shapes=self.get_modality_shapes(policy_cfg),
+        ).to(self.device).eval()
+        policy = PolicyWrapper.wrap_controller(
+            policy,
+            mask_drivable=kwargs.get("mask_drivable"),
+            sample=True,
+            num_plan_samples=kwargs.get("num_plan_samples"),
+            clearance=kwargs.get("diversification_clearance"),
+        )
+        return policy, policy_cfg
+
+
 class HierAgentAwareCVAE(Hierarchical):
     def _get_controller(self):
         controller_ckpt_path, controller_config_path = get_checkpoint(
@@ -291,4 +314,3 @@ class AgentAwareEC(Hierarchical):
         policy = EC_sampling_controller(
             ego_sampler=ego_sampler,EC_model=EC_model, agent_planner=agent_planner, device=self.device)
         return policy, exp_cfg
-

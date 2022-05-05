@@ -17,7 +17,7 @@ from tbsim.algos.l5kit_algos import (
 from tbsim.algos.multiagent_algos import (
     MATrafficModel,
     MAGANTrafficModel,
-    HierarchicalAgentAware
+    HierarchicalAgentAwareModel
 )
 
 from tbsim.algos.selfplay_algos import (
@@ -59,10 +59,10 @@ def algo_factory(config: ExperimentConfig, modality_shapes: dict, data_module: L
         algo = L5DiscreteVAETrafficModel(
             algo_config=algo_config, modality_shapes=modality_shapes
         )
-    elif algo_name == "l5_rasterized_tree_vae":
-        algo = L5TreeVAETrafficModel(
-            algo_config=algo_config, modality_shapes=modality_shapes
-        )
+    # elif algo_name == "l5_rasterized_tree_vae":
+    #     algo = L5TreeVAETrafficModel(
+    #         algo_config=algo_config, modality_shapes=modality_shapes
+    #     )
     elif algo_name == "l5_rasterized_ec":
         algo = L5ECTrafficModel(
             algo_config=algo_config, modality_shapes=modality_shapes
@@ -70,7 +70,7 @@ def algo_factory(config: ExperimentConfig, modality_shapes: dict, data_module: L
     elif algo_name == "spatial_planner":
         algo = SpatialPlanner(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "hier_agent_aware":
-        algo = HierarchicalAgentAware(algo_config=algo_config, modality_shapes=modality_shapes)
+        algo = HierarchicalAgentAwareModel(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "occupancy":
         algo = OccupancyMetric(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "ma_rasterized":
