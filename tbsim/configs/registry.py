@@ -135,6 +135,13 @@ EXP_CONFIG_REGISTRY["l5_rasterized_ebm"] = ExperimentConfig(
     registered_name="l5_rasterized_ebm",
 )
 
+EXP_CONFIG_REGISTRY["l5_hier_agent_aware"] = ExperimentConfig(
+    train_config=L5KitMixedTrainConfig(),
+    env_config=L5KitMixedSemanticMapEnvConfig(),
+    algo_config=HierachicalAgentAwareConfig(),
+    registered_name="l5_hier_agent_aware"
+)
+
 
 EXP_CONFIG_REGISTRY["nusc_rasterized_plan"] = ExperimentConfig(
     train_config=NuscTrainConfig(),
@@ -185,7 +192,12 @@ EXP_CONFIG_REGISTRY["nusc_rasterized_gc"] = ExperimentConfig(
     registered_name="nusc_rasterized_gc"
 )
 
-
+EXP_CONFIG_REGISTRY["nusc_occupancy"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=OccupancyMetricConfig(),
+    registered_name="nusc_occupancy"
+)
 
 def get_registered_experiment_config(registered_name):
     if registered_name not in EXP_CONFIG_REGISTRY.keys():

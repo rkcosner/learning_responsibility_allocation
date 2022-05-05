@@ -242,13 +242,14 @@ class HierAgentAware(Hierarchical):
         return policy, exp_cfg
 
 
-class HierPnC(PolicyComposer):
+class HPnC(PolicyComposer):
     def get_policy(self, **kwargs):
-        policy_ckpt_path, policy_cfg = get_checkpoint(
+        policy_ckpt_path, policy_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
             ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
             ckpt_root_dir=self.ckpt_root_dir
         )
+        policy_cfg = get_experiment_config_from_file(policy_config_path)
         policy = HierarchicalAgentAware.load_from_checkpoint(
             policy_ckpt_path,
             algo_config=policy_cfg.algo,
