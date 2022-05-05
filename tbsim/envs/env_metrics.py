@@ -794,6 +794,113 @@ class OccupancyDiversity(Occupancymet):
         return
 
 
+class Occupancy_likelihood(EnvMetrics):
+    def __init__(self, metric_algo, perturbations=None):
+        super(Occupancy_likelihood, self).__init__()
+        self.metric_algo = metric_algo
+        self.traj_len = metric_algo.algo_config.future_num_frames
+        self.state_buffer = []
+        self.perturbations = dict() if perturbations is None else perturbations
+        self.total_steps = 0
+
+    def reset(self):
+        self.state_buffer = []
+        self._per_step = []
+        self._per_step_mask = []
+        self.total_steps = 0
+
+    def __len__(self):
+        return self.total_steps
+
+    def add_step(self, state_info: dict, all_scene_index: np.ndarray):
+        state_info = dict(state_info)
+        state_info["image"] = (state_info["image"] * 255.).astype(np.uint8)
+        self.state_buffer.append(state_info)
+        self.total_steps += 1
+
+    def compute_metric(self, state_buffer, all_scene_index):
+        assert len(state_buffer) == self.traj_len + 1
+        appearance_idx = obtain_active_agent_index(state_buffer)
+        agent_selected = np.where((appearance_idx>=0).all(axis=1))[0]
+        # assemble score function input
+        state = dict(state_buffer[0])  # avoid changing the original state_dict
+        for k,v in state.items():
+            state[k]=v[agent_selected]
+        state["image"] = (state["image"] / 255.).astype(np.float32)
+        agent_from_world = state["agent_from_world"]
+        yaw_current = state["yaw"]
+
+        # transform traversed trajectories into the ego frame of a given state
+        traj_inds = range(1, self.traj_len + 1)
+        
+
+        traj_pos = [state_buffer[traj_i]["centroid"][appearance_idx[agent_selected,traj_i]] for traj_i in traj_inds]
+        traj_yaw = [state_buffer[traj_i]["yaw"][appearance_idx[agent_selected,traj_i]] for traj_i in traj_inds]
+        traj_pos = np.stack(traj_pos, axis=1)  # [B, T, 2]
+
+        traj_yaw = np.stack(traj_yaw, axis=1)  # [B, T]
+        assert traj_pos.shape[0] == traj_yaw.shape[0]
+        
+        agent_traj_pos = transform_points(points=traj_pos, transf_matrix=agent_from_world)
+        agent_traj_yaw = angular_distance(traj_yaw, yaw_current[:, None])
+
+
+
+        state_torch = TensorUtils.to_torch(state, self.metric_algo.device)
+        metrics = dict()
+        state_torch["target_positions"] = TensorUtils.to_torch(agent_traj_pos,self.metric_algo.device).type(torch.float32)
+        state_torch["target_yaws"] = TensorUtils.to_torch(agent_traj_yaw,self.metric_algo.device).type(torch.float32)
+        traj_to_eval = dict()
+        traj_to_eval["target_positions"] = agent_traj_pos
+        traj_to_eval["target_yaws"] = agent_traj_yaw[:, :, None]
+        # evaluate score of the ground truth state
+        m = self.metric_algo.get_metrics(state_torch)
+        for mk in m:
+            metrics["pred_{}".format(mk)] = m[mk]
+
+
+        for k, v in self.perturbations.items():
+            
+            traj_perturbed = TensorUtils.to_torch(v.perturb(traj_to_eval), self.metric_algo.device)
+            for k,v in traj_perturbed.items():
+                traj_perturbed[k]=v.type(torch.float32)
+            state_torch.update(traj_perturbed)
+            m = self.metric_algo.get_metrics(state_torch)
+            for mk in m:
+                metrics["{}_{}".format(k, mk)] = m[mk]
+
+        metrics= TensorUtils.to_numpy(metrics)
+        step_metrics = dict()
+        for k in metrics:
+            met, met_mask = step_aggregate_per_scene(metrics[k], state["scene_index"], all_scene_index)
+            assert np.all(met_mask > 0)  # since we will always use it for all agents
+            step_metrics[k] = met
+        
+        return step_metrics
+
+    def get_episode_metrics(self):
+        assert len(self.state_buffer) >= self.traj_len+1
+        all_scene_index = np.unique(self.state_buffer[-self.traj_len-1]["scene_index"])
+        ep_metrics = self.compute_metric(self.state_buffer[-self.traj_len-1:], all_scene_index)
+
+
+        return ep_metrics
+
+def obtain_active_agent_index(state_buffer):
+    agents_indices = dict()
+    appearance_idx = -np.ones([state_buffer[0]["scene_index"].shape[0],len(state_buffer)])
+    appearance_idx[:,0]=np.arange(appearance_idx.shape[0])
+    for i in range(state_buffer[0]["scene_index"].shape[0]):
+        agents_indices[(state_buffer[0]["scene_index"][i],state_buffer[0]["track_id"][i])]=i
+
+    for t in range(1,len(state_buffer)):
+        for i in range(state_buffer[t]["scene_index"].shape[0]):
+            agent_idx = (state_buffer[t]["scene_index"][i],state_buffer[t]["track_id"][i])
+            if agent_idx in agents_indices:
+                appearance_idx[agents_indices[agent_idx],t] = i
+
+    return appearance_idx.astype(np.int)
+
 if __name__=="__main__":
     gridinfo = {"offset":np.zeros(2),"step":0.3*np.ones(2)}
     occu = OccupancyGrid(gridinfo,sigma=0.5)
