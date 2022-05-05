@@ -25,7 +25,8 @@ from tbsim.algos.l5kit_algos import (
     L5ECTrafficModel
 )
 
-from tbsim.algos.metric_algos import EBMMetric
+from tbsim.algos.metric_algos import EBMMetric, OccupancyMetric
+from tbsim.utils.metrics import OrnsteinUhlenbeckPerturbation
 from tbsim.utils.batch_utils import set_global_batch_type, batch_utils
 from tbsim.algos.multiagent_algos import MATrafficModel, HierarchicalAgentAware
 from tbsim.configs.eval_configs import EvaluationConfig
@@ -377,15 +378,13 @@ class MetricsComposer(object):
 
 
 class CVAEMetrics(MetricsComposer):
-    def get_metrics(self, **kwargs):
+    def get_metrics(self, perturbations = None, **kwargs):
         # TODO: pass in perturbations through kwargs
-        perturbations = None
+
 
         ckpt_path, config_path = get_checkpoint(
-            ngc_job_id="2873777",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
-            ckpt_key="iter2000",
-            # ngc_job_id=self.eval_config.ckpt.cvae_metric.ngc_job_id,
-            # ckpt_key=self.eval_config.ckpt.cvae_metric.ckpt_key,
+            ngc_job_id="2874790",
+            ckpt_key="iter27000_ep0_minADE0.61",
             ckpt_root_dir=self.eval_config.ckpt_root_dir
         )
         
@@ -398,10 +397,53 @@ class CVAEMetrics(MetricsComposer):
         ).to(self.device).eval()
         return EnvMetrics.LearnedCVAENLL(metric_algo=CVAE_model, perturbations=perturbations)
 
+class learnedEBMMetric(MetricsComposer):
+    def get_metrics(self, perturbations = None, **kwargs):
+        # TODO: pass in perturbations through kwargs
+
+
+        ckpt_path, config_path = get_checkpoint(
+            ngc_job_id="",
+            ckpt_key="",
+            ckpt_root_dir=self.eval_config.ckpt_root_dir
+        )
+
+        controller_cfg = get_experiment_config_from_file(config_path)
+        modality_shapes = batch_utils().get_modality_shapes(controller_cfg)
+        ebm_model = EBMMetric.load_from_checkpoint(
+            ckpt_path,
+            algo_config=controller_cfg.algo,
+            modality_shapes=modality_shapes
+        ).to(self.device).eval()
+        return EnvMetrics.LearnedCVAENLL(metric_algo=ebm_model, perturbations=perturbations)
 
 class OccupancyMetrics(MetricsComposer):
-    def get_metrics(self, **kwargs):
-        pass
+    def get_metrics(self, perturbations = None, **kwargs):
+        # TODO: adding checkpoints
+
+        # ckpt_path, config_path = get_checkpoint(
+        #     ngc_job_id="",
+        #     ckpt_key="",
+        #     ckpt_root_dir=self.eval_config.ckpt_root_dir
+        # )
+
+        # cfg = get_experiment_config_from_file(config_path)
+
+        # modality_shapes = batch_utils().get_modality_shapes(cfg)
+        # occupancy_model = OccupancyMetric.load_from_checkpoint(
+        #     ckpt_path,
+        #     algo_config=cfg.algo,
+        #     modality_shapes=modality_shapes
+        # ).to(self.device).eval()
+
+        cfg = get_experiment_config_from_file("/home/yuxiaoc/repos/behavior-generation/experiments/templates/l5_occupancy.json")
+
+        modality_shapes = batch_utils().get_modality_shapes(cfg)
+        occupancy_model = OccupancyMetric(
+            algo_config=cfg.algo,
+            modality_shapes=modality_shapes
+        ).to(self.device).eval()
+        return EnvMetrics.Occupancy_likelihood(metric_algo=occupancy_model, perturbations=perturbations)
 
 
 
@@ -422,7 +464,6 @@ def create_env_l5kit(
     eval_zarr = ChunkedDataset(dm.require(exp_cfg.train.dataset_valid_key)).open()
 
     env_dataset = EgoDatasetMixed(l5_config, eval_zarr, vectorizer, rasterizer)
-
     l5_config = deepcopy(l5_config)
     l5_config["raster_params"]["raster_size"] = (500, 500)
     l5_config["raster_params"]["pixel_size"] = (0.2, 0.2)
@@ -438,15 +479,19 @@ def create_env_l5kit(
     metrics = dict()
     if compute_metrics:
         gridinfo = {"offset": np.zeros(2), "step": 2.0*np.ones(2)}
-        # cvae_metrics = CVAEMetrics(eval_config=eval_cfg, device=device, ckpt_root_dir=eval_cfg.ckpt_root_dir)
+        cvae_metrics = CVAEMetrics(eval_config=eval_cfg, device=device, ckpt_root_dir=eval_cfg.ckpt_root_dir)
         failure_metric = EnvMetrics.CriticalFailure()
+        OU_pert = OrnsteinUhlenbeckPerturbation(theta=eval_cfg.perturb.OU.theta*np.ones(3),
+                                                sigma=eval_cfg.perturb.OU.sigma*np.array(eval_cfg.perturb.OU.scale))
+        learned_occu_metric = OccupancyMetrics(eval_config=eval_cfg, device=device, ckpt_root_dir=eval_cfg.ckpt_root_dir)
         metrics = dict(
             # all_off_road_rate=EnvMetrics.OffRoadRate(),
             # all_collision_rate=EnvMetrics.CollisionRate(),
             # all_occupancy = EnvMetrics.Occupancydistr(gridinfo,sigma=2.0)
-            # ego_cvae_metrics=cvae_metrics.get_metrics(),
+            # ego_cvae_metrics=cvae_metrics.get_metrics(perturbations={"OU":OU_pert}),
+            ego_occu_likelihood=learned_occu_metric.get_metrics(perturbations={"OU":OU_pert}),
             ego_occupancy_diversity=EnvMetrics.OccupancyDiversity(gridinfo, sigma=2.0),
-            all_occupancy_coverage=EnvMetrics.OccupancyCoverage(gridinfo,failure_metric, sigma=2.0)
+            all_occupancy_coverage=EnvMetrics.OccupancyCoverage(gridinfo,failure_metric, sigma=2.0),
             # all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations),
         )
 

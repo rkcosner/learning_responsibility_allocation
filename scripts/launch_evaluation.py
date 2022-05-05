@@ -50,7 +50,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--ckpt_root_dir",
         type=str,
-        default="checkpoints/",
+        default=None,
         help="checkpoint root directory when running on ngc"
     )
 
@@ -94,11 +94,12 @@ if __name__ == "__main__":
         str(args.num_scenes_per_batch),
         "--dataset_path",
         ngc_cfg["dataset_path"],
-        "--ckpt_root_dir",
-        args.ckpt_root_dir,
         "--env",
         cfgs[0].env
     ]
+    if args.ckpt_root_dir is not None:
+        script_command+=["--ckpt_root_dir",
+        args.ckpt_root_dir]
 
     if args.render:
         script_command.append("--render")
