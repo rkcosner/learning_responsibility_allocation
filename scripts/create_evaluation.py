@@ -5,14 +5,23 @@ import os.path
 import yaml
 from tbsim.configs.eval_configs import EvaluationConfig
 
-from tbsim.utils.experiment_utils import create_evaluation_configs, ParamSearchPlan, ParamRange, Param
+from tbsim.utils.experiment_utils import ParamConfig, create_evaluation_configs, ParamSearchPlan, ParamRange, Param
 
 
 def configs_to_search(base_cfg):
     """Override this with your hyperparameter search plan"""
     plan = ParamSearchPlan()
-    
-    plan.extend(plan.compose_cartesian([ParamRange("perturb.OU.sigma", alias="sigma", range=[0.05,0.1,0.2])]))
+    # plan.extend(plan.compose_cartesian([
+    #                                     ParamRange("l5kit.num_simulation_steps", alias="horizon", range=[21]),
+    #                                     ParamRange("start_frame_index_each_episode", alias="t0", range=[[25,50,75,100]]),
+    #                                     ParamRange("num_episode_repeats", alias="repeats", range=[4]),
+    #                                     ParamRange("l5kit.run_cvae", alias="cvae", range=[True])
+    #                                     ]))
+    plan.extend(plan.compose_cartesian([
+                                        ParamRange("l5kit.num_simulation_steps", alias="horizon", range=[200]),
+                                        ParamRange("num_episode_repeats", alias="repeats", range=[1]),
+                                        ParamRange("l5kit.run_cvae", alias="cvae", range=[False])
+                                        ]))
     return plan.generate_configs(base_cfg=base_cfg)
 
 

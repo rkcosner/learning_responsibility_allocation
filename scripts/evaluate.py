@@ -96,19 +96,25 @@ def create_env_l5kit(
         gridinfo = {"offset": np.zeros(2), "step": 2.0*np.ones(2)}
         cvae_metrics = CVAEMetrics(eval_config=eval_cfg, device=device, ckpt_root_dir=eval_cfg.ckpt_root_dir)
         failure_metric = EnvMetrics.CriticalFailure()
-        OU_pert = OrnsteinUhlenbeckPerturbation(theta=eval_cfg.perturb.OU.theta*np.ones(3),
-                                                sigma=eval_cfg.perturb.OU.sigma*np.array(eval_cfg.perturb.OU.scale))
+        perturbations = dict()
+        for sigma in eval_cfg.perturb.OU.sigma:
+            perturbations["OU_sigma_{}".format(sigma)] = OrnsteinUhlenbeckPerturbation(
+                                                    theta=eval_cfg.perturb.OU.theta*np.ones(3),
+                                                    sigma=sigma*np.array(eval_cfg.perturb.OU.scale))
         learned_occu_metric = OccupancyMetrics(eval_config=eval_cfg, device=device, ckpt_root_dir=eval_cfg.ckpt_root_dir)
-        metrics = dict(
-            # all_off_road_rate=EnvMetrics.OffRoadRate(),
-            # all_collision_rate=EnvMetrics.CollisionRate(),
-            # all_occupancy = EnvMetrics.Occupancydistr(gridinfo,sigma=2.0)
-            # ego_cvae_metrics=cvae_metrics.get_metrics(perturbations={"OU":OU_pert}),
-            ego_occu_likelihood=learned_occu_metric.get_metrics(perturbations={"OU":OU_pert}),
-            ego_occupancy_diversity=EnvMetrics.OccupancyDiversity(gridinfo, sigma=2.0),
-            all_occupancy_coverage=EnvMetrics.OccupancyCoverage(gridinfo,failure_metric, sigma=2.0),
-            # all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations),
-        )
+        if eval_cfg.run_cvae:
+            metrics = dict(
+                ego_cvae_metrics=cvae_metrics.get_metrics(perturbations=perturbations),
+            )
+        else:
+            metrics = dict(
+                all_off_road_rate=EnvMetrics.OffRoadRate(),
+                all_collision_rate=EnvMetrics.CollisionRate(),
+                ego_occu_likelihood=learned_occu_metric.get_metrics(perturbations=perturbations),
+                ego_occupancy_diversity=EnvMetrics.OccupancyDiversity(gridinfo, sigma=2.0),
+                all_occupancy_coverage=EnvMetrics.OccupancyCoverage(gridinfo,failure_metric, sigma=2.0),
+                # all_ebm_score=EnvMetrics.LearnedMetric(metric_algo=metric_algo, perturbations=perturbations),
+            )
 
     env = EnvL5KitSimulation(
         exp_cfg.env,

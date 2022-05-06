@@ -4,6 +4,7 @@ l5_rasterized_vae_trained_models/
 l5_rasterized_discrete_vae_trained_models/
 wandb/
 videos/
+figures/
 result/
 ngc/ngc_config.json
 checkpoints
@@ -85,3 +86,4 @@ l5_rasterized_tree_vae_trained_models/test/run0/logs/log.txt
 scripts/create_evaluation.py
 scripts/create_evaluation.py
 tbsim/configs/eval_configs.py
+generate_all_evaluations.sh
