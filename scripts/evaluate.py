@@ -27,6 +27,7 @@ from tbsim.utils.config_utils import translate_l5kit_cfg, translate_avdata_cfg
 from tbsim.utils.env_utils import rollout_episodes
 import tbsim.envs.env_metrics as EnvMetrics
 from tbsim.evaluation.metric_composers import CVAEMetrics, OccupancyMetrics
+from tbsim.evaluation.env_builders import EnvNuscBuilder, EnvL5Builder
 
 from tbsim.policies.wrappers import (
     RolloutWrapper,
@@ -192,6 +193,11 @@ def create_env_nusc(
 
 
 def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_disk, render_to_video):
+    if eval_cfg.env == "nusc":
+        set_global_batch_type("avdata")
+    elif eval_cfg.env == 'l5kit':
+        set_global_batch_type("l5kit")
+
     print(eval_cfg)
 
     # for reproducibility
@@ -211,15 +217,6 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
         os.remove(eval_cfg.experience_hdf5_path)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    # create env
-    if eval_cfg.env == "nusc":
-        env_func = create_env_nusc
-        set_global_batch_type("avdata")
-    elif eval_cfg.env == 'l5kit':
-        env_func = create_env_l5kit
-        set_global_batch_type("l5kit")
-    else:
-        raise NotImplementedError("{} is not a valid env".format(eval_cfg.env))
 
     # create policy and rollout wrapper
     policy_composers = importlib.import_module("tbsim.evaluation.policy_composers")
@@ -243,14 +240,15 @@ def run_evaluation(eval_cfg, save_cfg, skimp_rollout, compute_metrics, data_to_d
 
     print(exp_config.algo)
 
-    env = env_func(
-        exp_config,
-        eval_cfg,
-        device=device,
-        skimp_rollout=skimp_rollout,
-        compute_metrics=compute_metrics,
-        seed=eval_cfg.seed
-    )
+    # create env
+    if eval_cfg.env == "nusc":
+        env_builder = EnvNuscBuilder(eval_config=eval_cfg, exp_config=exp_config, device=device)
+    elif eval_cfg.env == 'l5kit':
+        env_builder = EnvL5Builder(eval_config=eval_cfg, exp_config=exp_config, device=device)
+    else:
+        raise NotImplementedError("{} is not a valid env".format(eval_cfg.env))
+
+    env = env_builder.get_env(use_analytical_metrics=True, use_learned_metrics=False)
 
     # eval loop
     obs_to_torch = eval_cfg.eval_class not in ["GroundTruth", "ReplayAction"]
