@@ -26,10 +26,18 @@ def configs_to_search_l5kit(base_cfg):
     base_cfg.train.training.num_data_workers = 8
     base_cfg.train.validation.num_data_workers = 8
 
-    plan.extend(plan.compose_zip([
+    plan.extend(plan.compose_cartesian([
         # ParamRange("algo.loss_weights.pixel_ce_loss", alias="clw", range=[0.0, 1.0]),
         # ParamRange("algo.loss_weights.pixel_bce_loss", alias="blw", range=[1.0, 0.0]),
-        ParamRange("algo.vae.latent_dim", alias="vae_dim", range=[5,10,15,20]),
+        # ParamRange("algo.vae.latent_dim", alias="vae_dim", range=[5,10,15,20]),
+        ParamRange("algo.vae.latent_dim", alias="vae_dim", range=[3,5]),
+        ParamRange("algo.model_architecture", alias="arch", range=["resnet50"]),
+    ]))
+
+    plan.extend(plan.compose_zip([
+        ParamRange("algo.stage", alias="stage", range=[2,3,4]),
+        ParamRange("algo.num_frames_per_stage", alias="per_stage", range=[25,18,12]),
+        ParamRange("algo.model_architecture", alias="arch", range=["resnet50","resnet50","resnet50"]),
     ]))
 
     return plan.generate_configs(base_cfg=base_cfg)

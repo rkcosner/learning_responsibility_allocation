@@ -514,13 +514,13 @@ class LearnedCVAENLL(EnvMetrics):
         metrics = dict()
 
         # evaluate score of the ground truth state
-        m = self.metric_algo.get_metrics(state_torch)
-        for mk in m:
-            metrics["gt_{}".format(mk)] = m[mk]
+        # m = self.metric_algo.get_metrics(state_torch)
+        # for mk in m:
+        #     metrics["gt_{}".format(mk)] = m[mk]
         traj_torch = TensorUtils.to_torch(traj_to_eval, self.metric_algo.device)
         m = self.metric_algo.get_metrics(state_torch,traj_torch)
         for mk in m:
-            metrics["pred_{}".format(mk)] = m[mk]
+            metrics[mk] = m[mk]
 
         for k, v in self.perturbations.items():
             
@@ -856,14 +856,13 @@ class Occupancy_likelihood(EnvMetrics):
         # evaluate score of the ground truth state
         m = self.metric_algo.get_metrics(state_torch)
         for mk in m:
-            metrics["pred_{}".format(mk)] = m[mk]
+            metrics[mk] = m[mk]
 
-
+        
         for k, v in self.perturbations.items():
-            
             traj_perturbed = TensorUtils.to_torch(v.perturb(traj_to_eval), self.metric_algo.device)
-            for k,v in traj_perturbed.items():
-                traj_perturbed[k]=v.type(torch.float32)
+            for kk,vv in traj_perturbed.items():
+                traj_perturbed[kk]=vv.type(torch.float32)
             state_torch.update(traj_perturbed)
             m = self.metric_algo.get_metrics(state_torch)
             for mk in m:
@@ -875,7 +874,6 @@ class Occupancy_likelihood(EnvMetrics):
             met, met_mask = step_aggregate_per_scene(metrics[k], state["scene_index"], all_scene_index)
             assert np.all(met_mask > 0)  # since we will always use it for all agents
             step_metrics[k] = met
-        
         return step_metrics
 
     def get_episode_metrics(self):
