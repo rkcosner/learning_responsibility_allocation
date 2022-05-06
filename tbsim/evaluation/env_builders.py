@@ -42,18 +42,38 @@ class EnvironmentBuilder(object):
         )
         return metrics
 
+    def _get_learned_metrics(self):
+        perturbations = dict()
+        if self.eval_cfg.perturb.enabled:
+            for sigma in self.eval_cfg.perturb.OU.sigma:
+                perturbations["OU_sigma_{}".format(sigma)] = OrnsteinUhlenbeckPerturbation(
+                    theta=self.eval_cfg.perturb.OU.theta*np.ones(3),
+                    sigma=sigma*np.array(self.eval_cfg.perturb.OU.scale))
+
+        cvae_metrics = CVAEMetrics(
+            eval_config=self.eval_cfg,
+            device=self.device,
+            ckpt_root_dir=self.eval_cfg.ckpt_root_dir
+        )
+
+        learned_occu_metric = OccupancyMetrics(
+            eval_config=self.eval_cfg,
+            device=self.device,
+            ckpt_root_dir=self.eval_cfg.ckpt_root_dir
+        )
+
+        metrics = dict(
+            ego_cvae_metrics=cvae_metrics.get_metrics(perturbations=perturbations),
+            ego_occu_likelihood=learned_occu_metric.get_metrics(perturbations=perturbations)
+        )
+        return metrics
+
     def get_env(self):
         raise NotImplementedError
 
 
 class EnvL5Builder(EnvironmentBuilder):
-    def _get_learned_metrics(self):
-        metrics = dict(
-
-        )
-        return metrics
-
-    def get_env(self, use_analytical_metrics=True, use_learned_metrics=False, skimp_rollout=False):
+    def get_env(self):
         exp_cfg = self.exp_cfg.clone()
         os.environ["L5KIT_DATA_FOLDER"] = self.eval_cfg.dataset_path
 
@@ -77,9 +97,9 @@ class EnvL5Builder(EnvironmentBuilder):
         exp_cfg.env.rasterizer.filter_agents_threshold = 0.8  # control everything that's above this confidence threshold
 
         metrics = dict()
-        if use_analytical_metrics:
+        if self.eval_cfg.metrics.compute_analytical_metrics:
             metrics.update(self._get_analytical_metrics())
-        if use_learned_metrics:
+        if self.eval_cfg.metrics.compute_learned_metrics:
             metrics.update(self._get_learned_metrics())
 
         env = EnvL5KitSimulation(
@@ -90,20 +110,14 @@ class EnvL5Builder(EnvironmentBuilder):
             renderer=render_rasterizer,
             metrics=metrics,
             seed=self.eval_cfg.seed,
-            skimp_rollout=skimp_rollout,
+            skimp_rollout=self.eval_cfg.skimp_rollout,
         )
 
         return env
 
 
 class EnvNuscBuilder(EnvironmentBuilder):
-    def _get_learned_metrics(self):
-        metrics = dict(
-
-        )
-        return metrics
-
-    def get_env(self, use_analytical_metrics=True, use_learned_metrics=False):
+    def get_env(self):
         exp_cfg = self.exp_cfg.clone()
         exp_cfg.unlock()
         exp_cfg.train.dataset_path = self.eval_cfg.dataset_path
@@ -141,9 +155,9 @@ class EnvNuscBuilder(EnvironmentBuilder):
         env_dataset = UnifiedDataset(**kwargs)
 
         metrics = dict()
-        if use_analytical_metrics:
+        if self.eval_cfg.metrics.compute_analytical_metrics:
             metrics.update(self._get_analytical_metrics())
-        if use_learned_metrics:
+        if self.eval_cfg.metrics.compute_learned_metrics:
             metrics.update(self._get_learned_metrics())
 
         env = EnvUnifiedSimulation(
