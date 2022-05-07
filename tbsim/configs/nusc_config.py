@@ -18,7 +18,7 @@ class NuscTrainConfig(TrainConfig):
 
         self.rollout.enabled = False
         self.rollout.save_video = True
-        self.rollout.every_n_steps = 10000
+        self.rollout.every_n_steps = 2000
 
         # training config
         self.training.batch_size = 100

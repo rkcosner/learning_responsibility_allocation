@@ -17,7 +17,7 @@ class TrainConfig(Dict):
         self.save.enabled = True  # whether model saving should be enabled or disabled
         self.save.every_n_steps = 100  # save model every n epochs
         self.save.best_k = 5
-        self.save.save_best_rollout = True
+        self.save.save_best_rollout = False
         self.save.save_best_validation = True
 
         ## evaluation rollout config ##
