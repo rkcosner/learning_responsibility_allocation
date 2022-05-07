@@ -16,11 +16,9 @@ class L5KitTrainConfig(TrainConfig):
         self.datamodule_class = "L5RasterizedDataModule"
         self.dataset_mode = "agents"
 
-        self.rollout.enabled = False
-        self.rollout.every_n_steps = 500
-        self.rollout.num_episodes = 10
-        self.rollout.num_scenes = 3
-        self.rollout.n_step_action = 10
+        self.rollout.enabled = True
+        self.rollout.save_video = True
+        self.rollout.every_n_steps = 10000
 
         # training config
         self.training.batch_size = 100
@@ -48,7 +46,7 @@ class L5KitEnvConfig(EnvConfig):
     def __init__(self):
         super(L5KitEnvConfig, self).__init__()
 
-        self.name = "l5_rasterized"
+        self.name = "l5kit"
 
         # raster image size [pixels]
         self.rasterizer.raster_size = (224, 224)
@@ -99,8 +97,7 @@ class L5KitMixedEnvConfig(EnvConfig):
 
     def __init__(self):
         super(L5KitMixedEnvConfig, self).__init__()
-        self.name = "l5_mixed"
-
+        self.name = "l5kit"
         # the keys are relative to the dataset environment variable
         self.rasterizer.semantic_map_key = "semantic_map/semantic_map.pb"
         self.rasterizer.dataset_meta_key = "meta.json"
@@ -178,6 +175,7 @@ class L5KitMixedSemanticMapEnvConfig(L5KitMixedEnvConfig):
 class L5RasterizedPlanningConfig(AlgoConfig):
     def __init__(self):
         super(L5RasterizedPlanningConfig, self).__init__()
+        self.eval_class = "BC"
 
         self.name = "l5_rasterized"
         self.model_architecture = "resnet18"
@@ -223,6 +221,8 @@ class L5RasterizedPlanningConfig(AlgoConfig):
 class SpatialPlannerConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(SpatialPlannerConfig, self).__init__()
+        self.eval_class = None
+
         self.name = "spatial_planner"
         self.loss_weights.pixel_bce_loss = 0.0
         self.loss_weights.pixel_ce_loss = 1.0
@@ -233,6 +233,8 @@ class SpatialPlannerConfig(L5RasterizedPlanningConfig):
 class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(MARasterizedPlanningConfig, self).__init__()
+        self.eval_class = None
+
         self.name = "ma_rasterized"
         self.agent_feature_dim = 128
         self.global_feature_dim = 128
@@ -262,6 +264,7 @@ class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
 class HierachicalAgentAwareConfig(MARasterizedPlanningConfig):
     def __init__(self):
         super(HierachicalAgentAwareConfig, self).__init__()
+        self.eval_class = "HPnC"
         self.name = "hier_agent_aware"
         self.loss_weights.pixel_bce_loss = 0.0
         self.loss_weights.pixel_ce_loss = 1.0
@@ -272,6 +275,7 @@ class HierachicalAgentAwareConfig(MARasterizedPlanningConfig):
 class L5RasterizedGCConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(L5RasterizedGCConfig, self).__init__()
+        self.eval_class = None
         self.name = "l5_rasterized_gc"
         self.goal_feature_dim = 32
         self.decoder.layer_dims = (128, 128)
@@ -280,6 +284,7 @@ class L5RasterizedGCConfig(L5RasterizedPlanningConfig):
 class EBMMetricConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(EBMMetricConfig, self).__init__()
+        self.eval_class = None
         self.name = "l5_ebm"
         self.negative_source = "permute"
         self.map_feature_dim = 64
@@ -292,6 +297,7 @@ class EBMMetricConfig(L5RasterizedPlanningConfig):
 class OccupancyMetricConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(OccupancyMetricConfig, self).__init__()
+        self.eval_class = None
         self.name = "occupancy"
         self.loss_weights.pixel_bce_loss = 0.0
         self.loss_weights.pixel_ce_loss = 1.0
@@ -300,6 +306,7 @@ class OccupancyMetricConfig(L5RasterizedPlanningConfig):
 class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(L5RasterizedVAEConfig, self).__init__()
+        self.eval_class = "TrafficSim"
         self.name = "l5_rasterized_vae"
         self.map_feature_dim = 256
         self.goal_conditional = False
@@ -319,6 +326,8 @@ class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
 class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(L5RasterizedDiscreteVAEConfig, self).__init__()
+        self.eval_class = "TPP"
+
         self.name = "l5_rasterized_discrete_vae"
         self.map_feature_dim = 256
         self.goal_conditional = False
@@ -348,6 +357,8 @@ class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
 class L5RasterizedTreeVAEConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(L5RasterizedTreeVAEConfig, self).__init__()
+        self.eval_class = None
+
         self.name = "l5_rasterized_tree_vae"
         self.map_feature_dim = 256
         self.goal_conditional = True
@@ -374,9 +385,12 @@ class L5RasterizedTreeVAEConfig(L5RasterizedPlanningConfig):
 
         self.min_std = 0.1
 
+
 class L5RasterizedECConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(L5RasterizedECConfig, self).__init__()
+        self.eval_class = None
+
         self.name = "l5_rasterized_ec"
         self.map_feature_dim = 256
         self.goal_conditional = True
@@ -391,9 +405,12 @@ class L5RasterizedECConfig(L5RasterizedPlanningConfig):
         self.loss_weights.EC_collision_loss = 5
         self.loss_weights.deviation_loss = 0.2
 
+
 class L5RasterizedGANConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(L5RasterizedGANConfig, self).__init__()
+        self.eval_class = "GAN"
+
         self.name = "gan"
 
         self.dynamics.type = "Unicycle"

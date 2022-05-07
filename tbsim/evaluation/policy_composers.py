@@ -45,7 +45,7 @@ class PolicyComposer(object):
 
 
 class ReplayAction(PolicyComposer):
-    def get_policy(self, **kwargs):
+    def get_policy(self):
         print("Loading action log from {}".format(self.eval_config.experience_hdf5_path))
         import h5py
         h5 = h5py.File(self.eval_config.experience_hdf5_path, "r")
@@ -59,7 +59,7 @@ class ReplayAction(PolicyComposer):
 
 
 class GroundTruth(PolicyComposer):
-    def get_policy(self, **kwargs):
+    def get_policy(self):
         if self.eval_config.env == "nusc":
             exp_cfg = get_registered_experiment_config("nusc_rasterized_plan")
         elif self.eval_config.env == "l5kit":
@@ -70,68 +70,90 @@ class GroundTruth(PolicyComposer):
 
 
 class BC(PolicyComposer):
-    def get_policy(self, **kwargs):
-        policy_ckpt_path, policy_config_path = get_checkpoint(
-            ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
-            ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
-            ckpt_root_dir=self.ckpt_root_dir,
-        )
-        policy_cfg = get_experiment_config_from_file(policy_config_path)
-        policy = L5TrafficModel.load_from_checkpoint(
-            policy_ckpt_path,
-            algo_config=policy_cfg.algo,
-            modality_shapes=self.get_modality_shapes(policy_cfg),
-        ).to(self.device).eval()
-        return policy, policy_cfg.clone()
+    def get_policy(self, policy=None):
+        if policy is not None:
+            assert isinstance(policy, L5TrafficModel)
+            policy_cfg = None
+        else:
+            policy_ckpt_path, policy_config_path = get_checkpoint(
+                ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
+                ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+                ckpt_root_dir=self.ckpt_root_dir,
+            )
+            policy_cfg = get_experiment_config_from_file(policy_config_path)
+            policy = L5TrafficModel.load_from_checkpoint(
+                policy_ckpt_path,
+                algo_config=policy_cfg.algo,
+                modality_shapes=self.get_modality_shapes(policy_cfg),
+            ).to(self.device).eval()
+            policy_cfg = policy_cfg.clone()
+
+        return policy, policy_cfg
 
 
 class TrafficSim(PolicyComposer):
-    def get_policy(self, **kwargs):
-        policy_ckpt_path, policy_config_path = get_checkpoint(
-            ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
-            ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
-            ckpt_root_dir=self.ckpt_root_dir,
-        )
-        policy_cfg = get_experiment_config_from_file(policy_config_path)
-        policy = L5VAETrafficModel.load_from_checkpoint(
-            policy_ckpt_path,
-            algo_config=policy_cfg.algo,
-            modality_shapes=self.get_modality_shapes(policy_cfg),
-        ).to(self.device).eval()
-        return policy, policy_cfg.clone()
+    def get_policy(self, policy=None):
+        if policy is not None:
+            assert isinstance(policy, L5VAETrafficModel)
+            policy_cfg = None
+        else:
+            policy_ckpt_path, policy_config_path = get_checkpoint(
+                ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
+                ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+                ckpt_root_dir=self.ckpt_root_dir,
+            )
+            policy_cfg = get_experiment_config_from_file(policy_config_path)
+            policy = L5VAETrafficModel.load_from_checkpoint(
+                policy_ckpt_path,
+                algo_config=policy_cfg.algo,
+                modality_shapes=self.get_modality_shapes(policy_cfg),
+            ).to(self.device).eval()
+            policy_cfg = policy_cfg.clone()
+        policy = PolicyWrapper.wrap_controller(policy, sample=self.eval_config.policy.sample)
+        return policy, policy_cfg
 
 
 class TPP(PolicyComposer):
-    def get_policy(self, **kwargs):
-        policy_ckpt_path, policy_config_path = get_checkpoint(
-            ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
-            ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
-            ckpt_root_dir=self.ckpt_root_dir,
-        )
-        policy_cfg = get_experiment_config_from_file(policy_config_path)
-        policy = L5DiscreteVAETrafficModel.load_from_checkpoint(
-            policy_ckpt_path,
-            algo_config=policy_cfg.algo,
-            modality_shapes=self.get_modality_shapes(policy_cfg),
-        ).to(self.device).eval()
-        policy = PolicyWrapper.wrap_controller(policy, sample=True)
-        return policy, policy_cfg.clone()
+    def get_policy(self, policy=None):
+        if policy is not None:
+            assert isinstance(policy, L5DiscreteVAETrafficModel)
+            policy_cfg = None
+        else:
+            policy_ckpt_path, policy_config_path = get_checkpoint(
+                ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
+                ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+                ckpt_root_dir=self.ckpt_root_dir,
+            )
+            policy_cfg = get_experiment_config_from_file(policy_config_path)
+            policy = L5DiscreteVAETrafficModel.load_from_checkpoint(
+                policy_ckpt_path,
+                algo_config=policy_cfg.algo,
+                modality_shapes=self.get_modality_shapes(policy_cfg),
+            ).to(self.device).eval()
+            policy_cfg = policy_cfg.clone()
+        policy = PolicyWrapper.wrap_controller(policy, sample=self.eval_config.policy.sample)
+        return policy, policy_cfg
 
 
 class GAN(PolicyComposer):
-    def get_policy(self, **kwargs):
-        policy_ckpt_path, policy_config_path = get_checkpoint(
-            ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
-            ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
-            ckpt_root_dir=self.ckpt_root_dir,
-        )
-        policy_cfg = get_experiment_config_from_file(policy_config_path)
-        policy = GANTrafficModel.load_from_checkpoint(
-            policy_ckpt_path,
-            algo_config=policy_cfg.algo,
-            modality_shapes=self.get_modality_shapes(policy_cfg),
-        ).to(self.device).eval()
-        return policy, policy_cfg.clone()
+    def get_policy(self, policy=None):
+        if policy is not None:
+            assert isinstance(policy, GANTrafficModel)
+            policy_cfg = None
+        else:
+            policy_ckpt_path, policy_config_path = get_checkpoint(
+                ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
+                ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+                ckpt_root_dir=self.ckpt_root_dir,
+            )
+            policy_cfg = get_experiment_config_from_file(policy_config_path)
+            policy = GANTrafficModel.load_from_checkpoint(
+                policy_ckpt_path,
+                algo_config=policy_cfg.algo,
+                modality_shapes=self.get_modality_shapes(policy_cfg),
+            ).to(self.device).eval()
+            policy_cfg = policy_cfg.clone()
+        return policy, policy_cfg
 
 
 class Hierarchical(PolicyComposer):
@@ -171,10 +193,20 @@ class Hierarchical(PolicyComposer):
         ).to(self.device).eval()
         return controller, policy_cfg.clone()
 
-    def get_policy(self, **kwargs):
-        planner, _ = self._get_planner()
-        controller, exp_cfg = self._get_controller()
-        planner = PolicyWrapper.wrap_planner(planner, mask_drivable=kwargs.get("mask_drivable"), sample=False)
+    def get_policy(self, planner=None, controller=None):
+        if planner is not None:
+            assert isinstance(controller, MATrafficModel)
+            assert isinstance(planner, SpatialPlanner)
+            exp_cfg = None
+        else:
+            planner, _ = self._get_planner()
+            controller, exp_cfg = self._get_controller()
+            exp_cfg = exp_cfg.clone()
+        planner = PolicyWrapper.wrap_planner(
+            planner,
+            mask_drivable=self.eval_config.policy.mask_drivable,
+            sample=False
+        )
         policy = HierarchicalWrapper(planner, controller)
         return policy, exp_cfg
 
@@ -195,16 +227,24 @@ class HierAgentAware(Hierarchical):
         ).to(self.device).eval()
         return predictor, predictor_cfg.clone()
 
-    def get_policy(self, **kwargs):
-        planner, _ = self._get_planner()
-        predictor, exp_cfg = self._get_predictor()
-        controller = predictor
+    def get_policy(self, planner=None, predictor=None, controller=None):
+        if planner is not None:
+            assert isinstance(predictor, MATrafficModel)
+            assert isinstance(planner, SpatialPlanner)
+            exp_cfg = None
+        else:
+            planner, _ = self._get_planner()
+            predictor, exp_cfg = self._get_predictor()
+            exp_cfg = exp_cfg.clone()
+
+        controller = predictor if controller is None else controller
+
         plan_sampler = PolicyWrapper.wrap_planner(
             planner,
-            mask_drivable=kwargs.get("mask_drivable"),
+            mask_drivable=self.eval_config.policy.mask_drivable,
             sample=True,
-            num_plan_samples=kwargs.get("num_plan_samples"),
-            clearance=kwargs.get("diversification_clearance"),
+            num_plan_samples=self.eval_config.policy.num_plan_samples,
+            clearance=self.eval_config.policy.diversification_clearance,
         )
         sampler = HierarchicalSamplerWrapper(plan_sampler, controller)
 
@@ -212,36 +252,11 @@ class HierAgentAware(Hierarchical):
         return policy, exp_cfg
 
 
-class HPnC(PolicyComposer):
-    def get_policy(self, **kwargs):
-        policy_ckpt_path, policy_config_path = get_checkpoint(
-            ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
-            ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
-            ckpt_root_dir=self.ckpt_root_dir
-        )
-        policy_cfg = get_experiment_config_from_file(policy_config_path)
-        policy = HierarchicalAgentAwareModel.load_from_checkpoint(
-            policy_ckpt_path,
-            algo_config=policy_cfg.algo,
-            modality_shapes=self.get_modality_shapes(policy_cfg),
-        ).to(self.device).eval()
-        policy = PolicyWrapper.wrap_controller(
-            policy,
-            mask_drivable=kwargs.get("mask_drivable"),
-            sample=True,
-            num_plan_samples=kwargs.get("num_plan_samples"),
-            clearance=kwargs.get("diversification_clearance"),
-        )
-        return policy, policy_cfg
-
-
 class HierAgentAwareCVAE(Hierarchical):
     def _get_controller(self):
         controller_ckpt_path, controller_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
             ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
-            # ngc_job_id="2792906",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
-            # ckpt_key="iter13000",
             ckpt_root_dir=self.ckpt_root_dir
         )
         controller_cfg = get_experiment_config_from_file(controller_config_path)
@@ -257,8 +272,6 @@ class HierAgentAwareCVAE(Hierarchical):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
             ckpt_key=self.eval_config.ckpt.predictor.ckpt_key,
-            # ngc_job_id="2732861",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
-            # ckpt_key="iter20999",
             ckpt_root_dir=self.ckpt_root_dir
         )
         predictor_cfg = get_experiment_config_from_file(predictor_config_path)
@@ -270,20 +283,61 @@ class HierAgentAwareCVAE(Hierarchical):
         ).to(self.device).eval()
         return predictor, predictor_cfg.clone()
 
-    def get_policy(self, **kwargs):
-        planner, _ = self._get_planner()
-        predictor, _ = self._get_predictor()
-        controller, exp_cfg = self._get_controller()
-        controller = PolicyWrapper.wrap_controller(
-            controller,
-            sample=True,
-            num_action_samples=kwargs.get("num_action_samples")
+    def get_policy(self, planner=None, predictor=None, controller=None):
+        if planner is not None:
+            assert isinstance(predictor, MATrafficModel)
+            assert isinstance(planner, SpatialPlanner)
+            assert isinstance(controller, L5DiscreteVAETrafficModel)
+            exp_cfg = None
+        else:
+            planner, _ = self._get_planner()
+            predictor, _ = self._get_predictor()
+            controller, exp_cfg = self._get_controller()
+            controller = PolicyWrapper.wrap_controller(
+                controller,
+                sample=True,
+                num_action_samples=self.eval_config.policy.num_action_samples
+            )
+            exp_cfg = exp_cfg.clone()
+
+        planner = PolicyWrapper.wrap_planner(
+            planner,
+            mask_drivable=self.eval_config.policy.mask_drivable,
+            sample=False
         )
 
         sampler = HierarchicalWrapper(planner, controller)
-
         policy = SamplingPolicyWrapper(ego_action_sampler=sampler, agent_traj_predictor=predictor)
         return policy, exp_cfg
+
+
+class HPnC(PolicyComposer):
+    def get_policy(self, policy=None):
+        if policy is not None:
+            assert isinstance(policy, HierarchicalAgentAwareModel)
+            policy_cfg = None
+        else:
+            policy_ckpt_path, policy_config_path = get_checkpoint(
+                ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
+                ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+                ckpt_root_dir=self.ckpt_root_dir
+            )
+            policy_cfg = get_experiment_config_from_file(policy_config_path)
+            policy = HierarchicalAgentAwareModel.load_from_checkpoint(
+                policy_ckpt_path,
+                algo_config=policy_cfg.algo,
+                modality_shapes=self.get_modality_shapes(policy_cfg),
+            ).to(self.device).eval()
+            policy_cfg = policy_cfg.clone()
+
+        policy = PolicyWrapper.wrap_controller(
+            policy,
+            mask_drivable=self.eval_config.policy.mask_drivable,
+            sample=True,
+            num_plan_samples=self.eval_config.policy.num_plan_samples,
+            clearance=self.eval_config.policy.diversification_clearance,
+        )
+        return policy, policy_cfg
 
 
 class AgentAwareEC(Hierarchical):
@@ -291,10 +345,6 @@ class AgentAwareEC(Hierarchical):
         EC_ckpt_path, EC_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
             ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
-            # ngc_job_id="2596419",  # gc_clip_regyaw_dynUnicycle_decmlp128,128_decstateTrue_yrl1.0
-            # ckpt_key="iter120999_",
-            # ngc_job_id="2783997",  # aaplan_dynUnicycle_yrl0.1_roiFalse_gcTrue_rlayerlayer2_rlFalse
-            # ckpt_key="iter33000",
             ckpt_root_dir=self.ckpt_root_dir
         )
         EC_cfg = get_experiment_config_from_file(EC_config_path)
@@ -306,11 +356,26 @@ class AgentAwareEC(Hierarchical):
         ).to(self.device).eval()
         return EC_model, EC_cfg.clone()
 
-    def get_policy(self, **kwargs):
-        planner, _ = self._get_planner()
-        EC_model, exp_cfg = self._get_EC_predictor()
+    def get_policy(self, planner=None, predictor=None, controller=None):
+        if planner is not None:
+            assert isinstance(planner, SpatialPlanner)
+            assert isinstance(predictor, L5ECTrafficModel)
+            exp_cfg = None
+        else:
+            planner, _ = self._get_planner()
+            predictor, exp_cfg = self._get_EC_predictor()
+
         ego_sampler = SplinePlanner(self.device, N_seg=planner.algo_config.future_num_frames+1)
-        agent_planner = planner
+        agent_planner = PolicyWrapper.wrap_planner(
+            planner,
+            mask_drivable=self.eval_config.policy.mask_drivable,
+            sample=False
+        )
+
         policy = EC_sampling_controller(
-            ego_sampler=ego_sampler,EC_model=EC_model, agent_planner=agent_planner, device=self.device)
+            ego_sampler=ego_sampler,
+            EC_model=predictor,
+            agent_planner=agent_planner,
+            device=self.device
+        )
         return policy, exp_cfg

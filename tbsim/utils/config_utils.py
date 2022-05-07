@@ -24,7 +24,7 @@ def translate_l5kit_cfg(cfg: ExperimentConfig):
     return rcfg
 
 
-def get_experiment_config_from_file(file_path, locked=False):
+def get_experiment_config_from_file(file_path, locked=True):
     ext_cfg = json.load(open(file_path, "r"))
     cfg = get_registered_experiment_config(ext_cfg["registered_name"])
     cfg.update(**ext_cfg)

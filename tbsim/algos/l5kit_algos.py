@@ -571,7 +571,7 @@ class L5VAETrafficModel(pl.LightningModule):
                 ).to_dict()
             )
         else:
-            # otherwise, sample action from posterior
+            # otherwise, use prior mean to generate the sample
             action_preds = self.nets["policy"].predict(obs_dict)["predictions"]
             info = dict()
 

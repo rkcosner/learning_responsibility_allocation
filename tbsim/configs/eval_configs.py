@@ -1,4 +1,6 @@
 import numpy as np
+from copy import deepcopy
+
 from tbsim.configs.config import Dict
 
 
@@ -42,6 +44,7 @@ class EvaluationConfig(Dict):
         self.policy.pos_to_yaw = True
         self.policy.yaw_correction_speed = 1.0
         self.policy.diversification_clearance = None
+        self.policy.sample = True
 
         self.metrics.compute_analytical_metrics = True
         self.metrics.compute_learned_metrics = False
@@ -61,3 +64,17 @@ class EvaluationConfig(Dict):
         self.l5kit.num_simulation_steps = 200
         self.l5kit.skip_first_n = 1
         self.l5kit.skimp_rollout = False
+
+    def clone(self):
+        return deepcopy(self)
+
+
+class TrainTimeEvaluationConfig(EvaluationConfig):
+    def __init__(self):
+        super(TrainTimeEvaluationConfig, self).__init__()
+
+        self.num_scenes_per_batch = 4
+        self.nusc.eval_scenes = np.arange(0, 100, 5).tolist()
+        self.l5kit.eval_scenes = self.l5kit.eval_scenes[:20]
+
+        self.policy.sample = False
