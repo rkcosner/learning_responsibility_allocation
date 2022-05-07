@@ -16,7 +16,7 @@ class L5KitTrainConfig(TrainConfig):
         self.datamodule_class = "L5RasterizedDataModule"
         self.dataset_mode = "agents"
 
-        self.rollout.enabled = True
+        self.rollout.enabled = False
         self.rollout.save_video = True
         self.rollout.every_n_steps = 10000
 
