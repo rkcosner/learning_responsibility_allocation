@@ -1002,7 +1002,11 @@ class RasterizedTreeVAEModel(nn.Module):
     def forward(self, batch_inputs: dict,sample=False):
         if not sample:
             trajectories = torch.cat((batch_inputs["target_positions"], batch_inputs["target_yaws"]), dim=-1)
-            assert batch_inputs["target_positions"].shape[-2]>=self.stage*self.num_frames_per_stage
+            try:
+                assert batch_inputs["target_positions"].shape[-2]>=self.stage*self.num_frames_per_stage
+            except:
+                import pdb
+                pdb.set_trace()
         H = self.num_frames_per_stage
         if self.algo_config.goal_conditional:
             goal = self._get_goal_states(batch_inputs)

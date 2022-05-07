@@ -44,7 +44,7 @@ class EvaluationConfig(Dict):
         self.policy.diversification_clearance = None
 
         self.metrics.compute_analytical_metrics = True
-        self.metrics.compute_learned_metrics = False
+        self.metrics.compute_learned_metrics = True
 
         self.perturb.enabled = False
         self.perturb.OU.theta = 0.8

@@ -369,7 +369,7 @@ class L5RasterizedTreeVAEConfig(L5RasterizedPlanningConfig):
         self.EC_feat_dim = 64
         self.loss_weights.EC_coll_loss = 10
         self.loss_weights.deviation_loss = 0.5
-        self.loss_weights.kl_loss = 1
+        self.loss_weights.kl_loss = 10
         self.eval.mode = "sum"
 
         self.min_std = 0.1
