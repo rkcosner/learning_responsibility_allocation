@@ -53,7 +53,7 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
     policy_composers = importlib.import_module("tbsim.evaluation.policy_composers")
     composer_class = getattr(policy_composers, eval_cfg.eval_class)
     composer = composer_class(eval_cfg, device, ckpt_root_dir=eval_cfg.ckpt_root_dir)
-    policy, exp_config = composer.get_policy(**eval_cfg.policy)
+    policy, exp_config = composer.get_policy()
 
     if eval_cfg.policy.pos_to_yaw:
         policy = Pos2YawWrapper(

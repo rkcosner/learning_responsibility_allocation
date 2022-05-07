@@ -17,10 +17,8 @@ class NuscTrainConfig(TrainConfig):
         self.datamodule_class = "UnifiedDataModule"
 
         self.rollout.enabled = False
-        self.rollout.every_n_steps = 500
-        self.rollout.num_episodes = 10
-        self.rollout.num_scenes = 3
-        self.rollout.n_step_action = 10
+        self.rollout.save_video = True
+        self.rollout.every_n_steps = 2000
 
         # training config
         self.training.batch_size = 100
@@ -42,7 +40,7 @@ class NuscEnvConfig(EnvConfig):
     def __init__(self):
         super(NuscEnvConfig, self).__init__()
 
-        self.name = "avdata_nusc"
+        self.name = "nusc"
 
         # raster image size [pixels]
         self.rasterizer.raster_size = 224

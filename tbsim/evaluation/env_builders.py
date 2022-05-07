@@ -76,6 +76,7 @@ class EnvL5Builder(EnvironmentBuilder):
     def get_env(self):
         exp_cfg = self.exp_cfg.clone()
         os.environ["L5KIT_DATA_FOLDER"] = self.eval_cfg.dataset_path
+        exp_cfg.unlock()
 
         dm = LocalDataManager(None)
         l5_config = translate_l5kit_cfg(exp_cfg)
@@ -95,6 +96,8 @@ class EnvL5Builder(EnvironmentBuilder):
         exp_cfg.env.generate_agent_obs = True
         exp_cfg.env.simulation.distance_th_close = 30  # control everything within this bound
         exp_cfg.env.rasterizer.filter_agents_threshold = 0.8  # control everything that's above this confidence threshold
+
+        exp_cfg.lock()
 
         metrics = dict()
         if self.eval_cfg.metrics.compute_analytical_metrics:

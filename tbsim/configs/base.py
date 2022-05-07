@@ -1,5 +1,6 @@
 from tbsim.configs.config import Dict
 from copy import deepcopy
+from tbsim.configs.eval_configs import TrainTimeEvaluationConfig
 
 
 class TrainConfig(Dict):
@@ -16,21 +17,15 @@ class TrainConfig(Dict):
         self.save.enabled = True  # whether model saving should be enabled or disabled
         self.save.every_n_steps = 100  # save model every n epochs
         self.save.best_k = 5
-        self.save.save_best_rollout = True
+        self.save.save_best_rollout = False
         self.save.save_best_validation = True
 
-        ## rendering config ##
-        self.render.on_screen = False  # render on-screen or not
-        self.render.to_video = True  # render evaluation rollouts to videos
-
         ## evaluation rollout config ##
+        self.rollout.save_video = True
         self.rollout.enabled = False  # enable evaluation rollouts
-        self.rollout.num_episodes = 10  # number of evaluation episodes to run
-        self.rollout.num_scenes = 25  # number of parallel scenes to run (if applicable)
         self.rollout.every_n_steps = 1000  # do rollouts every @rate epochs
-        self.rollout.warm_start_n_steps = (
-            1  # number of steps to wait before starting rollouts
-        )
+        self.rollout.warm_start_n_steps = 1  # number of steps to wait before starting rollouts
+
 
         ## training config
         self.training.batch_size = 100
@@ -68,6 +63,7 @@ class ExperimentConfig(Dict):
         train_config: TrainConfig,
         env_config: EnvConfig,
         algo_config: AlgoConfig,
+        eval_config: TrainTimeEvaluationConfig = None,
         registered_name: str = None,
     ):
         """
@@ -84,6 +80,8 @@ class ExperimentConfig(Dict):
         self.train = train_config
         self.env = env_config
         self.algo = algo_config
+        self.eval = TrainTimeEvaluationConfig() if eval_config is None else eval_config
+
         # Write all results to this directory. A new folder with the timestamp will be created
         # in this directory, and it will contain three subfolders - "log", "models", and "videos".
         # The "log" directory will contain tensorboard and stdout txt logs. The "models" directory
@@ -103,5 +101,6 @@ class ExperimentConfig(Dict):
             train_config=deepcopy(self.train),
             env_config=deepcopy(self.env),
             algo_config=deepcopy(self.algo),
+            eval_config=deepcopy(self.eval),
             registered_name=self.registered_name,
         )

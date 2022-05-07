@@ -2,6 +2,9 @@ from typing import OrderedDict
 import numpy as np
 import pytorch_lightning as pl
 import torch
+import importlib
+import os
+from imageio import get_writer
 
 from tbsim.envs.base import BatchedEnv, BaseEnv
 import tbsim.utils.tensor_utils as TensorUtils
@@ -10,6 +13,8 @@ from tbsim.policies.common import RolloutAction
 from tbsim.policies.wrappers import RolloutWrapper
 from l5kit.simulation.unroll import ClosedLoopSimulator
 import tbsim.utils.geometry_utils as GeoUtils
+from tbsim.policies.wrappers import Pos2YawWrapper
+from tbsim.evaluation.env_builders import EnvNuscBuilder, EnvL5Builder
 
 
 def set_initial_states(env, obs, adjustment_plan ,device):
@@ -220,48 +225,122 @@ def rollout_episodes(
 class RolloutCallback(pl.Callback):
     def __init__(
             self,
-            env,
-            num_episodes=1,
-            n_step_action=1,
+            exp_config,
             every_n_steps=100,
             warm_start_n_steps=1,
             verbose=False,
+            save_video=False,
+            video_dir=None
     ):
-        self._env = env
-        self._num_episodes = num_episodes
         self._every_n_steps = every_n_steps
         self._warm_start_n_steps = warm_start_n_steps
         self._verbose = verbose
-        self._n_step_action = n_step_action
+        self._exp_cfg = exp_config.clone()
+        self._save_video = save_video
+        self._video_dir = video_dir
+        self.env = None
+        self._eval_cfg = self._exp_cfg.eval
 
     def print_if_verbose(self, msg):
         if self._verbose:
             print(msg)
 
-    def on_batch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+    def _get_env(self, device):
+        if self.env is not None:
+            return self.env
+        if self._eval_cfg.env == "nusc":
+            env_builder = EnvNuscBuilder(eval_config=self._eval_cfg, exp_config=self._exp_cfg, device=device)
+        elif self._eval_cfg.env == 'l5kit':
+            env_builder = EnvL5Builder(eval_config=self._eval_cfg, exp_config=self._exp_cfg, device=device)
+        else:
+            raise NotImplementedError("{} is not a valid env".format(self._eval_cfg.env))
+
+        env = env_builder.get_env()
+        return env
+
+    def _run_rollout(self, pl_module: pl.LightningModule, global_step: int):
+        policy_composers = importlib.import_module("tbsim.evaluation.policy_composers")
+
+        composer_class = getattr(policy_composers, self._eval_cfg.eval_class)
+        composer = composer_class(self._eval_cfg, pl_module.device, ckpt_root_dir=self._eval_cfg.ckpt_root_dir)
+        policy, _ = composer.get_policy(policy=pl_module)
+
+        if self._eval_cfg.policy.pos_to_yaw:
+            policy = Pos2YawWrapper(
+                policy,
+                dt=self._exp_cfg.algo.step_time,
+                yaw_correction_speed=self._eval_cfg.policy.yaw_correction_speed
+            )
+
+        if self._eval_cfg.env == "nusc":
+            rollout_policy = RolloutWrapper(agents_policy=policy)
+        elif self._eval_cfg.ego_only:
+            rollout_policy = RolloutWrapper(ego_policy=policy)
+        else:
+            rollout_policy = RolloutWrapper(ego_policy=policy, agents_policy=policy)
+
+        env = self._get_env(pl_module.device)
+
+        scene_i = 0
+        eval_scenes = self._eval_cfg.eval_scenes
+
+        result_stats = None
+
+        while scene_i < len(eval_scenes):
+            scene_indices = eval_scenes[scene_i: scene_i + self._eval_cfg.num_scenes_per_batch]
+            scene_i += self._eval_cfg.num_scenes_per_batch
+            stats, info, renderings = rollout_episodes(
+                env,
+                rollout_policy,
+                num_episodes=self._eval_cfg.num_episode_repeats,
+                n_step_action=self._eval_cfg.n_step_action,
+                render=self._save_video,
+                skip_first_n=self._eval_cfg.skip_first_n,
+                scene_indices=scene_indices,
+                start_frame_index_each_episode=self._eval_cfg.start_frame_index_each_episode,
+                seed_each_episode=self._eval_cfg.seed_each_episode,
+                horizon=self._eval_cfg.num_simulation_steps
+            )
+
+            if result_stats is None:
+                result_stats = stats
+                result_stats["scene_index"] = np.array(info["scene_index"])
+            else:
+                for k in stats:
+                    result_stats[k] = np.concatenate([result_stats[k], stats[k]], axis=0)
+                result_stats["scene_index"] = np.concatenate([result_stats["scene_index"], np.array(info["scene_index"])])
+
+            if self._save_video:
+                for ei, episode_rendering in enumerate(renderings):
+                    for i, scene_images in enumerate(episode_rendering):
+                        video_fn = "{}_{}_{}.mp4".format(global_step, info["scene_index"][i], ei)
+                        writer = get_writer(os.path.join(self._video_dir, video_fn), fps=10)
+                        print("video to {}".format(os.path.join(self._video_dir, video_fn)))
+                        for im in scene_images:
+                            writer.append_data(im)
+                        writer.close()
+        return result_stats
+
+    def on_train_batch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule, outputs, batch, batch_idx, unused=0) -> None:
         should_run = (
             trainer.global_step >= self._warm_start_n_steps
             and trainer.global_step % self._every_n_steps == 0
         )
         if should_run:
             try:
-                stats, _, _ = rollout_episodes(
-                    env=self._env,
-                    policy=RolloutWrapper(ego_policy=pl_module),
-                    num_episodes=self._num_episodes,
-                    n_step_action=self._n_step_action,
-                )
                 self.print_if_verbose(
                     "\nStep %i rollout (%i episodes): "
-                    % (trainer.global_step, self._num_episodes)
+                    % (trainer.global_step, len(self._eval_cfg.eval_scenes))
                 )
+
+                stats = self._run_rollout(pl_module, trainer.global_step)
                 for k, v in stats.items():
                     # Set on_step=True and on_epoch=False to force the logger to log stats at the step
                     # See https://github.com/PyTorchLightning/pytorch-lightning/issues/9772 for explanation
                     pl_module.log(
-                        "rollout/metrics_" + k, np.mean(v), on_step=True, on_epoch=False
+                        "rollout/" + k, np.mean(v), on_step=True, on_epoch=False
                     )
-                    self.print_if_verbose(("rollout/metrics_" + k, np.mean(v)))
+                    self.print_if_verbose(("rollout/" + k, np.mean(v)))
                 self.print_if_verbose("\n")
             except Exception as e:
                 print("Rollout failed because:")
