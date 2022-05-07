@@ -267,7 +267,7 @@ if __name__ == "__main__":
         default_config = get_registered_experiment_config(args.config_name)
     elif args.config_file is not None:
         # Update default config with external json file
-        default_config = get_experiment_config_from_file(args.config_file)
+        default_config = get_experiment_config_from_file(args.config_file, locked=False)
     else:
         raise Exception(
             "Need either a config name or a json file to create experiment config"
