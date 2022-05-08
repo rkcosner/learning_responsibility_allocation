@@ -241,12 +241,13 @@ class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
         self.context_size = (30, 30)
         self.goal_conditional = True
         self.goal_feature_dim = 32
-        self.decoder.layer_dims = (128, 128)
+        self.decoder.layer_dims = (128, 128, 128)
 
         self.use_rotated_roi = False
         self.use_transformer = False
         self.roi_layer_key = "layer2"
         self.use_GAN = False
+        self.history_conditioning = True
 
         self.loss_weights.lane_reg_loss = 0.5
         self.loss_weights.GAN_loss = 0.5
