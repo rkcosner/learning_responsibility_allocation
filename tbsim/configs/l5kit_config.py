@@ -233,7 +233,7 @@ class SpatialPlannerConfig(L5RasterizedPlanningConfig):
 class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(MARasterizedPlanningConfig, self).__init__()
-        self.eval_class = None
+        self.eval_class = "HierAgentAware"
 
         self.name = "ma_rasterized"
         self.agent_feature_dim = 128

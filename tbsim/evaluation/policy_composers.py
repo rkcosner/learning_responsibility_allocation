@@ -195,13 +195,17 @@ class Hierarchical(PolicyComposer):
 
     def get_policy(self, planner=None, controller=None):
         if planner is not None:
-            assert isinstance(controller, MATrafficModel)
             assert isinstance(planner, SpatialPlanner)
+        else:
+            planner, exp_cfg = self._get_planner()
+
+        if controller is not None:
+            assert isinstance(controller, MATrafficModel)
             exp_cfg = None
         else:
-            planner, _ = self._get_planner()
             controller, exp_cfg = self._get_controller()
             exp_cfg = exp_cfg.clone()
+
         planner = PolicyWrapper.wrap_planner(
             planner,
             mask_drivable=self.eval_config.policy.mask_drivable,
@@ -229,11 +233,14 @@ class HierAgentAware(Hierarchical):
 
     def get_policy(self, planner=None, predictor=None, controller=None):
         if planner is not None:
-            assert isinstance(predictor, MATrafficModel)
             assert isinstance(planner, SpatialPlanner)
-            exp_cfg = None
         else:
             planner, _ = self._get_planner()
+
+        if predictor is not None:
+            assert isinstance(predictor, MATrafficModel)
+            exp_cfg = None
+        else:
             predictor, exp_cfg = self._get_predictor()
             exp_cfg = exp_cfg.clone()
 
