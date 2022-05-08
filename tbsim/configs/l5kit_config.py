@@ -247,7 +247,7 @@ class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
         self.use_transformer = False
         self.roi_layer_key = "layer2"
         self.use_GAN = False
-        self.history_conditioning = True
+        self.history_conditioning = False
 
         self.loss_weights.lane_reg_loss = 0.5
         self.loss_weights.GAN_loss = 0.5
