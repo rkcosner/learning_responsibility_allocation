@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from torchvision.models.resnet import resnet18, resnet50
 from torchvision.models.feature_extraction import create_feature_extractor
 from torchvision.ops import RoIAlign
+from tbsim.models.Transformer import SimpleTransformer
 
 from tbsim.utils.tensor_utils import reshape_dimensions, flatten
 import tbsim.utils.tensor_utils as TensorUtils
@@ -897,12 +898,13 @@ class ConditionEncoder(nn.Module):
             condition_dim: int,
             mlp_layer_dims: tuple = (128, 128),
             goal_encoder=None,
-            rnn_hidden_size: int = 100
+            agent_traj_encoder=None
     ) -> None:
         super(ConditionEncoder, self).__init__()
         self.map_encoder = map_encoder
         self.trajectory_shape = trajectory_shape
         self.goal_encoder = goal_encoder
+        self.agent_traj_encoder = agent_traj_encoder
 
         # TODO: history encoder
         # self.hist_lstm = nn.LSTM(trajectory_shape[-1], hidden_size=rnn_hidden_size, batch_first=True)
@@ -920,6 +922,9 @@ class ConditionEncoder(nn.Module):
         if self.goal_encoder is not None:
             goal_feat = self.goal_encoder(condition_inputs["goal"])
             c_feat = torch.cat([c_feat, goal_feat], dim=-1)
+        if self.agent_traj_encoder is not None and "agent_traj" in condition_inputs:
+            agent_traj_feat = self.agent_traj_encoder(condition_inputs["agent_traj"])
+            c_feat = torch.cat([c_feat, agent_traj_feat], dim=-1)
         return c_feat
 
 
@@ -980,6 +985,37 @@ class ECEncoder(nn.Module):
         c_feat = self.mlp(c_feat)
         
         return c_feat
+
+class AgentTrajEncoder(nn.Module):
+    """Condition Encoder (x -> c) for CVAE"""
+
+    def __init__(
+            self,
+            trajectory_shape: tuple,  # [T, D]
+            feature_dim: int,
+            mlp_layer_dims: tuple = (128, 128),
+            rnn_hidden_size: int = 100,
+            use_transformer = True,
+    ) -> None:
+        super(AgentTrajEncoder, self).__init__()
+        self.trajectory_shape = trajectory_shape
+        self.feature_dim = feature_dim
+        self.traj_encoder = RNNTrajectoryEncoder(trajectory_shape[-1], rnn_hidden_size, feature_dim=feature_dim, mlp_layer_dims=mlp_layer_dims)
+        if use_transformer:
+            self.transformer = SimpleTransformer(
+                src_dim=feature_dim)
+        else:
+            self.transformer = None
+
+    def forward(self, agent_trajs):
+        bs,Na,T,D = agent_trajs.shape
+        feat = self.traj_encoder(agent_trajs.reshape(-1,T,D)).reshape(bs,Na,-1)
+        if self.transformer is not None:
+            agent_pos = agent_trajs[:,:,0,:2]
+            avails = (agent_pos!=0).any(-1)
+            feat = self.transformer(feat,avails,agent_pos)
+        
+        return torch.max(feat,1)[0]
 
 
 

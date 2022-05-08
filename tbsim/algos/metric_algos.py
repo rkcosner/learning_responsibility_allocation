@@ -10,7 +10,8 @@ from tbsim.models.learned_metrics import PermuteEBM
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.utils.batch_utils import batch_utils
 from tbsim.utils.geometry_utils import transform_points_tensor
-from tbsim.models.base_models import RasterizedMapUNet
+from tbsim.models.base_models import RasterizedMapUNet, SplitMLP
+from tbsim.models.Transformer import SimpleTransformer
 import tbsim.algos.algo_utils as AlgoUtils
 
 
@@ -121,12 +122,20 @@ class OccupancyMetric(pl.LightningModule):
         super(OccupancyMetric, self).__init__()
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
+        self.agent_future_cond = algo_config.agent_future_cond.enabled
+        if algo_config.agent_future_cond.enabled:
+            self.agent_future_every_n_frame = algo_config.agent_future_cond.every_n_frame
+            self.future_num_frames = int(np.floor(algo_config.future_num_frames/self.agent_future_every_n_frame))
+            C,H,W = modality_shapes["image"]
+            modality_shapes["image"] = (C+self.future_num_frames,H,W)
 
         self.nets["policy"] = RasterizedMapUNet(
             model_arch=algo_config.model_architecture,
             input_image_shape=modality_shapes["image"],  # [C, H, W]
             output_channel=algo_config.future_num_frames
         )
+
+          
 
     @property
     def checkpoint_monitor_keys(self):
@@ -137,8 +146,44 @@ class OccupancyMetric(pl.LightningModule):
             keys["valCELoss"] = "val/losses_pixel_ce_loss"
         return keys
 
+    def rasterize_agent_future(self,obs_dict):
+
+        b, t_h, h, w = obs_dict["image"].shape  # [B, C, H, W]
+        t_f = self.future_num_frames
+
+        # create spatial supervisions
+        agent_positions = obs_dict["all_other_agents_future_positions"][:,:,::self.agent_future_every_n_frame]
+
+        pos_raster = transform_points_tensor(
+            agent_positions.reshape(b,-1,2),
+            obs_dict["raster_from_agent"].float()
+        ).reshape(b,-1,t_f,2).long()  # [B, T, 2]
+        # make sure all pixels are within the raster image
+        pos_raster[..., 0] = pos_raster[..., 0].clip(0, w - 1e-5)
+        pos_raster[..., 1] = pos_raster[..., 1].clip(0, h - 1e-5)
+
+        # compute flattened pixel location
+        hist_image = torch.zeros([b,t_f,h*w],dtype=obs_dict["image"].dtype,device=obs_dict["image"].device)
+        raster_hist_pos_flat = pos_raster[..., 1] * w + pos_raster[..., 0]  # [B, T, A]
+        raster_hist_pos_flat = (raster_hist_pos_flat * obs_dict["all_other_agents_future_availability"][:,:,::self.agent_future_every_n_frame]).long()
+
+        hist_image.scatter_(dim=2, index=raster_hist_pos_flat.transpose(1,2), src=torch.ones_like(hist_image))  # mark other agents with -1
+
+        hist_image[:, :, 0] = 0  # correct the 0th index from invalid positions
+        hist_image[:, :, -1] = 0  # correct the maximum index caused by out of bound locations
+
+        return hist_image.reshape(b, t_f, h, w)
+        
+
     def forward(self, obs_dict, mask_drivable=False, num_samples=None, clearance=None):
-        pred_map = self.nets["policy"](obs_dict["image"])
+        if self.agent_future_cond:
+            hist_image = self.rasterize_agent_future(obs_dict)
+            image = torch.cat([obs_dict["image"],hist_image],1)
+        else:
+            image = obs_dict["image"]
+        
+        pred_map = self.nets["policy"](image)
+
         return {
             "occupancy_map": pred_map
         }

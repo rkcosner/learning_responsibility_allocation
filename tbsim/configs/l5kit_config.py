@@ -297,10 +297,12 @@ class EBMMetricConfig(L5RasterizedPlanningConfig):
 class OccupancyMetricConfig(L5RasterizedPlanningConfig):
     def __init__(self):
         super(OccupancyMetricConfig, self).__init__()
-        self.eval_class = None
+        self.eval_class = "metric"
         self.name = "occupancy"
         self.loss_weights.pixel_bce_loss = 0.0
         self.loss_weights.pixel_ce_loss = 1.0
+        self.agent_future_cond.enabled = True
+        self.agent_future_cond.every_n_frame = 5
 
 
 class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
@@ -350,6 +352,10 @@ class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
         self.loss_weights.EC_coll_loss = 10
         self.loss_weights.deviation_loss = 0.5
         self.eval.mode = "mean"
+
+        self.agent_future_cond.enabled=True
+        self.agent_future_cond.feature_dim = 32
+        self.agent_future_cond.transformer =True
 
         self.min_std = 0.1
 
