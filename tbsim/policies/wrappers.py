@@ -98,7 +98,8 @@ class SamplingPolicyWrapper(object):
             raw_types=obs["all_other_agents_types"],
             raster_from_agent=obs["raster_from_agent"],
             dis_map=dis_map,
-            weights={"collision_weight": 1.0, "lane_weight": 1.0},
+            log_likelihood=torch.log(action_info["plan_info"]["pred_probs"]),
+            weights=kwargs["cost_weights"],
         )
 
         ego_trajs_best = torch.gather(

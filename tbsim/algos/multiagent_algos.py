@@ -408,8 +408,13 @@ class HierarchicalAgentAwareModel(pl.LightningModule):
             yaws=plan_dict["predictions"]["yaws"].permute(0, 2, 1, 3),  # [B, num_sample, T, 1]
             availabilities=plan_dict["availabilities"].permute(0, 2, 1)  # [B, num_sample, T]
         )
+        plan_info = dict(
+            location_map=preds["location_map"],
+            plan_samples=plan_samples,
+            pred_probs=preds["pred_probs"]
+        )
 
-        return plan_samples, dict(location_map=preds["location_map"], plan_samples=plan_samples, pred_logits=preds["pred_logits"])
+        return plan_samples, plan_info
 
     def get_action(self, obs_dict, **kwargs):
         """If using the model as an actor (generating actions)"""
@@ -466,11 +471,8 @@ class HierarchicalAgentAwareModel(pl.LightningModule):
             raw_types=obs_dict["all_other_agents_types"],
             raster_from_agent=obs_dict["raster_from_agent"],
             dis_map=dis_map,
-            # likelihood=plan_info["plan_logits"],
-            weights={
-                "collision_weight": kwargs["collision_weight"],
-                "lane_weight": kwargs["lane_weight"]
-            },
+            log_likelihood=torch.log(plan_info["pred_probs"]),
+            weights=kwargs["cost_weights"],
         )
 
         action_trajs_best = torch.gather(

@@ -45,6 +45,10 @@ class EvaluationConfig(Dict):
         self.policy.yaw_correction_speed = 1.0
         self.policy.diversification_clearance = None
         self.policy.sample = True
+        self.policy.cost_weights.collision_weight = 1.0
+        self.policy.cost_weights.lane_weight = 1.0
+        self.policy.cost_weights.likelihood_weight = 0.0  # 0.1
+        self.policy.cost_weights.progress_weight = 0.0  # 0.005
 
         self.metrics.compute_analytical_metrics = True
         self.metrics.compute_learned_metrics = False

@@ -256,6 +256,7 @@ class HierAgentAware(Hierarchical):
         sampler = HierarchicalSamplerWrapper(plan_sampler, controller)
 
         policy = SamplingPolicyWrapper(ego_action_sampler=sampler, agent_traj_predictor=predictor)
+        policy = PolicyWrapper.wrap_controller(policy, cost_weights=self.eval_config.policy.cost_weights)
         return policy, exp_cfg
 
 
@@ -342,8 +343,7 @@ class HPnC(PolicyComposer):
             mask_drivable=self.eval_config.policy.mask_drivable,
             num_samples=self.eval_config.policy.num_plan_samples,
             clearance=self.eval_config.policy.diversification_clearance,
-            lane_weight=1.0,
-            collision_weight=1.0
+            cost_weights=self.eval_config.policy.cost_weights
         )
         return policy, policy_cfg
 

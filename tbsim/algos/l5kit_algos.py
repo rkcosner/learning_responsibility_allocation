@@ -288,7 +288,7 @@ class SpatialPlanner(pl.LightningModule):
             location_prob_map = location_prob_map * drivable_map.float()
 
         # decode map as predictions
-        pixel_pred, res_pred, yaw_pred, pred_logit = AlgoUtils.decode_spatial_prediction(
+        pixel_pred, res_pred, yaw_pred, pred_prob = AlgoUtils.decode_spatial_prediction(
             prob_map=location_prob_map,
             residual_yaw_map=pred_map[:, 1:],
             num_samples=num_samples,
@@ -306,7 +306,7 @@ class SpatialPlanner(pl.LightningModule):
                 positions=pos_pred,
                 yaws=yaw_pred
             ),
-            confidence=torch.sigmoid(pred_logit),
+            pred_probs=pred_prob,
             spatial_prediction=pred_map,
             location_map=location_map,
             location_prob_map=location_prob_map
@@ -439,7 +439,7 @@ class SpatialPlanner(pl.LightningModule):
         plan = TensorUtils.map_tensor(plan_samples.to_dict(), lambda x: x[:, 0])
         plan = Plan.from_dict(plan)
 
-        return plan, dict(location_map=preds["location_map"], plan_samples=plan_samples)
+        return plan, dict(location_map=preds["location_map"], plan_samples=plan_samples, pred_probs=preds["pred_probs"])
 
 
 class L5VAETrafficModel(pl.LightningModule):
