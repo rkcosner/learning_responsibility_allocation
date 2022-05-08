@@ -239,6 +239,7 @@ class RolloutCallback(pl.Callback):
         self._save_video = save_video
         self._video_dir = video_dir
         self.env = None
+        self.policy = None
         self._eval_cfg = self._exp_cfg.eval
 
     def print_if_verbose(self, msg):
@@ -256,14 +257,22 @@ class RolloutCallback(pl.Callback):
             raise NotImplementedError("{} is not a valid env".format(self._eval_cfg.env))
 
         env = env_builder.get_env()
-        return env
+        self.env = env
+        return self.env
 
-    def _run_rollout(self, pl_module: pl.LightningModule, global_step: int):
+    def _get_policy(self, pl_module: pl.LightningModule):
+        if self.policy is not None:
+            return self.policy
         policy_composers = importlib.import_module("tbsim.evaluation.policy_composers")
 
         composer_class = getattr(policy_composers, self._eval_cfg.eval_class)
         composer = composer_class(self._eval_cfg, pl_module.device, ckpt_root_dir=self._eval_cfg.ckpt_root_dir)
-        policy, _ = composer.get_policy(policy=pl_module)
+        print("Building composer {}".format(self._eval_cfg.eval_class))
+
+        if self._exp_cfg.algo.name == "ma_rasterized":
+            policy, _ = composer.get_policy(predictor=pl_module)
+        else:
+            policy, _ = composer.get_policy(policy=pl_module)
 
         if self._eval_cfg.policy.pos_to_yaw:
             policy = Pos2YawWrapper(
@@ -279,6 +288,11 @@ class RolloutCallback(pl.Callback):
         else:
             rollout_policy = RolloutWrapper(ego_policy=policy, agents_policy=policy)
 
+        self.policy = rollout_policy
+        return self.policy
+
+    def _run_rollout(self, pl_module: pl.LightningModule, global_step: int):
+        rollout_policy = self._get_policy(pl_module)
         env = self._get_env(pl_module.device)
 
         scene_i = 0

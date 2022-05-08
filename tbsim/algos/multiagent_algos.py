@@ -41,6 +41,7 @@ class MATrafficModel(pl.LightningModule):
             goal_feature_dim=algo_config.goal_feature_dim,
             use_rotated_roi=algo_config.use_rotated_roi,
             use_transformer=algo_config.use_transformer,
+            history_conditioning=algo_config.history_conditioning,
             roi_layer_key=algo_config.roi_layer_key,
             use_gan=algo_config.use_GAN
         )
@@ -301,6 +302,7 @@ class HierarchicalAgentAwareModel(pl.LightningModule):
             goal_feature_dim=algo_config.goal_feature_dim,
             use_rotated_roi=algo_config.use_rotated_roi,
             use_transformer=algo_config.use_transformer,
+            history_conditioning=algo_config.history_conditioning,
             roi_layer_key=algo_config.roi_layer_key,
             use_gan=algo_config.use_GAN
         )

@@ -44,6 +44,7 @@ class AgentAwareRasterizedModel(nn.Module):
             weights_scaling: tuple = (1.0, 1.0, 1.0),
             use_transformer=True,
             use_rotated_roi=True,
+            history_conditioning=False,
             use_gan=False,
             roi_layer_key="layer4"
     ) -> None:
@@ -60,8 +61,9 @@ class AgentAwareRasterizedModel(nn.Module):
             roi_layer_key=roi_layer_key
         )
         self.use_rotated_roi = use_rotated_roi
-
         self.goal_conditional = goal_conditional
+        self.history_conditioning = history_conditioning
+
         goal_dim = 0
         if self.goal_conditional:
             self.goal_encoder = base_models.MLP(
@@ -71,8 +73,18 @@ class AgentAwareRasterizedModel(nn.Module):
             )
             goal_dim = goal_feature_dim
 
+        hist_feat_dim = 0
+        if history_conditioning:
+            hist_feat_dim = 16
+            self.history_encoder = base_models.RNNTrajectoryEncoder(
+                trajectory_dim=3,
+                rnn_hidden_size=100,
+                mlp_layer_dims=(128, 128),
+                feature_dim=hist_feat_dim
+            )
+
         self.ego_decoder = base_models.MLPTrajectoryDecoder(
-            feature_dim=agent_feature_dim + global_feature_dim + goal_dim,
+            feature_dim=agent_feature_dim + global_feature_dim + goal_dim + hist_feat_dim,
             state_dim=3,
             num_steps=future_num_frames,
             dynamics_type=dynamics_type,
@@ -81,9 +93,10 @@ class AgentAwareRasterizedModel(nn.Module):
             network_kwargs=decoder_kwargs
         )
 
+
         # other_dyn_type = None if disable_dynamics_for_other_agents else dynamics_type
         self.agents_decoder = base_models.MLPTrajectoryDecoder(
-            feature_dim=agent_feature_dim + global_feature_dim,
+            feature_dim=agent_feature_dim + global_feature_dim + hist_feat_dim,
             state_dim=3,
             num_steps=future_num_frames,
             dynamics_type=dynamics_type,
@@ -284,6 +297,11 @@ class AgentAwareRasterizedModel(nn.Module):
         all_feats = all_feats.reshape(b, a, -1)
         all_feats = torch.cat(
             (all_feats, TensorUtils.unsqueeze_expand_at(global_feats, a, 1)), dim=-1)
+
+        if self.history_conditioning:
+            hist_traj = torch.cat((states_all["history_positions"], states_all["history_yaws"]), dim=-1)
+            hist_feats = TensorUtils.time_distributed(hist_traj, self.history_encoder)
+            all_feats = torch.cat((all_feats, hist_feats), dim=-1)
 
         # optionally pass information using transformer
         if self.transformer is not None:
