@@ -104,8 +104,7 @@ class SamplingPolicyWrapper(object):
         ego_trajs_best = torch.gather(
             ego_trajs,
             dim=1,
-            index=action_idx[:, None, None,
-                  None].expand(-1, 1, *ego_trajs.shape[2:])
+            index=action_idx[:, None, None, None].expand(-1, 1, *ego_trajs.shape[2:])
         ).squeeze(1)
 
         ego_actions = Action(

@@ -340,9 +340,10 @@ class HPnC(PolicyComposer):
         policy = PolicyWrapper.wrap_controller(
             policy,
             mask_drivable=self.eval_config.policy.mask_drivable,
-            sample=True,
-            num_plan_samples=self.eval_config.policy.num_plan_samples,
+            num_samples=self.eval_config.policy.num_plan_samples,
             clearance=self.eval_config.policy.diversification_clearance,
+            lane_weight=1.0,
+            collision_weight=1.0
         )
         return policy, policy_cfg
 
