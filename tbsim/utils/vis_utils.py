@@ -134,26 +134,6 @@ def render_state_avdata(
         fill_color=COLORS["ego_fill"]
     )
 
-    # neigh_pos = batch["neigh_hist"][batch_idx, :, -1, :2]
-    # neigh_yaw = np.arctan2(batch["neigh_hist"][batch_idx, :, -1, -2], batch["neigh_hist"][batch_idx, :, -1, -1])
-    # neigh_extent = batch["neigh_hist_extents"][batch_idx, :, -1, :2]
-    # valid_mask = np.bitwise_not(np.any(np.isnan(neigh_pos), axis=-1))
-    # neigh_pos = neigh_pos[valid_mask]
-    # neigh_yaw = neigh_yaw[valid_mask]
-    # neigh_extent = neigh_extent[valid_mask]
-    # neigh_yaw = neigh_yaw[:, None]
-    #
-    # if neigh_pos.shape[0] > 0:
-    #     image = draw_agent_boxes(
-    #         image,
-    #         pos=neigh_pos,
-    #         yaw=neigh_yaw,
-    #         extent=neigh_extent,
-    #         raster_from_agent=trans_mat,
-    #         outline_color=COLORS["agent_contour"],
-    #         fill_color=COLORS["agent_fill"]
-    #     )
-
     scene_index = batch["scene_index"][batch_idx]
     agent_scene_index= scene_index == batch["scene_index"]
     agent_scene_index[batch_idx] = 0  # don't plot ego
@@ -198,7 +178,7 @@ def render_state_avdata(
 
 
 def get_state_image_with_boxes_l5kit(ego_obs, agents_obs, rasterizer):
-    yaw = 0  # ego_obs["yaw"]
+    yaw = ego_obs["yaw"]  # set to 0 to fix the video
     state_im = rasterizer.rasterize(
         ego_obs["centroid"],
         yaw
