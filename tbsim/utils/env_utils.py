@@ -165,16 +165,20 @@ def rollout_episodes(
                 else:
                     obs_torch = obs
 
+            with timers.timed("network"):
+                action = policy.get_action(obs_torch, step_index=counter)
+
+
             if counter < skip_first_n:
-                # skip the first N steps to warm up environment state (velocity, etc.)
-                env.step(env.get_gt_action(obs), num_steps_to_take=1, render=False)
+                # use GT action for the first N steps to warm up environment state (velocity, etc.)
+                gt_action = env.get_gt_action(obs)
+                action.ego = gt_action.ego
+                action.agents = gt_action.agents
+                env.step(action, num_steps_to_take=1, render=False)
                 if adjustment_plan is not None:
                     set_initial_states(env, obs, adjustment_plan ,device)
-                # env.step(env.get_gt_action(obs), num_steps_to_take=1, render=False)
                 counter += 1
             else:
-                with timers.timed("network"):
-                    action = policy.get_action(obs_torch, step_index=counter)
                 with timers.timed("env_step"):
                     ims = env.step(
                         action, num_steps_to_take=n_step_action, render=render

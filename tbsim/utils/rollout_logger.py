@@ -26,16 +26,25 @@ class RolloutLogger(object):
         return combined
 
     def _combine_action(self, action: RolloutAction):
-        combined = dict()
+        combined = dict(action=dict())
         if action.has_ego:
-            combined.update(action.ego.to_dict())
+            combined["action"] = action.ego.to_dict()
+            if action.ego_info is not None and "action_samples" in action.ego_info:
+                combined["action_samples"] = action.ego_info["action_samples"]
         if action.has_agents:
             agents_action = action.agents.to_dict()
             for k in agents_action:
-                if k in combined:
-                    combined[k] = np.concatenate((combined[k], agents_action[k]), axis=0)
+                if k in combined["action"]:
+                    combined["action"][k] = np.concatenate((combined["action"][k], agents_action[k]), axis=0)
                 else:
-                    combined[k] = agents_action[k]
+                    combined["action"][k] = agents_action[k]
+            if action.agents_info is not None and "action_samples" in action.agents_info:
+                samples = action.agents_info["action_samples"]
+                for k in samples:
+                    if k in combined["action_samples"]:
+                        combined["action_samples"][k] = np.concatenate((combined["action_samples"][k], samples[k]), axis=0)
+                    else:
+                        combined["action_samples"][k] = samples[k]
         return combined
 
     def _maybe_initialize(self, obs):
@@ -71,8 +80,12 @@ class RolloutLogger(object):
         ]
 
         state = {k: obs[k] for k in obs_keys}
-        state["action_positions"] = action["positions"][:, [0]]
-        state["action_yaws"] = action["yaws"][:, [0]]
+        state["action_positions"] = action["action"]["positions"][:, [0]]
+        state["action_yaws"] = action["action"]["yaws"][:, [0]]
+        if "action_samples" in action:
+            # only collect up to 10 samples to save space
+            state["action_sample_positions"] = action["action_samples"]["positions"][:, :10]
+            state["action_sample_yaws"] = action["action_samples"]["yaws"][:, :10]
 
         for si in self._scene_indices:
             scene_mask = np.where(si == obs["scene_index"])[0]
@@ -108,12 +121,17 @@ class RolloutLogger(object):
         if self._serialized_scene_buffer is not None:
             return self._serialized_scene_buffer
 
+        buffer_len = None
         serialized = dict()
         for si in self._scene_buffer:
             serialized[si] = dict()
             for k in self._scene_buffer[si]:
                 bf = [e[:, None] for e in self._scene_buffer[si][k]]
                 serialized[si][k] = np.concatenate(bf, axis=1)
+                if buffer_len is None:
+                    buffer_len = serialized[si][k].shape[1]
+                assert serialized[si][k].shape[1] == buffer_len
+
         self._serialized_scene_buffer = serialized
         return deepcopy(self._serialized_scene_buffer)
 
@@ -138,6 +156,6 @@ class RolloutLogger(object):
     def log_step(self, obs, action: RolloutAction):
         combined_obs = self._combine_obs(obs)
         combined_action = self._combine_action(action)
-        assert combined_obs["scene_index"].shape[0] == combined_action["positions"].shape[0]
+        assert combined_obs["scene_index"].shape[0] == combined_action["action"]["positions"].shape[0]
         self._maybe_initialize(combined_obs)
         self._append_buffer(combined_obs, combined_action)

@@ -484,17 +484,16 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                     actions_world_d["agents_info"], lambda x: x[active_agent_index]
                 )
 
-            actions_world_d = TensorUtils.map_ndarray(
-                    actions_world_d, lambda x: x[:, step_i:])
+            actions_world_d["agents"] = TensorUtils.map_ndarray(actions_world_d["agents"], lambda x: x[:, step_i:])
+            actions_world_d["ego"] = TensorUtils.map_ndarray(actions_world_d["ego"], lambda x: x[:, step_i:])
+
             if actions.has_agents:
                 if len(newly_added)>0:
                     T = actions_world_d["agents"]["positions"].shape[1]
                     actions_world_d["agents"]["positions"][newly_added,:T] = obs["agents"]["target_positions"][newly_added,:T]
                     actions_world_d["agents"]["yaws"][newly_added,:T] = obs["agents"]["target_yaws"][newly_added,:T]
-            step_actions_world = RolloutAction.from_dict(
-                actions_world_d
-            )
 
+            step_actions_world = RolloutAction.from_dict(actions_world_d)
 
             step_actions = step_actions_world.transform(
                 ego_trans_mats=obs["ego"]["agent_from_world"],
@@ -503,6 +502,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                 agents_rot_rads=- obs["agents"]["yaw"][..., None,
                                                        None] if self.generate_agent_obs else None
             )
+
             if render:
                 if step_actions.ego_info is not None and "plan_info" in step_actions.ego_info:
                     step_actions.ego_info["plan_info"] = actions.ego_info["plan_info"]
