@@ -5,6 +5,7 @@ import json
 import random
 import yaml
 import importlib
+from collections import Counter
 
 import os
 import torch
@@ -147,9 +148,14 @@ def dump_episode_buffer(buffer, scene_index, h5_path):
     import h5py
     h5_file = h5py.File(h5_path, "a")
 
+    ep_count = Counter()
     for si, scene_buffer in zip(scene_index, buffer):
+        # TODO: fix this hack
+        # Postfix scene index with episode count (scene may repeat with multiple episodes)
+        ep_i = ep_count[si]
+        ep_count[si] += 1
         for mk in scene_buffer:
-            h5key = "/{}/{}".format(si, mk)
+            h5key = "/{}_{}/{}".format(si, ep_i, mk)
             h5_file.create_dataset(h5key, data=scene_buffer[mk])
     h5_file.close()
     print("scene {} written to {}".format(scene_index, h5_path))
