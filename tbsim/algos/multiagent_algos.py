@@ -411,7 +411,7 @@ class HierarchicalAgentAwareModel(pl.LightningModule):
         plan_info = dict(
             location_map=preds["location_map"],
             plan_samples=plan_samples,
-            pred_probs=preds["pred_probs"]
+            log_likelihood=preds["log_likelihood"]
         )
 
         return plan_samples, plan_info
@@ -471,7 +471,7 @@ class HierarchicalAgentAwareModel(pl.LightningModule):
             raw_types=obs_dict["all_other_agents_types"],
             raster_from_agent=obs_dict["raster_from_agent"],
             dis_map=dis_map,
-            log_likelihood=torch.log(plan_info["pred_probs"]),
+            log_likelihood=plan_info["log_likelihood"],
             weights=kwargs["cost_weights"],
         )
 
@@ -486,7 +486,7 @@ class HierarchicalAgentAwareModel(pl.LightningModule):
 
         action_info = dict(
             plan_samples=plan_info["plan_samples"].to_dict(),
-            location_map=plan_info["location_map"],
+            plan_info=dict(location_map=plan_info["location_map"]),
             action_samples=action_samples.to_dict()
         )
         return ego_actions, action_info
