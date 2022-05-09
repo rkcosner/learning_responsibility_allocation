@@ -167,7 +167,7 @@ def rollout_episodes(
 
             if counter < skip_first_n:
                 # skip the first N steps to warm up environment state (velocity, etc.)
-                env.step(RolloutAction(), num_steps_to_take=1, render=False)
+                env.step(env.get_gt_action(obs), num_steps_to_take=1, render=False)
                 if adjustment_plan is not None:
                     set_initial_states(env, obs, adjustment_plan ,device)
                 # env.step(env.get_gt_action(obs), num_steps_to_take=1, render=False)
