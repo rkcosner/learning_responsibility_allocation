@@ -211,6 +211,10 @@ class GAN(PolicyComposer):
                 modality_shapes=self.get_modality_shapes(policy_cfg),
             ).to(self.device).eval()
             policy_cfg = policy_cfg.clone()
+        policy = PolicyWrapper.wrap_controller(
+            policy,
+            num_action_samples=self.eval_config.policy.num_action_samples
+        )
         return policy, policy_cfg
 
 
