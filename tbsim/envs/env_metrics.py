@@ -294,8 +294,8 @@ class CriticalFailure(EnvMetrics):
             self._agent_track_id = state_info["track_id"]
 
         met_all = dict(
-            coll=OffRoadRate.compute_per_step(state_info, all_scene_index),
-            offroad=CollisionRate.compute_per_step(state_info, all_scene_index)[0]["coll_any"]
+            offroad=OffRoadRate.compute_per_step(state_info, all_scene_index),
+            coll=CollisionRate.compute_per_step(state_info, all_scene_index)[0]["coll_any"]
         )
 
         # reassign metrics according to the track id of the initial state (in case some agents go missing)
