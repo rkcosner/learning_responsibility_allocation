@@ -170,7 +170,17 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         return self._num_total_scenes
 
     def get_info(self):
+        sim_buffer = self.logger.get_serialized_scene_buffer()
+        gt_buffer = self.gt_logger.get_serialized_scene_buffer()
+        joint_buffer = sim_buffer
+        for si in gt_buffer:
+            for k in gt_buffer[si]:
+                joint_buffer[si]["gt_{}".format(k)] = gt_buffer[si][k]
+
+        joint_buffer = [joint_buffer[k] for k in self.current_scene_indices]
+
         return {
+            "buffer": joint_buffer,
             "scene_index": self.current_scene_indices,
             "experience": self.get_episode_experience()
         }
@@ -365,8 +375,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
             elif k.startswith("agents"):
                 v.add_step(obs["agents"], self.current_scene_indices)
             elif k.startswith("all"):
-                v.add_step(self.combine_observations(
-                    obs), self.current_scene_indices)
+                v.add_step(self.combine_observations(obs), self.current_scene_indices)
             else:
                 raise KeyError("Invalid metrics name {}".format(k))
 

@@ -149,9 +149,8 @@ def dump_episode_buffer(buffer, scene_index, h5_path):
 
     for si, scene_buffer in zip(scene_index, buffer):
         for mk in scene_buffer:
-            for k in scene_buffer[mk]:
-                h5key = "/{}/{}/{}".format(si, mk, k)
-                h5_file.create_dataset(h5key, data=scene_buffer[mk][k])
+            h5key = "/{}/{}".format(si, mk)
+            h5_file.create_dataset(h5key, data=scene_buffer[mk])
     h5_file.close()
     print("scene {} written to {}".format(scene_index, h5_path))
 
@@ -306,7 +305,7 @@ if __name__ == "__main__":
         skimp_rollout = False
         compute_metrics = True
     elif args.mode == "evaluate_rollout":
-        data_to_disk = False
+        data_to_disk = True
         skimp_rollout = False
         compute_metrics = True
 

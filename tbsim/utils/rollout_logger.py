@@ -58,7 +58,18 @@ class RolloutLogger(object):
         """
         self._serialized_scene_buffer = None  # need to re-serialize
 
-        obs_keys = ["centroid", "yaw", "extent", "raster_from_agent", "world_from_agent", "scene_index", "track_id"]
+        # TODO: move this to __init__ as arg
+        obs_keys = [
+            "centroid",
+            "yaw",
+            "extent",
+            "raster_from_agent",
+            "world_from_agent",
+            "raster_from_world",
+            "scene_index",
+            "track_id"
+        ]
+
         state = {k: obs[k] for k in obs_keys}
         state["action_positions"] = action["positions"][:, [0]]
         state["action_yaws"] = action["yaws"][:, [0]]
@@ -104,7 +115,7 @@ class RolloutLogger(object):
                 bf = [e[:, None] for e in self._scene_buffer[si][k]]
                 serialized[si][k] = np.concatenate(bf, axis=1)
         self._serialized_scene_buffer = serialized
-        return self._serialized_scene_buffer
+        return deepcopy(self._serialized_scene_buffer)
 
     def get_trajectory(self):
         """Get per-scene rollout trajectory in the world coordinate system"""

@@ -22,6 +22,7 @@ setup(
         "torch==1.10.2",
         "torchvision==0.11.3",
         "pyemd",
+        "h5py",
         "imageio-ffmpeg",
         "torchtext",  # weird pytorch-lightning dependency bug
     ],
