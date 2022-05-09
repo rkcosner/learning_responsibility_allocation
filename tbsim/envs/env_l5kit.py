@@ -73,9 +73,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         self._done = False
         self._prediction_only = prediction_only
 
-        self._ego_states = dict()
-        self._agents_states = dict()
-
         self.logger = None
         self.gt_logger = None
 
@@ -131,14 +128,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         for v in self._metrics.values():
             v.reset()
-
-        for k in self._current_scene_indices:
-            self._ego_states[k] = []
-            self._agents_states[k] = []
-
-        self.episode_buffer = []
-        for _ in range(self.num_instances):
-            self.episode_buffer.append(dict(ego_obs=dict(), ego_action=dict(), agents_obs=dict(), agents_action=dict()))
 
         self.logger = RolloutLogger()
         self.gt_logger = RolloutLogger()
@@ -226,6 +215,10 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
 
         Returns: a dictionary of metrics, each containing an array of measurement same length as the number of scenes
         """
+
+        # make sure the agent ordering is consistent
+        for si in self.current_scene_indices:
+            assert np.all(self.logger.get_track_id()[si] == self.gt_logger.get_track_id()[si])
 
         sim_traj = self.logger.get_trajectory()
         gt_traj = self.gt_logger.get_trajectory()
@@ -361,19 +354,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         ims = np.stack(ims)
         return ims
 
-    def _get_l5_sim_states(self) -> List[SimulationOutput]:
-        simulated_outputs: List[SimulationOutput] = []
-        for scene_idx in self.current_scene_indices:
-            simulated_outputs.append(
-                SimulationOutput(
-                    scene_idx,
-                    self._current_scene_dataset,
-                    self._ego_states,
-                    self._agents_states,
-                )
-            )
-        return simulated_outputs
-
     @property
     def horizon(self):
         return len(self._current_scene_dataset)
@@ -403,41 +383,25 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         should_update = self._frame_index + 1 < self.horizon and not self._prediction_only
         self.timers.tic("update")
         if step_actions.has_ego:
-            ego_obs = dict(obs["ego"])
-            ego_obs.pop("image", None)  # reduce memory consumption
             if should_update:
                 # update the next frame's ego position and orientation using control input
                 ClosedLoopSimulator.update_ego(
                     dataset=self._current_scene_dataset,
                     frame_idx=self._frame_index + 1,
-                    input_dict=ego_obs,
+                    input_dict=obs["ego"],
                     output_dict=step_actions.ego.to_dict(),
                 )
 
-            # record state
-            ego_in_out = ClosedLoopSimulator.get_ego_in_out(
-                ego_obs, step_actions.ego.to_dict(), keys_to_exclude=set(("image",))
-            )
-            for i, scene_idx in enumerate(self.current_scene_indices):
-                self._ego_states[scene_idx].append(ego_in_out[scene_idx])
-
         if step_actions.has_agents:
-            agent_obs = dict(obs["agents"])
-            agent_obs.pop("image", None)  # reduce memory consumption
             if should_update:
                 # update the next frame's agent positions and orientations using control input
                 ClosedLoopSimulator.update_agents(
                     dataset=self._current_scene_dataset,
                     frame_idx=self._frame_index + 1,
-                    input_dict=agent_obs,
+                    input_dict=obs["agents"],
                     output_dict=step_actions.agents.to_dict(),
                 )
-            agents_in_out = ClosedLoopSimulator.get_agents_in_out(
-                agent_obs, step_actions.agents.to_dict(), keys_to_exclude=set(("image",))
-            )
-            for i, scene_idx in enumerate(self.current_scene_indices):
-                self._agents_states[scene_idx].append(
-                    agents_in_out.get(scene_idx, []))
+
         self.timers.toc("update")
 
         # TODO: accumulate sim trajectories
