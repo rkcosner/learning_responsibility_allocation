@@ -85,7 +85,7 @@ class OccupancyMetrics(MetricsComposer):
 
         ckpt_path, config_path = get_checkpoint(
             ngc_job_id="2878434",
-            ckpt_key="iter37000_ep0_valCELoss1.68",
+            ckpt_key="iter74000_ep0_valCELoss1.63",
             ckpt_root_dir=self.eval_config.ckpt_root_dir
         )
 

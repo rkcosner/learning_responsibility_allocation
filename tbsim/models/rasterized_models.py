@@ -519,7 +519,14 @@ class RasterizedDiscreteVAEModel(nn.Module):
         self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
 
         goal_dim = 0 if not algo_config.goal_conditional else algo_config.goal_feature_dim
-
+        if algo_config.agent_future_cond.enabled:
+            agent_traj_encoder = base_models.AgentTrajEncoder(trajectory_shape=trajectory_shape,
+                                                              feature_dim=algo_config.agent_future_cond.feature_dim,
+                                                              use_transformer=algo_config.agent_future_cond.transformer)
+            agent_future_dim = algo_config.agent_future_cond.feature_dim
+        else:
+            agent_traj_encoder=None
+            agent_future_dim = 0
         map_encoder = base_models.RasterizedMapEncoder(
             model_arch=algo_config.model_architecture,
             input_image_shape=modality_shapes["image"],
@@ -530,7 +537,7 @@ class RasterizedDiscreteVAEModel(nn.Module):
         if algo_config.vae.recon_loss_type=="MSE":
             algo_config.vae.decoder.Gaussian_var=False
         traj_decoder = base_models.MLPTrajectoryDecoder(
-            feature_dim=algo_config.vae.condition_dim + goal_dim + algo_config.vae.latent_dim,
+            feature_dim=algo_config.vae.condition_dim+goal_dim+agent_future_dim+algo_config.vae.latent_dim,
             state_dim=trajectory_shape[-1],
             num_steps=algo_config.future_num_frames,
             dynamics_type=algo_config.dynamics.type,
@@ -549,23 +556,26 @@ class RasterizedDiscreteVAEModel(nn.Module):
             )
         else:
             goal_encoder = None
-
+        
+        self.agent_future_cond = algo_config.agent_future_cond.enabled
+        
         c_encoder = base_models.ConditionEncoder(
             map_encoder=map_encoder,
             trajectory_shape=trajectory_shape,
             condition_dim=algo_config.vae.condition_dim,
             mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
             goal_encoder=goal_encoder,
+            agent_traj_encoder = agent_traj_encoder
         )
         q_encoder = base_models.PosteriorEncoder(
-            condition_dim=algo_config.vae.condition_dim + goal_dim,
+            condition_dim=algo_config.vae.condition_dim+goal_dim+agent_future_dim,
             trajectory_shape=trajectory_shape,
             output_shapes=OrderedDict(logq=(algo_config.vae.latent_dim,)),
             mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
             rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
         )
         p_encoder = base_models.SplitMLP(
-            input_dim=algo_config.vae.condition_dim+goal_dim,
+            input_dim=algo_config.vae.condition_dim+goal_dim+agent_future_dim,
             layer_dims=algo_config.vae.encoder.mlp_layer_dims,
             output_shapes=OrderedDict(logp=(algo_config.vae.latent_dim,))
         )
@@ -609,6 +619,9 @@ class RasterizedDiscreteVAEModel(nn.Module):
         inputs = OrderedDict(trajectories=trajectories)
         goal = self._get_goal_states(batch_inputs) if self.algo_config.goal_conditional else None
         condition_inputs = OrderedDict(image=batch_inputs["image"], goal=goal)
+        if self.agent_future_cond:
+            agent_traj = torch.cat((batch_inputs["all_other_agents_future_positions"],batch_inputs["all_other_agents_future_yaws"]),-1)
+            condition_inputs["agent_traj"] = agent_traj
 
         decoder_kwargs = dict()
         if self.dyn is not None:
@@ -624,6 +637,9 @@ class RasterizedDiscreteVAEModel(nn.Module):
     def sample(self, batch_inputs: dict, n: int):
         goal = self._get_goal_states(batch_inputs) if self.algo_config.goal_conditional else None
         condition_inputs = OrderedDict(image=batch_inputs["image"], goal=goal)
+        if self.agent_future_cond:
+            agent_traj = torch.cat((batch_inputs["all_other_agents_future_positions"],batch_inputs["all_other_agents_future_yaws"]),-1)
+            condition_inputs["agent_traj"] = agent_traj
 
         decoder_kwargs = dict()
         if self.dyn is not None:
@@ -637,6 +653,9 @@ class RasterizedDiscreteVAEModel(nn.Module):
     def predict(self, batch_inputs: dict):
         goal = self._get_goal_states(batch_inputs) if self.algo_config.goal_conditional else None
         condition_inputs = OrderedDict(image=batch_inputs["image"], goal=goal)
+        if self.agent_future_cond:
+            agent_traj = torch.cat((batch_inputs["all_other_agents_future_positions"],batch_inputs["all_other_agents_future_yaws"]),-1)
+            condition_inputs["agent_traj"] = agent_traj
 
         decoder_kwargs = dict()
         if self.dyn is not None:
@@ -1002,7 +1021,11 @@ class RasterizedTreeVAEModel(nn.Module):
     def forward(self, batch_inputs: dict,sample=False):
         if not sample:
             trajectories = torch.cat((batch_inputs["target_positions"], batch_inputs["target_yaws"]), dim=-1)
-            assert batch_inputs["target_positions"].shape[-2]>=self.stage*self.num_frames_per_stage
+            try:
+                assert batch_inputs["target_positions"].shape[-2]>=self.stage*self.num_frames_per_stage
+            except:
+                import pdb
+                pdb.set_trace()
         H = self.num_frames_per_stage
         if self.algo_config.goal_conditional:
             goal = self._get_goal_states(batch_inputs)

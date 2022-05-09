@@ -854,6 +854,8 @@ class Occupancy_likelihood(EnvMetrics):
         traj_to_eval["target_positions"] = agent_traj_pos
         traj_to_eval["target_yaws"] = agent_traj_yaw[:, :, None]
         # evaluate score of the ground truth state
+        import pdb
+        pdb.set_trace()
         m = self.metric_algo.get_metrics(state_torch)
         for mk in m:
             metrics[mk] = m[mk]
