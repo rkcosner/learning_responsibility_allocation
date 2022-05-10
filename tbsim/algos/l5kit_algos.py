@@ -333,7 +333,7 @@ class SpatialPlanner(pl.LightningModule):
         metrics["goal_selection_err"] = torch.mean(
             (goal_sup["goal_position_pixel_flat"].long() != pixel_pred).float()
         )
-        metrics["goal_cls_err"] = torch.mean((pred_batch["confidence"] < 0.5).float())
+        metrics["goal_cls_err"] = torch.mean((torch.exp(pred_batch["log_likelihood"]) < 0.5).float())
         metrics = TensorUtils.to_numpy(metrics)
         for k, v in metrics.items():
             metrics[k] = float(v)
@@ -379,7 +379,7 @@ class SpatialPlanner(pl.LightningModule):
         batch = batch_utils().parse_batch(batch)
         pout = self.forward(batch)
         batch["goal"] = AlgoUtils.get_spatial_goal_supervision(batch)
-        losses = self._compute_losses(pout, batch)
+        losses = self.compute_losses(pout, batch)
         total_loss = 0.0
         for lk, l in losses.items():
             loss = l * self.algo_config.loss_weights[lk]
@@ -387,7 +387,7 @@ class SpatialPlanner(pl.LightningModule):
             total_loss += loss
 
         with torch.no_grad():
-            metrics = self._compute_metrics(pout, batch)
+            metrics = self.compute_metrics(pout, batch)
         for mk, m in metrics.items():
             self.log("train/metrics_" + mk, m)
 
@@ -397,8 +397,8 @@ class SpatialPlanner(pl.LightningModule):
         batch = batch_utils().parse_batch(batch)
         pout = self(batch)
         batch["goal"] = AlgoUtils.get_spatial_goal_supervision(batch)
-        losses = TensorUtils.detach(self._compute_losses(pout, batch))
-        metrics = self._compute_metrics(pout, batch)
+        losses = TensorUtils.detach(self.compute_losses(pout, batch))
+        metrics = self.compute_metrics(pout, batch)
         return {"losses": losses, "metrics": metrics}
 
     def validation_epoch_end(self, outputs) -> None:
