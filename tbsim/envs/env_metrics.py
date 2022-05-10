@@ -798,7 +798,7 @@ class OccupancyDiversity(Occupancymet):
 
     def get_episode_metrics(self):
         self.episode_index+=1
-        return
+        return dict()
 
 
 class Occupancy_likelihood(EnvMetrics):

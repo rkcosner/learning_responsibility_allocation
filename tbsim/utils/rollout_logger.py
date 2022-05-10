@@ -7,7 +7,10 @@ from tbsim.policies.common import RolloutAction
 
 class RolloutLogger(object):
     """Log trajectories and other essential info during rollout for visualization and evaluation"""
-    def __init__(self):
+    def __init__(self, obs_keys=None):
+        if obs_keys is None:
+            obs_keys = dict()
+        self._obs_keys = obs_keys
         self._scene_buffer = dict()
         self._serialized_scene_buffer = None
         self._scene_indices = None
@@ -68,18 +71,7 @@ class RolloutLogger(object):
         self._serialized_scene_buffer = None  # need to re-serialize
 
         # TODO: move this to __init__ as arg
-        obs_keys = [
-            "centroid",
-            "yaw",
-            "extent",
-            "raster_from_agent",
-            "world_from_agent",
-            "raster_from_world",
-            "scene_index",
-            "track_id"
-        ]
-
-        state = {k: obs[k] for k in obs_keys}
+        state = {k: obs[k] for k in self._obs_keys}
         state["action_positions"] = action["action"]["positions"][:, [0]]
         state["action_yaws"] = action["action"]["yaws"][:, [0]]
         if "action_samples" in action:

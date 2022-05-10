@@ -178,6 +178,13 @@ EXP_CONFIG_REGISTRY["nusc_ma_rasterized_plan"] = ExperimentConfig(
     registered_name="nusc_ma_rasterized_plan"
 )
 
+EXP_CONFIG_REGISTRY["nusc_gan_plan"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=L5RasterizedGANConfig(),
+    registered_name="nusc_gan_plan"
+)
+
 EXP_CONFIG_REGISTRY["nusc_hier_agent_aware"] = ExperimentConfig(
     train_config=NuscTrainConfig(),
     env_config=NuscEnvConfig(),

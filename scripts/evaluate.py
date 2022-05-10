@@ -136,7 +136,7 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
                         writer.append_data(im)
                     writer.close()
 
-        if data_to_disk:
+        if data_to_disk and "buffer" in info:
             dump_episode_buffer(
                 info["buffer"],
                 info["scene_index"],

@@ -89,6 +89,8 @@ def parse_avdata_batch(batch: dict):
     hist_pos, hist_yaw, hist_speed, hist_mask = avdata2posyawspeed(batch["agent_hist"])
     curr_speed = hist_speed[..., -1]
     curr_state = batch["curr_agent_state"]
+    curr_yaw = curr_state[:, -1]
+    curr_pos = curr_state[:, :2]
 
     # convert nuscenes types to l5kit types
     agent_type = batch["agent_type"]
@@ -109,35 +111,41 @@ def parse_avdata_batch(batch: dict):
     neigh_hist_extents = batch["neigh_hist_extents"]
     neigh_hist_extents[torch.isnan(neigh_hist_extents)] = 0.
 
-    # map-related
-    map_res = batch["maps_resolution"][0]
-    h, w = batch["maps"].shape[-2:]
-    # TODO: pass env configs to here
-    raster_from_agent = torch.Tensor([
-         [map_res, 0, 0.25 * w],
-         [0, map_res, 0.5 * h],
-         [0, 0, 1]
-    ]).to(curr_state.device)
-    agent_from_raster = torch.inverse(raster_from_agent)
-    raster_from_agent = TensorUtils.unsqueeze_expand_at(raster_from_agent, size=batch["maps"].shape[0], dim=0)
-    agent_from_raster = TensorUtils.unsqueeze_expand_at(agent_from_raster, size=batch["maps"].shape[0], dim=0)
-    curr_yaw = curr_state[:, -1]
-    curr_pos = curr_state[:, :2]
-    raster_from_world = torch.bmm(raster_from_agent, batch["agents_from_world_tf"])
     world_from_agents = torch.inverse(batch["agents_from_world_tf"])
 
-    all_hist_pos = torch.cat((hist_pos[:, None], neigh_hist_pos), dim=1)
-    all_hist_yaw = torch.cat((hist_yaw[:, None], neigh_hist_yaw), dim=1)
-    all_hist_mask = torch.cat((hist_mask[:, None], neigh_hist_mask), dim=1)
-    maps = rasterize_agents(
-        batch["maps"],
-        all_hist_pos,
-        all_hist_yaw,
-        all_hist_mask,
-        raster_from_agent,
-        map_res
-    )
-    drivable_map = get_drivable_region_map(batch["maps"])
+    # map-related
+    if batch["maps"] is not None:
+        map_res = batch["maps_resolution"][0]
+        h, w = batch["maps"].shape[-2:]
+        # TODO: pass env configs to here
+        raster_from_agent = torch.Tensor([
+             [map_res, 0, 0.25 * w],
+             [0, map_res, 0.5 * h],
+             [0, 0, 1]
+        ]).to(curr_state.device)
+        agent_from_raster = torch.inverse(raster_from_agent)
+        raster_from_agent = TensorUtils.unsqueeze_expand_at(raster_from_agent, size=batch["maps"].shape[0], dim=0)
+        agent_from_raster = TensorUtils.unsqueeze_expand_at(agent_from_raster, size=batch["maps"].shape[0], dim=0)
+        raster_from_world = torch.bmm(raster_from_agent, batch["agents_from_world_tf"])
+
+        all_hist_pos = torch.cat((hist_pos[:, None], neigh_hist_pos), dim=1)
+        all_hist_yaw = torch.cat((hist_yaw[:, None], neigh_hist_yaw), dim=1)
+        all_hist_mask = torch.cat((hist_mask[:, None], neigh_hist_mask), dim=1)
+        maps = rasterize_agents(
+            batch["maps"],
+            all_hist_pos,
+            all_hist_yaw,
+            all_hist_mask,
+            raster_from_agent,
+            map_res
+        )
+        drivable_map = get_drivable_region_map(batch["maps"])
+    else:
+        maps = None
+        drivable_map = None
+        raster_from_agent = None
+        agent_from_raster = None
+        raster_from_world = None
 
     extent_scale = 1.0
 

@@ -129,8 +129,18 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         for v in self._metrics.values():
             v.reset()
 
-        self.logger = RolloutLogger()
-        self.gt_logger = RolloutLogger()
+        obs_keys_to_log = [
+            "centroid",
+            "yaw",
+            "extent",
+            "raster_from_agent",
+            "world_from_agent",
+            "raster_from_world",
+            "scene_index",
+            "track_id"
+        ]
+        self.logger = RolloutLogger(obs_keys=obs_keys_to_log)
+        self.gt_logger = RolloutLogger(obs_keys=obs_keys_to_log)
 
     def get_random_action(self):
         ac = self._npr.randn(self._num_scenes, 1, 3)
