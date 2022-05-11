@@ -311,18 +311,50 @@ class CriticalFailure(EnvMetrics):
             self._per_step[k].append(met_all[k])
 
     def get_per_agent_metrics(self):
-        coll = np.stack(self._per_step["coll"]).sum(axis=0)  # [A]
-        coll_failure = coll >= self._num_collision_frames
+        coll_per_step = np.stack(self._per_step["coll"])
+        offroad_per_step = np.stack(self._per_step["offroad"])
 
-        offroad = np.stack(self._per_step["offroad"]).sum(axis=0)  # [A]
-        offroad_failure = offroad >= self._num_offroad_frames
+        coll_ttf = np.ones(len(self._agent_track_id)) * -1  # time-to-failure
+        offroad_ttf = coll_ttf.copy()
+        num_steps = coll_per_step.shape[0]
+        for i in range(num_steps):
+            coll = coll_per_step[:i + 1].sum(axis=0)  # [A]
+            coll_failure = coll >= self._num_collision_frames
 
-        failure_per_agent = np.bitwise_or(coll_failure, offroad_failure)
-        return dict(
+            offroad = offroad_per_step[:i + 1].sum(axis=0)  # [A]
+            offroad_failure = offroad >= self._num_offroad_frames
+
+            coll_ttf[np.bitwise_and(coll_failure, coll_ttf < 0)] = i
+            offroad_ttf[np.bitwise_and(offroad_failure, offroad_ttf < 0)] = i
+
+        offroad_failure = offroad_ttf >= 0
+        coll_failure = coll_ttf >= 0
+        any_failure = np.bitwise_or(offroad_failure, coll_failure)
+
+        any_ttf = np.minimum(coll_ttf, offroad_ttf)
+
+        bracket_step = 5
+        ttf_brackets = np.arange(bracket_step, num_steps + 1, bracket_step)
+        ttfs = dict()
+        for i in range(len(ttf_brackets)):
+            ttfs["offroad_ttf@{}".format(ttf_brackets[i])] = \
+                np.bitwise_and(offroad_ttf >= 0, offroad_ttf < ttf_brackets[i])
+            ttfs["coll_ttf@{}".format(ttf_brackets[i])] = \
+                np.bitwise_and(coll_ttf >= 0, coll_ttf < ttf_brackets[i])
+            ttfs["any_ttf@{}".format(ttf_brackets[i])] = \
+                np.bitwise_and(any_ttf >= 0, any_ttf < ttf_brackets[i])
+
+        for k in ttfs:
+            ttfs[k] = ttfs[k].astype(np.float32)
+
+        metrics = dict(
             offroad=offroad_failure.astype(np.float32),
             coll=coll_failure.astype(np.float32),
-            any=failure_per_agent.astype(np.float32)
+            any=any_failure.astype(np.float32),
         )
+
+        metrics.update(ttfs)
+        return metrics
 
     def get_episode_metrics(self) -> Dict[str, np.ndarray]:
         met_per_agent = self.get_per_agent_metrics()
