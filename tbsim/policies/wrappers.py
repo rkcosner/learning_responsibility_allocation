@@ -55,8 +55,10 @@ class HierarchicalSamplerWrapper(HierarchicalWrapper):
         action_info = dict(
             plan_samples=plan_samples,
             action_samples=action_samples,
-            plan_info=plan_info
+            plan_info=plan_info,
         )
+        if "log_likelihood" in plan_info:
+            action_info["log_likelihood"] = plan_info["log_likelihood"]
         return None, action_info
 
 
@@ -83,6 +85,9 @@ class SamplingPolicyWrapper(object):
         agent_preds, _ = self.predictor.get_prediction(
             obs)  # preds of shape [B, A - 1, ...]
 
+        if isinstance(action_samples, dict):
+            action_samples = Action.from_dict(action_samples)
+
         ego_trajs = action_samples.trajectories
         agent_pred_trajs = agent_preds.trajectories
 
@@ -90,6 +95,8 @@ class SamplingPolicyWrapper(object):
             dim=-2)[0]
         drivable_map = batch_utils().get_drivable_region_map(obs["image"]).float()
         dis_map = calc_distance_map(drivable_map)
+        log_likelihood = action_info.get("log_likelihood", None)
+
         action_idx = ego_sample_planning(
             ego_trajectories=ego_trajs,
             agent_trajectories=agent_pred_trajs,
@@ -98,14 +105,14 @@ class SamplingPolicyWrapper(object):
             raw_types=obs["all_other_agents_types"],
             raster_from_agent=obs["raster_from_agent"],
             dis_map=dis_map,
-            weights={"collision_weight": 1.0, "lane_weight": 1.0},
+            log_likelihood=log_likelihood,
+            weights=kwargs["cost_weights"],
         )
 
         ego_trajs_best = torch.gather(
             ego_trajs,
             dim=1,
-            index=action_idx[:, None, None,
-                  None].expand(-1, 1, *ego_trajs.shape[2:])
+            index=action_idx[:, None, None, None].expand(-1, 1, *ego_trajs.shape[2:])
         ).squeeze(1)
 
         ego_actions = Action(

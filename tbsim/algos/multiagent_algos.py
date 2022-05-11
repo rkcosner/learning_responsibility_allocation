@@ -408,8 +408,13 @@ class HierarchicalAgentAwareModel(pl.LightningModule):
             yaws=plan_dict["predictions"]["yaws"].permute(0, 2, 1, 3),  # [B, num_sample, T, 1]
             availabilities=plan_dict["availabilities"].permute(0, 2, 1)  # [B, num_sample, T]
         )
+        plan_info = dict(
+            location_map=preds["location_map"],
+            plan_samples=plan_samples,
+            log_likelihood=preds["log_likelihood"]
+        )
 
-        return plan_samples, dict(location_map=preds["location_map"], plan_samples=plan_samples)
+        return plan_samples, plan_info
 
     def get_action(self, obs_dict, **kwargs):
         """If using the model as an actor (generating actions)"""
@@ -419,9 +424,9 @@ class HierarchicalAgentAwareModel(pl.LightningModule):
         planner_preds = SpatialPlanner.forward_prediction(
             pred_map=pred_maps,
             obs_dict=obs_dict,
-            mask_drivable=kwargs.get("mask_drivable", False),
-            num_samples=kwargs.get("num_samples", None),
-            clearance=kwargs.get("clearance", None)
+            mask_drivable=kwargs["mask_drivable"],
+            num_samples=kwargs["num_samples"],
+            clearance=kwargs["clearance"]
         )
 
         plan_samples, plan_info = self.get_plan(planner_preds)
@@ -436,16 +441,17 @@ class HierarchicalAgentAwareModel(pl.LightningModule):
 
         obs_tiled = TensorUtils.repeat_by_expand_at(obs_dict, repeats=n, dim=0)
         preds = self.predictor.forward_prediction(feats_tiled, obs_tiled, plan=plan_tiled)
+        preds = TensorUtils.reshape_dimensions(preds, begin_axis=0, end_axis=1, target_dims=(b, n))  # [B, N, A, ...]
 
-        agent_preds = self.predictor.get_agents_predictions(preds)
+        # goal-conditioning only affects ego, so use any agent prediction in the sample
+        agent_preds = TensorUtils.map_tensor(preds, lambda x: x[:, 0, 1:])
 
         agent_pred_trajs = Trajectory(
             positions=agent_preds["predictions"]["positions"],
             yaws=agent_preds["predictions"]["yaws"]
         ).trajectories
 
-        ego_preds = self.predictor.get_ego_predictions(preds)
-        ego_preds = TensorUtils.unsqueeze(ego_preds, 1)
+        ego_preds = TensorUtils.map_tensor(preds, lambda x: x[:, :, 0])
         action_samples = Action(
             positions=ego_preds["predictions"]["positions"],
             yaws=ego_preds["predictions"]["yaws"]
@@ -456,6 +462,7 @@ class HierarchicalAgentAwareModel(pl.LightningModule):
             dim=-2)[0]
         drivable_map = batch_utils().get_drivable_region_map(obs_dict["image"]).float()
         dis_map = calc_distance_map(drivable_map)
+
         action_idx = ego_sample_planning(
             ego_trajectories=action_sample_trajs,
             agent_trajectories=agent_pred_trajs,
@@ -464,10 +471,8 @@ class HierarchicalAgentAwareModel(pl.LightningModule):
             raw_types=obs_dict["all_other_agents_types"],
             raster_from_agent=obs_dict["raster_from_agent"],
             dis_map=dis_map,
-            weights={
-                "collision_weight": kwargs.get("collision_weight", 1.0),
-                "lane_weight": kwargs.get("lane_weight", 1.0)
-            },
+            log_likelihood=plan_info["log_likelihood"],
+            weights=kwargs["cost_weights"],
         )
 
         action_trajs_best = torch.gather(
@@ -481,7 +486,7 @@ class HierarchicalAgentAwareModel(pl.LightningModule):
 
         action_info = dict(
             plan_samples=plan_info["plan_samples"].to_dict(),
-            location_map=plan_info["location_map"],
+            plan_info=dict(location_map=plan_info["location_map"]),
             action_samples=action_samples.to_dict()
         )
         return ego_actions, action_info

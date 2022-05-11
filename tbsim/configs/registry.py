@@ -67,8 +67,8 @@ EXP_CONFIG_REGISTRY["l5_mixed_plan"] = ExperimentConfig(
 )
 
 EXP_CONFIG_REGISTRY["l5_gan_plan"] = ExperimentConfig(
-    train_config=L5KitTrainConfig(),
-    env_config=L5KitEnvConfig(),
+    train_config=L5KitMixedTrainConfig(),
+    env_config=L5KitMixedSemanticMapEnvConfig(),
     algo_config=L5RasterizedGANConfig(),
     registered_name="l5_gan_plan",
 )
@@ -176,6 +176,13 @@ EXP_CONFIG_REGISTRY["nusc_ma_rasterized_plan"] = ExperimentConfig(
     env_config=NuscEnvConfig(),
     algo_config=MARasterizedPlanningConfig(),
     registered_name="nusc_ma_rasterized_plan"
+)
+
+EXP_CONFIG_REGISTRY["nusc_gan_plan"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=L5RasterizedGANConfig(),
+    registered_name="nusc_gan_plan"
 )
 
 EXP_CONFIG_REGISTRY["nusc_hier_agent_aware"] = ExperimentConfig(

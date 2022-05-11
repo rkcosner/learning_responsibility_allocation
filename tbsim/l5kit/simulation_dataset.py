@@ -143,6 +143,20 @@ class SimulationDataset:
             frame_batch.append(frame)
         return frame_batch
 
+    def rasterise_frame_batch_gt(self, state_index: int) -> List[Dict[str, np.ndarray]]:
+        """
+        Get a frame from all scenes
+
+        :param state_index: the frame index
+        :return: a list of dict from EgoDatasets
+        """
+        frame_batch = []
+        for scene_idx, scene_dt in self.recorded_scene_dataset_batch.items():
+            frame = scene_dt[state_index]
+            frame["scene_index"] = scene_idx  # set the scene to the right index
+            frame_batch.append(frame)
+        return frame_batch
+
     def set_ego(self, state_index: int, output_index: int, ego_translations: np.ndarray,
                 ego_yaws: np.ndarray) -> None:
         """Mutate future frame position and yaw for ego across scenes. This acts on the underlying dataset
@@ -185,6 +199,17 @@ class SimulationDataset:
         """
         ret = {}
         for scene_index in self.scene_dataset_batch:
+            ret.update(self._rasterise_agents_frame(scene_index, state_index))
+        return ret
+
+    def rasterise_agents_frame_batch_gt(self, state_index: int) -> Dict[Tuple[int, int], Dict[str, np.ndarray]]:
+        """Rasterise agents for each scene in the batch at a given frame.
+
+        :param state_index: the frame index in the scene
+        :return: a dict mapping from [scene_id, track_id] to the numpy dict
+        """
+        ret = {}
+        for scene_index in self.recorded_scene_dataset_batch:
             ret.update(self._rasterise_agents_frame(scene_index, state_index))
         return ret
 

@@ -5,6 +5,8 @@ import json
 import random
 import yaml
 import importlib
+from collections import Counter
+from pprint import pprint
 
 import os
 from tbsim.utils.metrics import OrnsteinUhlenbeckPerturbation
@@ -113,7 +115,7 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
         )
 
         print(info["scene_index"])
-        print(stats)
+        pprint(stats)
 
         # aggregate metrics stats
         if result_stats is None:
@@ -141,7 +143,7 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
                         writer.append_data(im)
                     writer.close()
 
-        if data_to_disk:
+        if data_to_disk and "buffer" in info:
             dump_episode_buffer(
                 info["buffer"],
                 info["scene_index"],
@@ -153,11 +155,15 @@ def dump_episode_buffer(buffer, scene_index, h5_path):
     import h5py
     h5_file = h5py.File(h5_path, "a")
 
+    ep_count = Counter()
     for si, scene_buffer in zip(scene_index, buffer):
+        # TODO: fix this hack
+        # Postfix scene index with episode count (scene may repeat with multiple episodes)
+        ep_i = ep_count[si]
+        ep_count[si] += 1
         for mk in scene_buffer:
-            for k in scene_buffer[mk]:
-                h5key = "/{}/{}/{}".format(si, mk, k)
-                h5_file.create_dataset(h5key, data=scene_buffer[mk][k])
+            h5key = "/{}_{}/{}".format(si, ep_i, mk)
+            h5_file.create_dataset(h5key, data=scene_buffer[mk])
     h5_file.close()
     print("scene {} written to {}".format(scene_index, h5_path))
 
@@ -312,7 +318,7 @@ if __name__ == "__main__":
         skimp_rollout = False
         compute_metrics = True
     elif args.mode == "evaluate_rollout":
-        data_to_disk = False
+        data_to_disk = True
         skimp_rollout = False
         compute_metrics = True
 

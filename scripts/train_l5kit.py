@@ -296,16 +296,17 @@ if __name__ == "__main__":
         default_config.train.rollout.every_n_steps = 10
         default_config.train.rollout.num_episodes = 1
 
-    # make eval config consistent with the rest of the config
-    default_config.eval.env = default_config.env.name
-    assert default_config.algo.eval_class is not None, \
-        "Please set an eval_class for {}".format(default_config.algo.name)
-    default_config.eval.eval_class = default_config.algo.eval_class
-    default_config.eval.dataset_path = default_config.train.dataset_path
-    for k in default_config.eval[default_config.eval.env]:  # copy env-specific config to the global-level
-        default_config.eval[k] = default_config.eval[default_config.eval.env][k]
-    default_config.eval.pop("nusc")
-    default_config.eval.pop("l5kit")
+    # make rollout evaluation config consistent with the rest of the config
+    if default_config.train.rollout.enabled:
+        default_config.eval.env = default_config.env.name
+        assert default_config.algo.eval_class is not None, \
+            "Please set an eval_class for {}".format(default_config.algo.name)
+        default_config.eval.eval_class = default_config.algo.eval_class
+        default_config.eval.dataset_path = default_config.train.dataset_path
+        for k in default_config.eval[default_config.eval.env]:  # copy env-specific config to the global-level
+            default_config.eval[k] = default_config.eval[default_config.eval.env][k]
+        default_config.eval.pop("nusc")
+        default_config.eval.pop("l5kit")
 
     default_config.lock()  # Make config read-only
     main(default_config, auto_remove_exp_dir=args.remove_exp_dir, debug=args.debug)

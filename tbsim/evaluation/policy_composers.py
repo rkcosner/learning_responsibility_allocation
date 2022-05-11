@@ -110,7 +110,36 @@ class TrafficSim(PolicyComposer):
                 modality_shapes=self.get_modality_shapes(policy_cfg),
             ).to(self.device).eval()
             policy_cfg = policy_cfg.clone()
-        policy = PolicyWrapper.wrap_controller(policy, sample=self.eval_config.policy.sample)
+        policy = PolicyWrapper.wrap_controller(
+            policy,
+            sample=self.eval_config.policy.sample,
+            num_action_samples=self.eval_config.policy.num_action_samples
+        )
+        return policy, policy_cfg
+
+
+class TrafficSimplan(TrafficSim):
+    def _get_predictor(self):
+        predictor_ckpt_path, predictor_config_path = get_checkpoint(
+            ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
+            ckpt_key=self.eval_config.ckpt.predictor.ckpt_key,
+            ckpt_root_dir=self.ckpt_root_dir
+        )
+        predictor_cfg = get_experiment_config_from_file(predictor_config_path)
+
+        predictor = MATrafficModel.load_from_checkpoint(
+            predictor_ckpt_path,
+            algo_config=predictor_cfg.algo,
+            modality_shapes=self.get_modality_shapes(predictor_cfg),
+        ).to(self.device).eval()
+        return predictor, predictor_cfg.clone()
+
+    def get_policy(self, policy=None):
+        policy, policy_cfg = super(TrafficSimplan, self).get_policy(policy=policy)
+        predictor, _ = self._get_predictor()
+
+        policy = SamplingPolicyWrapper(ego_action_sampler=policy, agent_traj_predictor=predictor)
+        policy = PolicyWrapper.wrap_controller(policy, cost_weights=self.eval_config.policy.cost_weights)
         return policy, policy_cfg
 
 
@@ -132,7 +161,36 @@ class TPP(PolicyComposer):
                 modality_shapes=self.get_modality_shapes(policy_cfg),
             ).to(self.device).eval()
             policy_cfg = policy_cfg.clone()
-        policy = PolicyWrapper.wrap_controller(policy, sample=self.eval_config.policy.sample)
+        policy = PolicyWrapper.wrap_controller(
+            policy,
+            sample=self.eval_config.policy.sample,
+            num_action_samples=self.eval_config.policy.num_action_samples
+        )
+        return policy, policy_cfg
+
+
+class TPPplan(TPP):
+    def _get_predictor(self):
+        predictor_ckpt_path, predictor_config_path = get_checkpoint(
+            ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
+            ckpt_key=self.eval_config.ckpt.predictor.ckpt_key,
+            ckpt_root_dir=self.ckpt_root_dir
+        )
+        predictor_cfg = get_experiment_config_from_file(predictor_config_path)
+
+        predictor = MATrafficModel.load_from_checkpoint(
+            predictor_ckpt_path,
+            algo_config=predictor_cfg.algo,
+            modality_shapes=self.get_modality_shapes(predictor_cfg),
+        ).to(self.device).eval()
+        return predictor, predictor_cfg.clone()
+
+    def get_policy(self, policy=None):
+        policy, policy_cfg = super(TPPplan, self).get_policy(policy=policy)
+        predictor, _ = self._get_predictor()
+
+        policy = SamplingPolicyWrapper(ego_action_sampler=policy, agent_traj_predictor=predictor)
+        policy = PolicyWrapper.wrap_controller(policy, cost_weights=self.eval_config.policy.cost_weights)
         return policy, policy_cfg
 
 
@@ -154,6 +212,35 @@ class GAN(PolicyComposer):
                 modality_shapes=self.get_modality_shapes(policy_cfg),
             ).to(self.device).eval()
             policy_cfg = policy_cfg.clone()
+        policy = PolicyWrapper.wrap_controller(
+            policy,
+            num_action_samples=self.eval_config.policy.num_action_samples
+        )
+        return policy, policy_cfg
+
+
+class GANplan(GAN):
+    def _get_predictor(self):
+        predictor_ckpt_path, predictor_config_path = get_checkpoint(
+            ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
+            ckpt_key=self.eval_config.ckpt.predictor.ckpt_key,
+            ckpt_root_dir=self.ckpt_root_dir
+        )
+        predictor_cfg = get_experiment_config_from_file(predictor_config_path)
+
+        predictor = MATrafficModel.load_from_checkpoint(
+            predictor_ckpt_path,
+            algo_config=predictor_cfg.algo,
+            modality_shapes=self.get_modality_shapes(predictor_cfg),
+        ).to(self.device).eval()
+        return predictor, predictor_cfg.clone()
+
+    def get_policy(self, policy=None):
+        policy, policy_cfg = super(GANplan, self).get_policy(policy=policy)
+        predictor, _ = self._get_predictor()
+
+        policy = SamplingPolicyWrapper(ego_action_sampler=policy, agent_traj_predictor=predictor)
+        policy = PolicyWrapper.wrap_controller(policy, cost_weights=self.eval_config.policy.cost_weights)
         return policy, policy_cfg
 
 
@@ -217,6 +304,29 @@ class Hierarchical(PolicyComposer):
         return policy, exp_cfg
 
 
+class HierarchicalSample(Hierarchical):
+    def get_policy(self, planner=None, controller=None):
+        if planner is not None:
+            assert isinstance(planner, SpatialPlanner)
+        else:
+            planner, exp_cfg = self._get_planner()
+
+        if controller is not None:
+            assert isinstance(controller, MATrafficModel)
+            exp_cfg = None
+        else:
+            controller, exp_cfg = self._get_controller()
+            exp_cfg = exp_cfg.clone()
+
+        planner = PolicyWrapper.wrap_planner(
+            planner,
+            mask_drivable=self.eval_config.policy.mask_drivable,
+            sample=True
+        )
+        policy = HierarchicalWrapper(planner, controller)
+        return policy, exp_cfg
+
+
 class HierAgentAware(Hierarchical):
     def _get_predictor(self):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
@@ -258,6 +368,7 @@ class HierAgentAware(Hierarchical):
         sampler = HierarchicalSamplerWrapper(plan_sampler, controller)
 
         policy = SamplingPolicyWrapper(ego_action_sampler=sampler, agent_traj_predictor=predictor)
+        policy = PolicyWrapper.wrap_controller(policy, cost_weights=self.eval_config.policy.cost_weights)
         return policy, exp_cfg
 
 
@@ -342,9 +453,9 @@ class HPnC(PolicyComposer):
         policy = PolicyWrapper.wrap_controller(
             policy,
             mask_drivable=self.eval_config.policy.mask_drivable,
-            sample=True,
-            num_plan_samples=self.eval_config.policy.num_plan_samples,
+            num_samples=self.eval_config.policy.num_plan_samples,
             clearance=self.eval_config.policy.diversification_clearance,
+            cost_weights=self.eval_config.policy.cost_weights
         )
         return policy, policy_cfg
 

@@ -36,7 +36,9 @@ class EnvironmentBuilder(object):
             all_collision_rate=EnvMetrics.CollisionRate(),
             all_coverage=EnvMetrics.OccupancyCoverage(
                 gridinfo={"offset": np.zeros(2), "step": 2.0*np.ones(2)},
-                failure_metric=EnvMetrics.CriticalFailure(num_offroad_frames=2)
+            ),
+            all_diversity=EnvMetrics.OccupancyDiversity(
+                gridinfo={"offset": np.zeros(2), "step": 4.0*np.ones(2)},
             ),
             all_failure=EnvMetrics.CriticalFailure(num_offroad_frames=2)
         )
@@ -89,8 +91,8 @@ class EnvL5Builder(EnvironmentBuilder):
         env_dataset = EgoDatasetMixed(l5_config, eval_zarr, vectorizer, rasterizer)
         l5_config = deepcopy(l5_config)
         l5_config["raster_params"]["raster_size"] = (500, 500)
-        l5_config["raster_params"]["pixel_size"] = (0.2, 0.2)
-        l5_config["raster_params"]["ego_center"] = (0.5, 0.5)
+        l5_config["raster_params"]["pixel_size"] = (0.3, 0.3)
+        # l5_config["raster_params"]["ego_center"] = (0.5, 0.5)
         render_rasterizer = build_visualization_rasterizer_l5kit(l5_config, LocalDataManager(None))
         exp_cfg.env.simulation.num_simulation_steps = self.eval_cfg.num_simulation_steps
         exp_cfg.env.simulation.distance_th_far = 1e+5  # keep controlling everything

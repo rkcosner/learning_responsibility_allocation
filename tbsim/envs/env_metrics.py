@@ -294,8 +294,8 @@ class CriticalFailure(EnvMetrics):
             self._agent_track_id = state_info["track_id"]
 
         met_all = dict(
-            coll=OffRoadRate.compute_per_step(state_info, all_scene_index),
-            offroad=CollisionRate.compute_per_step(state_info, all_scene_index)[0]["coll_any"]
+            offroad=OffRoadRate.compute_per_step(state_info, all_scene_index),
+            coll=CollisionRate.compute_per_step(state_info, all_scene_index)[0]["coll_any"]
         )
 
         # reassign metrics according to the track id of the initial state (in case some agents go missing)
@@ -303,7 +303,7 @@ class CriticalFailure(EnvMetrics):
             met_a = np.zeros(len(self._agent_track_id))  # assume no collision for missing agents
             for i, (sid, tid) in enumerate(zip(state_info["scene_index"], state_info["track_id"])):
                 agent_index = np.bitwise_and(self._agent_track_id == tid, self._agent_scene_index == sid)
-                assert np.sum(agent_index) == 1  # make sure there is no new agent
+                assert np.sum(agent_index) == 1, np.sum(agent_index)  # make sure there is no new agent
                 met_a[agent_index] = met[i]
             met_all[k] = met_a
 
@@ -311,18 +311,49 @@ class CriticalFailure(EnvMetrics):
             self._per_step[k].append(met_all[k])
 
     def get_per_agent_metrics(self):
-        coll = np.stack(self._per_step["coll"]).sum(axis=0)  # [A]
-        coll_failure = coll >= self._num_collision_frames
+        coll_per_step = np.stack(self._per_step["coll"])
+        offroad_per_step = np.stack(self._per_step["offroad"])
 
-        offroad = np.stack(self._per_step["offroad"]).sum(axis=0)  # [A]
-        offroad_failure = offroad >= self._num_offroad_frames
+        coll_ttf = np.ones(len(self._agent_track_id)) * np.inf  # time-to-failure
+        offroad_ttf = coll_ttf.copy()
+        num_steps = coll_per_step.shape[0]
+        for i in range(num_steps):
+            coll = coll_per_step[:i + 1].sum(axis=0)  # [A]
+            coll_failure = coll >= self._num_collision_frames
 
-        failure_per_agent = np.bitwise_or(coll_failure, offroad_failure)
-        return dict(
+            offroad = offroad_per_step[:i + 1].sum(axis=0)  # [A]
+            offroad_failure = offroad >= self._num_offroad_frames
+
+            coll_ttf[np.bitwise_and(coll_failure, np.isinf(coll_ttf))] = i
+            offroad_ttf[np.bitwise_and(offroad_failure, np.isinf(offroad_ttf))] = i
+
+        any_ttf = np.minimum(coll_ttf, offroad_ttf)
+
+        offroad_failure = offroad_ttf < num_steps
+        coll_failure = coll_ttf < num_steps
+        any_failure = any_ttf < num_steps
+
+        ttf_brackets = np.arange(0, num_steps + 1, 5)
+        ttfs = dict()
+        for i in range(len(ttf_brackets) - 1):
+            ttfs["offroad_ttf@{}".format(ttf_brackets[i + 1])] = \
+                np.bitwise_and(offroad_ttf >= ttf_brackets[i], offroad_ttf < ttf_brackets[i + 1])
+            ttfs["coll_ttf@{}".format(ttf_brackets[i + 1])] = \
+                np.bitwise_and(coll_ttf >= ttf_brackets[i], coll_ttf < ttf_brackets[i + 1])
+            ttfs["any_ttf@{}".format(ttf_brackets[i + 1])] = \
+                np.bitwise_and(any_ttf >= ttf_brackets[i], any_ttf < ttf_brackets[i + 1])
+
+        for k in ttfs:
+            ttfs[k] = ttfs[k].astype(np.float32)
+
+        metrics = dict(
             offroad=offroad_failure.astype(np.float32),
             coll=coll_failure.astype(np.float32),
-            any=failure_per_agent.astype(np.float32)
+            any=any_failure.astype(np.float32),
         )
+
+        metrics.update(ttfs)
+        return metrics
 
     def get_episode_metrics(self) -> Dict[str, np.ndarray]:
         met_per_agent = self.get_per_agent_metrics()
@@ -711,7 +742,7 @@ class OccupancyGrid():
         # clear_flag = (raster_points[:,0]>=0) & (raster_points[:,0]<drivable_area_map.shape[0])& (raster_points[:,1]>=0) & (raster_points[:,1]<drivable_area_map.shape[1])
         return lane_flag
 
-    def update(self, coords, raster_from_world, lane_map, agent_ids, threshold=0.1,weight=1):
+    def update(self, coords, raster_from_world, lane_map, agent_ids, episode_index, threshold=0.1,weight=1):
         assert threshold<1.0
         radius = np.sqrt(-2*self.sigma*np.log(threshold))
         grid_points,XYi,kernel_value = self.get_neighboring_grid_points(coords,radius)
@@ -725,7 +756,7 @@ class OccupancyGrid():
         for i in range(XYi_flatten.shape[0]):
             self.occupancy_grid[(XYi_flatten[i,0],XYi_flatten[i,1])] += weight*kernel_value_flatten[i]
             self.lane_flag[(XYi_flatten[i,0],XYi_flatten[i,1])] = lane_flag_flatten[i]
-            self.agent_ids[(XYi_flatten[i,0],XYi_flatten[i,1])].add(agent_ids[i])
+            self.agent_ids[(XYi_flatten[i,0],XYi_flatten[i,1])].add((episode_index, agent_ids[i]))
     
     def visualize(self):
         fig, ax = plt.subplots(figsize=(20, 20))
@@ -750,7 +781,7 @@ class Occupancymet(EnvMetrics):
     def reset(self):
         self.og.clear()
 
-    def add_step(self, state_info: dict, all_scene_index: np.ndarray):
+    def add_step(self, state_info: dict, all_scene_index: np.ndarray, episode_index: int):
         self._per_step.append(0)
         self._per_step_mask.append(1)
         drivable_area = batch_utils().get_drivable_region_map(state_info["image"])
@@ -765,8 +796,9 @@ class Occupancymet(EnvMetrics):
                 raster_from_world=state_info["raster_from_world"][indices],
                 lane_map=drivable_area[indices],
                 agent_ids=state_info["track_id"][indices],
+                episode_index=episode_index,
                 threshold=0.1,
-                weight=1
+                weight=1,
             )
 
     def get_episode_metrics(self):
@@ -774,34 +806,50 @@ class Occupancymet(EnvMetrics):
 
 
 class OccupancyCoverage(Occupancymet):
-    def __init__(self, gridinfo, failure_metric, sigma=1.0, threshold=1e-2):
-        self._failure_metric = failure_metric
-        super(OccupancyCoverage,self).__init__(gridinfo, sigma)
+    def __init__(self, gridinfo, sigma=1.0, threshold=1e-2):
+        self.failure_metric = [CriticalFailure(num_offroad_frames=2)]
+        self.episode_index = 0
         self.threshold = threshold
+        self._episode_started = False
+        super(OccupancyCoverage, self).__init__(gridinfo, sigma)
 
     def reset(self):
-        super(OccupancyCoverage, self).reset()
-        self._failure_metric.reset()
+        if self._episode_started:
+            self.failure_metric.append(CriticalFailure(num_offroad_frames=2))
+            self.episode_index += 1
+            self._episode_started = False
+
+    def multi_episode_reset(self):
+        self.failure_metric = [CriticalFailure(num_offroad_frames=2)]
+        self.episode_index = 0
+        self._episode_started = False
+        self.og.clear()
 
     def add_step(self, state_info: dict, all_scene_index: np.ndarray):
-        super(OccupancyCoverage, self).add_step(state_info, all_scene_index)
-        self._failure_metric.add_step(state_info, all_scene_index)
+        super(OccupancyCoverage, self).add_step(state_info, all_scene_index, self.episode_index)
+        self._episode_started = True
+        self.failure_metric[-1].add_step(state_info, all_scene_index)
 
     def summarize_grid(self):
-        per_agent_failure = self._failure_metric.get_per_agent_metrics()["any"]
-        failed_agent_ids = self._failure_metric.all_agent_ids[per_agent_failure > 0]
-        failed_scene_index = self._failure_metric.all_scene_index[per_agent_failure > 0]
+        failed_agent_ids = []
+        failed_scene_index = []
+        assert self.episode_index + 1 == len(self.failure_metric)
+        for fm in self.failure_metric:
+            per_agent_failure = fm.get_per_agent_metrics()["any"]
+            failed_agent_ids.append(fm.all_agent_ids[per_agent_failure > 0])
+            failed_scene_index.append(fm.all_scene_index[per_agent_failure > 0])
 
         coverage_num = OrderedDict(total=[], onroad=[], success=[])
         for scene_idx, og in self.og.items():
             data = np.array(list(og.occupancy_grid.values()))
             lane = np.array(list(og.lane_flag.values())).astype(np.float32)
-            success_mask = np.zeros_like(lane)
-            for i, aid in enumerate(og.agent_ids.values()):
-                # if any of the successful agent covers a grid, count it as a successful coverage
+            success_mask = np.zeros_like(lane).astype(np.bool)
+            for i, ep_aid in enumerate(og.agent_ids.values()):
+                # if any of the successful agent in any episode covers a grid, count it as a successful coverage
                 # conversely, if all the agents that cover the grid ended up failing, do not count the coverage.
-                failed_agent_ids_in_scene = failed_agent_ids[failed_scene_index == scene_idx]
-                success_mask[i] = ~np.all(np.isin(list(aid), failed_agent_ids_in_scene))
+                for (epi, aid) in ep_aid:
+                    failed_agent_ids_in_scene = failed_agent_ids[epi][failed_scene_index[epi] == scene_idx]
+                    success_mask[i] = success_mask[i] or (aid not in failed_agent_ids_in_scene)
             data_onroad = data * lane
             data_success = data * lane * success_mask.astype(np.float32)
             coverage_num["onroad"].append((data_onroad > self.threshold).sum())
@@ -810,22 +858,11 @@ class OccupancyCoverage(Occupancymet):
 
         return {k: np.array(v) for k, v in coverage_num.items()}
 
-    def get_episode_metrics(self):
-        return self.summarize_grid()
-
-
-class OccupancyCoverageMultiEpisode(OccupancyCoverage):
-    def reset(self):
-        pass
-
-    def get_episode_metrics(self):
-        return dict()
-
     def get_multi_episode_metrics(self):
         return self.summarize_grid()
 
-    def multi_episode_reset(self):
-        self.og.clear()
+    def get_episode_metrics(self):
+        return dict()
 
 
 class OccupancyDiversity(Occupancymet):
@@ -859,6 +896,7 @@ class OccupancyDiversity(Occupancymet):
                 raster_from_world=state_info["raster_from_world"][indices],
                 lane_map=drivable_area[indices],
                 agent_ids=state_info["track_id"],
+                episode_index=self.episode_index,
                 threshold=0.1,
                 weight=1
             )
@@ -889,7 +927,7 @@ class OccupancyDiversity(Occupancymet):
 
     def get_episode_metrics(self):
         self.episode_index+=1
-        return
+        return dict()
 
 
 class Occupancy_likelihood(EnvMetrics):

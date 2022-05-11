@@ -18,6 +18,7 @@ from tbsim.utils.geometry_utils import transform_points_tensor
 import tbsim.envs.env_metrics as EnvMetrics
 from tbsim.utils.timer import Timers
 from tbsim.utils.avdata_utils import parse_avdata_batch, get_drivable_region_map
+from tbsim.utils.rollout_logger import RolloutLogger
 
 
 class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
@@ -29,6 +30,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
             seed=0,
             prediction_only=False,
             metrics=None,
+            log_data=True,
             renderer=None
     ):
         """
@@ -57,11 +59,12 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         self._prediction_only = prediction_only
 
         self._cached_observation = None
-        self.episode_buffer = []
 
         self.timers = Timers()
 
         self._metrics = dict() if metrics is None else metrics
+        self._log_data = log_data
+        self.logger = None
 
     def update_random_seed(self, seed):
         self._npr = np.random.RandomState(seed=seed)
@@ -161,7 +164,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
             sim_scene: SimulationScene = SimulationScene(
                 env_name=self._env_config.name,
                 scene_name=si.name,
-                scene_info=si,
+                scene=si,
                 dataset=self.dataset,
                 init_timestep=start_frame_index,
                 freeze_agents=True,
@@ -175,12 +178,18 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         self._cached_observation = None
         self._done = False
 
+        obs_keys_to_log = [
+            "centroid",
+            "yaw",
+            "extent",
+            "world_from_agent",
+            "scene_index",
+            "track_id"
+        ]
+        self.logger = RolloutLogger(obs_keys=obs_keys_to_log)
+
         for v in self._metrics.values():
             v.reset()
-
-        self.episode_buffer = []
-        for _ in range(self.num_instances):
-            self.episode_buffer.append(dict(ego_obs=dict(), ego_action=dict(), agents_obs=dict(), agents_action=dict()))
 
     def render(self, actions_to_take):
         scene_ims = []
@@ -204,14 +213,12 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         return RolloutAction(agents=agents)
 
     def get_info(self):
-        for scene_buffer in self.episode_buffer:
-            for mk in scene_buffer:
-                for k in scene_buffer[mk]:
-                    scene_buffer[mk][k] = np.stack(scene_buffer[mk][k])
-
-        return {
-            "scene_index": self.current_scene_names,
-        }
+        info = dict(scene_index=self.current_scene_names)
+        if self._log_data:
+            sim_buffer = self.logger.get_serialized_scene_buffer()
+            sim_buffer = [sim_buffer[k] for k in self.current_scene_index]
+            info["buffer"] = sim_buffer
+        return info
 
     def get_multi_episode_metrics(self):
         metrics = dict()
@@ -281,6 +288,19 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
         return self._cached_observation
 
+    def get_observation_skimp(self):
+        self.timers.tic("obs_skimp")
+        raw_obs = []
+        for si, scene in enumerate(self._current_scenes):
+            raw_obs.extend(scene.get_obs(collate=False, get_map=False))
+        agent_obs = self.dataset.get_collate_fn(return_dict=True)(raw_obs)
+        agent_obs = parse_avdata_batch(agent_obs)
+        agent_obs = TensorUtils.to_numpy(agent_obs)
+        agent_obs["scene_index"] = self.current_agent_scene_index
+        agent_obs["track_id"] = self.current_agent_track_id
+        self.timers.toc("obs_skimp")
+        return dict(agents=agent_obs)
+
     def _add_per_step_metrics(self, obs):
         for k, v in self._metrics.items():
             v.add_step(obs, self.current_scene_index)
@@ -291,11 +311,25 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
         obs = self.get_observation()["agents"]
         # record metrics
-        self._add_per_step_metrics(obs)
+        with self.timers.timed("metrics"):
+            self._add_per_step_metrics(obs)
 
         action = step_actions.agents.to_dict()
         assert action["positions"].shape[0] == obs["centroid"].shape[0]
         for action_index in range(num_steps_to_take):
+            if action_index >= action["positions"].shape[1]:  # GT actions may be shorter
+                self._done = True
+                self._frame_index += action_index
+                self._cached_observation = None
+                return
+            # # log state and action
+            if self._log_data:
+                action_to_log = RolloutAction(
+                    agents=Action.from_dict(TensorUtils.map_ndarray(action, lambda x: x[:, action_index:])),
+                    agents_info=step_actions.agents_info
+                )
+                self.logger.log_step(self.get_observation_skimp(), action_to_log)
+
             idx = 0
             for scene in self._current_scenes:
                 scene_action = dict()
@@ -312,6 +346,8 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                     if not np.any(np.isnan(action["positions"][idx, action_index])):  # ground truth action may be NaN
                         next_state[:2] = action["positions"][idx, action_index] @ world_from_agent + curr_pos
                         next_state[2] = curr_yaw + action["yaws"][idx, action_index, 0]
+                    else:
+                        print("invalid action!")
                     scene_action[agent.name] = next_state
                     idx += 1
                 scene.step(scene_action, return_obs=False)

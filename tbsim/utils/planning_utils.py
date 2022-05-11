@@ -62,6 +62,15 @@ def get_drivable_area_loss(
     return lane_flags.max(dim=-1)[0]
 
 
+def get_total_distance(ego_trajectories):
+    # Assume format [..., T, 3]
+    assert ego_trajectories.shape[-1] == 3
+    diff = ego_trajectories[..., 1:, :] - ego_trajectories[..., :-1, :]
+    dist = torch.norm(diff[..., :2], dim=-1)
+    total_dist = torch.sum(dist, dim=-1)
+    return total_dist
+
+
 def ego_sample_planning(
     ego_trajectories,
     agent_trajectories,
@@ -71,7 +80,7 @@ def ego_sample_planning(
     raster_from_agent,
     dis_map,
     weights,
-    likelihood=None,
+    log_likelihood=None,
     col_funcs=None,
 ):
     col_loss = get_collision_loss(
@@ -85,16 +94,21 @@ def ego_sample_planning(
     lane_loss = get_drivable_area_loss(
         ego_trajectories, raster_from_agent, dis_map, ego_extents
     )
-    if likelihood is None:
-        total_score = (
-            -weights["collision_weight"] * col_loss -
-            weights["lane_weight"] * lane_loss
-        )
-    else:
-        total_score = (
-            likelihood
+    progress = get_total_distance(ego_trajectories)
+
+    log_likelihood = 0 if log_likelihood is None else log_likelihood
+    # print("coll={}, lane={}, progress={}, likelihood={}".format(
+    #     torch.max(col_loss) * weights["collision_weight"],
+    #     torch.max(lane_loss) * weights["lane_weight"],
+    #     torch.max(progress) * weights["progress_weight"],
+    #     torch.topk(log_likelihood.reshape(-1), k=10)[0] * weights["likelihood_weight"]
+    # ))
+
+    total_score = (
+            + weights["likelihood_weight"] * log_likelihood
+            + weights["progress_weight"] * progress
             - weights["collision_weight"] * col_loss
             - weights["lane_weight"] * lane_loss
-        )
+    )
 
     return torch.argmax(total_score, dim=1)

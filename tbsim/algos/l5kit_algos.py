@@ -288,7 +288,7 @@ class SpatialPlanner(pl.LightningModule):
             location_prob_map = location_prob_map * drivable_map.float()
 
         # decode map as predictions
-        pixel_pred, res_pred, yaw_pred, pred_logit = AlgoUtils.decode_spatial_prediction(
+        pixel_pred, res_pred, yaw_pred, pred_prob = AlgoUtils.decode_spatial_prediction(
             prob_map=location_prob_map,
             residual_yaw_map=pred_map[:, 1:],
             num_samples=num_samples,
@@ -306,7 +306,7 @@ class SpatialPlanner(pl.LightningModule):
                 positions=pos_pred,
                 yaws=yaw_pred
             ),
-            confidence=torch.sigmoid(pred_logit),
+            log_likelihood=torch.log(pred_prob),
             spatial_prediction=pred_map,
             location_map=location_map,
             location_prob_map=location_prob_map
@@ -333,7 +333,7 @@ class SpatialPlanner(pl.LightningModule):
         metrics["goal_selection_err"] = torch.mean(
             (goal_sup["goal_position_pixel_flat"].long() != pixel_pred).float()
         )
-        metrics["goal_cls_err"] = torch.mean((pred_batch["confidence"] < 0.5).float())
+        metrics["goal_cls_err"] = torch.mean((torch.exp(pred_batch["log_likelihood"]) < 0.5).float())
         metrics = TensorUtils.to_numpy(metrics)
         for k, v in metrics.items():
             metrics[k] = float(v)
@@ -379,7 +379,7 @@ class SpatialPlanner(pl.LightningModule):
         batch = batch_utils().parse_batch(batch)
         pout = self.forward(batch)
         batch["goal"] = AlgoUtils.get_spatial_goal_supervision(batch)
-        losses = self._compute_losses(pout, batch)
+        losses = self.compute_losses(pout, batch)
         total_loss = 0.0
         for lk, l in losses.items():
             loss = l * self.algo_config.loss_weights[lk]
@@ -387,7 +387,7 @@ class SpatialPlanner(pl.LightningModule):
             total_loss += loss
 
         with torch.no_grad():
-            metrics = self._compute_metrics(pout, batch)
+            metrics = self.compute_metrics(pout, batch)
         for mk, m in metrics.items():
             self.log("train/metrics_" + mk, m)
 
@@ -397,8 +397,8 @@ class SpatialPlanner(pl.LightningModule):
         batch = batch_utils().parse_batch(batch)
         pout = self(batch)
         batch["goal"] = AlgoUtils.get_spatial_goal_supervision(batch)
-        losses = TensorUtils.detach(self._compute_losses(pout, batch))
-        metrics = self._compute_metrics(pout, batch)
+        losses = TensorUtils.detach(self.compute_losses(pout, batch))
+        metrics = self.compute_metrics(pout, batch)
         return {"losses": losses, "metrics": metrics}
 
     def validation_epoch_end(self, outputs) -> None:
@@ -439,7 +439,7 @@ class SpatialPlanner(pl.LightningModule):
         plan = TensorUtils.map_tensor(plan_samples.to_dict(), lambda x: x[:, 0])
         plan = Plan.from_dict(plan)
 
-        return plan, dict(location_map=preds["location_map"], plan_samples=plan_samples)
+        return plan, dict(location_map=preds["location_map"], plan_samples=plan_samples, log_likelihood=preds["log_likelihood"])
 
 
 class L5VAETrafficModel(pl.LightningModule):

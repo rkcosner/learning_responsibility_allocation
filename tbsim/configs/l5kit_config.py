@@ -18,7 +18,7 @@ class L5KitTrainConfig(TrainConfig):
 
         self.rollout.enabled = False
         self.rollout.save_video = True
-        self.rollout.every_n_steps = 2000
+        self.rollout.every_n_steps = 5000
 
         # training config
         self.training.batch_size = 100
@@ -354,9 +354,9 @@ class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
         self.loss_weights.deviation_loss = 0.5
         self.eval.mode = "mean"
 
-        self.agent_future_cond.enabled=True
+        self.agent_future_cond.enabled = False
         self.agent_future_cond.feature_dim = 32
-        self.agent_future_cond.transformer =True
+        self.agent_future_cond.transformer = True
 
         self.min_std = 0.1
 
