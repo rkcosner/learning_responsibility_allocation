@@ -1,5 +1,5 @@
 import torch
-from typing import Tuple, Dict
+from typing import OrderedDict, Tuple, Dict
 
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.utils.batch_utils import batch_utils
@@ -203,3 +203,23 @@ class RolloutWrapper(object):
                 agents_action, agents_action_info = self.agents_policy.get_action(
                     obs["agents"], step_index = step_index)
         return RolloutAction(ego_action, ego_action_info, agents_action, agents_action_info)
+
+
+class PerturbationWrapper(object):
+    """A wrapper policy that perturbs the policy action with Ornstein Uhlenbeck noise"""
+
+    def __init__(self, policy, noise):
+        self.device = policy.device
+        self.noise = noise
+        self.policy = policy
+
+    def eval(self):
+        self.policy.eval()
+
+    def get_action(self, obs, **kwargs) -> Tuple[Action, Dict]:
+        actions, action_info = self.policy.get_action(obs, **kwargs)
+        actions_dict = OrderedDict(target_positions=actions.positions,target_yaws=actions.yaws) 
+        perturbed_action_dict = self.noise.perturb(TensorUtils.to_numpy(actions_dict))
+        perturbed_action_dict = TensorUtils.to_torch(perturbed_action_dict,self.device)
+        perturbed_actions = Action(perturbed_action_dict["target_positions"],perturbed_action_dict["target_yaws"])
+        return perturbed_actions, action_info

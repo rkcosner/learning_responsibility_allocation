@@ -190,7 +190,7 @@ class OccupancyMetric(pl.LightningModule):
 
     def compute_likelihood(self, occupancy_map, traj_pos, raster_from_agent):
         b, t, h, w = occupancy_map.shape  # [B, C, H, W]
-
+        
         # create spatial supervisions
         pos_raster = transform_points_tensor(
             traj_pos,
@@ -306,10 +306,15 @@ class OccupancyMetric(pl.LightningModule):
             weight_decay=optim_params["regularization"]["L2"],
         )
 
-    def get_metrics(self, obs_dict):
+    def get_metrics(self, obs_dict,horizon=None):
         occup_map = self.forward(obs_dict)["occupancy_map"]
+        b, t, h, w = occup_map.shape  # [B, C, H, W]
+        if horizon is None:
+            horizon = t
+        else:
+            assert horizon<=t
         li = self.compute_likelihood(occup_map, obs_dict["target_positions"], obs_dict["raster_from_agent"])
-        li["joint_likelihood"] = li["joint_likelihood"].mean(dim=-1)
-        li["indep_likelihood"] = li["indep_likelihood"].mean(dim=-1)
+        li["joint_likelihood"] = li["joint_likelihood"][:,:horizon].mean(dim=-1)
+        li["indep_likelihood"] = li["indep_likelihood"][:,:horizon].mean(dim=-1)
 
         return li

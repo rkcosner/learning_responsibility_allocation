@@ -476,8 +476,6 @@ class LearnedCVAENLL(EnvMetrics):
         state_info = dict(state_info)
         state_info["image"] = (state_info["image"] * 255.).astype(np.uint8)
         self.state_buffer.append(state_info)
-        
-
         self.total_steps += 1
 
     def compute_metric(self, state_buffer, all_scene_index):
@@ -547,6 +545,106 @@ class LearnedCVAENLL(EnvMetrics):
 
 
         return ep_metrics
+
+class LearnedCVAENLLRolling(LearnedCVAENLL):
+    def __init__(self, metric_algo, rolling_horizon=None, perturbations=None):
+        super(LearnedCVAENLLRolling, self).__init__(metric_algo,perturbations)
+        self.rolling_horizon = rolling_horizon
+
+    def reset(self):
+        self.state_buffer = []
+        self._per_step = []
+        self._per_step_mask = []
+        self.total_steps = 0
+
+    def __len__(self):
+        return self.total_steps
+
+    def add_step(self, state_info: dict, all_scene_index: np.ndarray):
+        state_info = dict(state_info)
+        state_info["image"] = (state_info["image"] * 255.).astype(np.uint8)
+        self.state_buffer.append(state_info)
+        self.total_steps += 1
+        step_metrics = self.compute_per_step(all_scene_index)
+        if step_metrics is not None:
+            self._per_step.append(step_metrics)
+
+    def compute_per_step(self, all_scene_index):
+        if len(self.state_buffer)<self.traj_len + 1:
+            return None
+        assert len(self.state_buffer) == self.traj_len + 1
+        appearance_idx = obtain_active_agent_index(self.state_buffer)
+        agent_selected = np.where((appearance_idx>=0).all(axis=1))[0]
+        # assemble score function input
+        state = dict(self.state_buffer[0])  # avoid changing the original state_dict
+        for k,v in state.items():
+            state[k]=v[agent_selected]
+        state["image"] = (state["image"] / 255.).astype(np.float32)
+        agent_from_world = state["agent_from_world"]
+        yaw_current = state["yaw"]
+
+        # transform traversed trajectories into the ego frame of a given state
+        traj_inds = range(1, self.traj_len + 1)
+        
+
+        traj_pos = [self.state_buffer[traj_i]["centroid"][appearance_idx[agent_selected,traj_i]] for traj_i in traj_inds]
+        traj_yaw = [self.state_buffer[traj_i]["yaw"][appearance_idx[agent_selected,traj_i]] for traj_i in traj_inds]
+        traj_pos = np.stack(traj_pos, axis=1)  # [B, T, 2]
+
+        traj_yaw = np.stack(traj_yaw, axis=1)  # [B, T]
+        assert traj_pos.shape[0] == traj_yaw.shape[0]
+        
+        agent_traj_pos = transform_points(points=traj_pos, transf_matrix=agent_from_world)
+        agent_traj_yaw = angular_distance(traj_yaw, yaw_current[:, None])
+
+        traj_to_eval = dict()
+        traj_to_eval["target_positions"] = agent_traj_pos
+        traj_to_eval["target_yaws"] = agent_traj_yaw[:, :, None]
+
+        state_torch = TensorUtils.to_torch(state, self.metric_algo.device)
+        metrics = dict()
+
+        traj_torch = TensorUtils.to_torch(traj_to_eval, self.metric_algo.device)
+        if isinstance(self.rolling_horizon,int):
+            m = self.metric_algo.get_metrics(state_torch,horizon=self.rolling_horizon)
+            for mk in m:
+                metrics[mk] = m[mk]
+        elif isinstance(self.rolling_horizon,list):
+            for horizon in self.rolling_horizon:
+                m = self.metric_algo.get_metrics(state_torch,horizon=horizon)
+                for mk in m:
+                    metrics["{}_horizon_{}".format(mk,horizon)] = m[mk]
+        
+        for k, v in self.perturbations.items():
+            traj_perturbed = TensorUtils.to_torch(v.perturb(traj_to_eval), self.metric_algo.device)
+            for kk,vv in traj_perturbed.items():
+                traj_perturbed[kk]=vv.type(torch.float32)
+            state_torch.update(traj_perturbed)
+            if isinstance(self.rolling_horizon,int):
+                rolling_horizon = self.rolling_horizon
+            elif isinstance(self.rolling_horizon,list):
+                rolling_horizon = self.rolling_horizon[0]
+            m = self.metric_algo.get_metrics(state_torch,horizon=rolling_horizon)
+            for mk in m:
+                metrics["{}_{}".format(k, mk)] = m[mk]
+
+        metrics= TensorUtils.to_numpy(metrics)
+        step_metrics = dict()
+        for k in metrics:
+            met, met_mask = step_aggregate_per_scene(metrics[k], state["scene_index"], all_scene_index)
+            assert np.all(met_mask > 0)  # since we will always use it for all agents
+            step_metrics[k] = met
+        self.state_buffer.pop(0)
+        return step_metrics
+
+    def get_episode_metrics(self):
+        scene_met = dict()
+        for k in self._per_step[0]:
+            scene_met_k = [step_met[k] for step_met in self._per_step]
+            scene_met_k = np.stack(scene_met_k,axis=0)
+            scene_met_k = scene_met_k.mean(0)
+            scene_met[k] = scene_met_k   
+        return scene_met
 
 def obtain_active_agent_index(state_buffer):
     agents_indices = dict()
@@ -854,8 +952,7 @@ class Occupancy_likelihood(EnvMetrics):
         traj_to_eval["target_positions"] = agent_traj_pos
         traj_to_eval["target_yaws"] = agent_traj_yaw[:, :, None]
         # evaluate score of the ground truth state
-        import pdb
-        pdb.set_trace()
+
         m = self.metric_algo.get_metrics(state_torch)
         for mk in m:
             metrics[mk] = m[mk]
@@ -885,6 +982,111 @@ class Occupancy_likelihood(EnvMetrics):
 
 
         return ep_metrics
+
+class Occupancy_rolling(Occupancy_likelihood):
+    def __init__(self, metric_algo, rolling_horizon, perturbations=None):
+        super(Occupancy_rolling, self).__init__(metric_algo,perturbations)
+        self.rolling_horizon = rolling_horizon
+
+    def reset(self):
+        self.state_buffer = []
+        self._per_step = []
+        self._per_step_mask = []
+        self.total_steps = 0
+
+    def __len__(self):
+        return self.total_steps
+
+    def add_step(self, state_info: dict, all_scene_index: np.ndarray):
+        state_info = dict(state_info)
+        state_info["image"] = (state_info["image"] * 255.).astype(np.uint8)
+        self.state_buffer.append(state_info)
+        self.total_steps += 1
+        step_metrics = self.compute_per_step(all_scene_index)
+        if step_metrics is not None:
+            self._per_step.append(step_metrics)
+
+
+    def compute_per_step(self, all_scene_index):
+        if len(self.state_buffer)<self.traj_len + 1:
+            return None
+        else:
+            assert len(self.state_buffer)==self.traj_len+1
+        appearance_idx = obtain_active_agent_index(self.state_buffer)
+        agent_selected = np.where((appearance_idx>=0).all(axis=1))[0]
+        # assemble score function input
+        state = dict(self.state_buffer[0])  # avoid changing the original state_dict
+        for k,v in state.items():
+            state[k]=v[agent_selected]
+        state["image"] = (state["image"] / 255.).astype(np.float32)
+        agent_from_world = state["agent_from_world"]
+        yaw_current = state["yaw"]
+
+        # transform traversed trajectories into the ego frame of a given state
+        traj_inds = range(1, self.traj_len + 1)
+        
+
+        traj_pos = [self.state_buffer[traj_i]["centroid"][appearance_idx[agent_selected,traj_i]] for traj_i in traj_inds]
+        traj_yaw = [self.state_buffer[traj_i]["yaw"][appearance_idx[agent_selected,traj_i]] for traj_i in traj_inds]
+        traj_pos = np.stack(traj_pos, axis=1)  # [B, T, 2]
+
+        traj_yaw = np.stack(traj_yaw, axis=1)  # [B, T]
+        assert traj_pos.shape[0] == traj_yaw.shape[0]
+        
+        agent_traj_pos = transform_points(points=traj_pos, transf_matrix=agent_from_world)
+        agent_traj_yaw = angular_distance(traj_yaw, yaw_current[:, None])
+
+
+
+        state_torch = TensorUtils.to_torch(state, self.metric_algo.device)
+        metrics = dict()
+        state_torch["target_positions"] = TensorUtils.to_torch(agent_traj_pos,self.metric_algo.device).type(torch.float32)
+        state_torch["target_yaws"] = TensorUtils.to_torch(agent_traj_yaw,self.metric_algo.device).type(torch.float32)
+        traj_to_eval = dict()
+        traj_to_eval["target_positions"] = agent_traj_pos
+        traj_to_eval["target_yaws"] = agent_traj_yaw[:, :, None]
+        # evaluate score of the ground truth state
+        if isinstance(self.rolling_horizon,int):
+            m = self.metric_algo.get_metrics(state_torch,horizon=self.rolling_horizon)
+            for mk in m:
+                metrics[mk] = m[mk]
+        elif isinstance(self.rolling_horizon,list):
+            for horizon in self.rolling_horizon:
+                m = self.metric_algo.get_metrics(state_torch,horizon=horizon)
+                for mk in m:
+                    metrics["{}_horizon_{}".format(mk,horizon)] = m[mk]
+        
+        for k, v in self.perturbations.items():
+            traj_perturbed = TensorUtils.to_torch(v.perturb(traj_to_eval), self.metric_algo.device)
+            for kk,vv in traj_perturbed.items():
+                traj_perturbed[kk]=vv.type(torch.float32)
+            state_torch.update(traj_perturbed)
+            if isinstance(self.rolling_horizon,int):
+                rolling_horizon = self.rolling_horizon
+            elif isinstance(self.rolling_horizon,list):
+                rolling_horizon = self.rolling_horizon[0]
+            m = self.metric_algo.get_metrics(state_torch,horizon=rolling_horizon)
+            for mk in m:
+                metrics["{}_{}".format(k, mk)] = m[mk]
+
+        metrics= TensorUtils.to_numpy(metrics)
+        step_metrics = dict()
+        for k in metrics:
+            met, met_mask = step_aggregate_per_scene(metrics[k], state["scene_index"], all_scene_index)
+            assert np.all(met_mask > 0)  # since we will always use it for all agents
+            step_metrics[k] = met
+        self.state_buffer.pop(0)
+        return step_metrics
+
+    def get_episode_metrics(self):
+        
+        scene_met = dict()
+        for k in self._per_step[0]:
+            scene_met_k = [step_met[k] for step_met in self._per_step]
+            scene_met_k = np.stack(scene_met_k,axis=0)
+            scene_met_k = scene_met_k.mean(0)
+            scene_met[k] = scene_met_k   
+        return scene_met
 
 def obtain_active_agent_index(state_buffer):
     agents_indices = dict()

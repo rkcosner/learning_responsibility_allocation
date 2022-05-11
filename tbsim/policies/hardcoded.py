@@ -18,8 +18,8 @@ from tbsim.policies.common import Action, Plan
 from tbsim.policies.base import Policy
 
 try:
-    from Pplan.spline_planner import SplinePlanner
-    from Pplan.trajectory_tree import TrajTree
+    from Pplan.Sampling.spline_planner import SplinePlanner
+    from Pplan.Sampling.trajectory_tree import TrajTree
 except ImportError:
     print("Cannot import Pplan")
 
@@ -254,3 +254,121 @@ class EC_sampling_controller(Policy):
         action_info["action_samples"] = {"positions":ego_traj_samples[...,:2],"yaws":ego_traj_samples[...,2:]}
         return action, action_info
         
+
+class ContingencyPlanner(Policy):
+    def __init__(self,ego_sampler,predictor,config,agent_planner=None,device="cpu"):
+        self.ego_sampler = ego_sampler
+        self.predictor = predictor
+        self.agent_planner = agent_planner
+        self.device = device
+        self.config = config
+        self.stage = config.stage
+        self.num_frames_per_stage = config.num_frames_per_stage
+        self.step_time = config.step_time
+        self.tf = self.stage*self.num_frames_per_stage*self.step_time
+
+        self.timer = Timers()
+    
+    def eval(self):
+        self.predictor.eval()
+        if self.agent_planner is not None:
+            self.agent_planner.eval()
+    
+    def get_action(self,obs,**kwargs)-> Tuple[Action, Dict]:
+        assert "agent_obs" in kwargs
+        agent_obs = kwargs["agent_obs"]
+        if self.agent_planner is not None:
+            agent_plan,_ = self.agent_planner.get_plan(agent_obs)
+            agent_plan = torch.cat((agent_plan.positions,agent_plan.yaws),-1)
+            agent_plan = agent_plan[...,-1,:]
+        else:
+            agent_plan=None
+        
+        self.timer.tic("sampling")
+        T = self.stage*self.num_frames_per_stage
+        bs = obs["history_positions"].shape[0]
+        agent_size = agent_obs["image"].shape[0]
+        ego_trajs = list()
+        #TODO: paralellize this process
+        ego_trees = list()
+        ego_nodes_by_stage = list()
+        for i in range(bs):
+            pos = obs["history_positions"][i,0]
+            vel = obs["curr_speed"][i]
+            yaw = obs["history_yaws"][i,0]
+            traj0 = torch.tensor([[pos[0], pos[1], vel, 0, yaw, 0., 0.]]).to(pos.device)
+            lanes = TensorUtils.to_numpy(obs["ego_lanes"][i])
+            lanes = np.concatenate((lanes[...,:2],np.arctan2(lanes[...,3:],lanes[...,2:3])),-1)
+            lanes = np.split(lanes,obs["ego_lanes"].shape[1])
+            lanes = [lane[0] for lane in lanes if not (lane==0).all()]
+            
+            def expand_func(x): return self.ego_sampler.gen_trajectory_batch(
+                    x, self.step_time*self.num_frames_per_stage, lanes,N=self.num_frames_per_stage+1)
+            x0 = TrajTree(traj0, None, 0)
+            
+            x0.grow_tree(expand_func, self.stage)
+            ego_trees.append(x0)
+            nodes = TrajTree.get_nodes_by_level(x0)
+            ego_nodes_by_stage.append(nodes)
+            if len(nodes[self.stage]) > 0:
+                ego_trajs_i = torch.stack([leaf.total_traj for leaf in nodes[self.stage]], 0).float()
+                ego_trajs_i = ego_trajs_i[...,1:,[0,1,4]] #TODO: make it less hacky
+            else:
+                ego_trajs_i = torch.cat((obs["target_positions"][i,:T],obs["target_yaws"][i,:T]),-1).unsqueeze(0)
+            ego_trajs.append(ego_trajs_i)
+        
+        self.timer.toc("sampling")
+        self.timer.tic("prediction")
+        Ns = max(ego_trajs_i.shape[0] for ego_trajs_i in ego_trajs)
+        cond_traj = torch.zeros([agent_size,Ns,T,3],dtype=torch.float32,device=obs["speed"].device)
+        ego_traj_samples = torch.zeros([bs,Ns,T,3],dtype=torch.float32)
+        for i in range(bs):
+            ego_traj_samples[i,:ego_trajs[i].shape[0]] = ego_trajs[i]
+            agent_idx = torch.where(agent_obs["scene_index"]==obs["scene_index"][i])[0]
+            ego_pos_world = GeoUtils.batch_nd_transform_points(ego_trajs[i][...,:2],obs["world_from_agent"][i].unsqueeze(0).float())
+            ego_pos_agent = GeoUtils.batch_nd_transform_points(
+                ego_pos_world.tile(agent_idx.shape[0],1,1,1),agent_obs["agent_from_world"][agent_idx,None,None].float()
+                )
+
+            ego_yaw_agent = (ego_trajs[i][...,2:]+obs["yaw"][i].float()).tile(agent_idx.shape[0],1,1,1)-agent_obs["yaw"][agent_idx].float().reshape(-1,1,1,1)
+            cond_traj[agent_idx,:ego_trajs[i].shape[0]] = torch.cat((ego_pos_agent,ego_yaw_agent),-1)
+        import pdb
+        pdb.set_trace()
+        EC_pred = self.predictor.get_EC_pred(agent_obs,cond_traj,agent_plan)["EC_pred"]
+        self.timer.toc("prediction")
+        self.timer.tic("planning")
+        drivable_map = get_drivable_region_map(obs["image"]).float()
+        dis_map = calc_distance_map(drivable_map)
+        
+        opt_traj = list()
+        for i in range(bs):
+            agent_idx = torch.where(agent_obs["scene_index"]==obs["scene_index"][i])[0]
+            N_i = ego_trajs[i].shape[0]
+
+            agent_pos_world = GeoUtils.batch_nd_transform_points(EC_pred["EC_trajectories"][agent_idx,:N_i,...,:2],agent_obs["world_from_agent"][agent_idx,None,None])
+            agent_pos_ego = GeoUtils.batch_nd_transform_points(agent_pos_world,obs["agent_from_world"][i].unsqueeze(0))
+            agent_yaw_ego =EC_pred["EC_trajectories"][agent_idx,:N_i,...,2:]+agent_obs["yaw"][agent_idx].reshape(-1,1,1,1)-obs["yaw"][i]
+            agent_traj = torch.cat((agent_pos_ego,agent_yaw_ego),-1)
+
+            idx = PlanUtils.ego_sample_planning(
+                ego_trajs[i].unsqueeze(0),
+                agent_traj.transpose(0,1).unsqueeze(0),
+                obs["extent"][i:i+1, :2],
+                agent_obs["extent"][None,agent_idx,:2],
+                agent_obs["type"][None,agent_idx],
+                obs["raster_from_world"][i].unsqueeze(0),                
+                dis_map[i].unsqueeze(0),
+                weights={"collision_weight": 1.0, "lane_weight": 1.0},
+            )[0]
+
+            opt_traj.append(ego_trajs[i][idx])
+        self.timer.toc("planning")
+        print(self.timer)
+        opt_traj = torch.stack(opt_traj,0)
+        action = Action(positions=opt_traj[...,:2],yaws=opt_traj[...,2:])
+        action_info = dict()
+        action_info["action_samples"] = {"positions":ego_traj_samples[...,:2],"yaws":ego_traj_samples[...,2:]}
+        return action, action_info
+
+
+    

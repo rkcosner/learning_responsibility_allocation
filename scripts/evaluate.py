@@ -7,6 +7,7 @@ import yaml
 import importlib
 
 import os
+from tbsim.utils.metrics import OrnsteinUhlenbeckPerturbation
 import torch
 
 from tbsim.utils.batch_utils import set_global_batch_type
@@ -16,7 +17,8 @@ from tbsim.evaluation.env_builders import EnvNuscBuilder, EnvL5Builder
 
 from tbsim.policies.wrappers import (
     RolloutWrapper,
-    Pos2YawWrapper
+    Pos2YawWrapper,
+    PerturbationWrapper
 )
 
 from tbsim.utils.tensor_utils import map_ndarray
@@ -61,6 +63,10 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
             dt=exp_config.algo.step_time,
             yaw_correction_speed=eval_cfg.policy.yaw_correction_speed
         )
+    if eval_cfg.rolling_perturb.enabled:
+        OU_pert = OrnsteinUhlenbeckPerturbation(theta=eval_cfg.rolling_perturb.OU.theta*np.ones(3),
+                    sigma=eval_cfg.rolling_perturb.OU.sigma*np.array(eval_cfg.rolling_perturb.OU.scale))
+        policy = PerturbationWrapper(policy,OU_pert)
 
     if eval_cfg.env == "nusc":
         rollout_policy = RolloutWrapper(agents_policy=policy)

@@ -696,22 +696,24 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
 
         return metrics
 
-    def get_metrics(self, data_batch, traj_batch=None):
+    def get_metrics(self, data_batch, traj_batch=None,horizon=None):
+        
         pout = self.nets["policy"](data_batch)
         bs, M = pout["x_recons"]["trajectories"].shape[:2]
+        if horizon is None:
+            horizon = pout["x_recons"]["trajectories"].shape[-2]
         if traj_batch is not None:
-            GT_traj = traj_batch["target_positions"].reshape(bs,-1)
+            GT_traj = traj_batch["target_positions"][:,:horizon].reshape(bs,-1)
         else:
-            GT_traj = data_batch["target_positions"].reshape(bs,-1)
-        pred_traj = pout["x_recons"]["trajectories"][...,:2].reshape(bs,M,-1)
+            GT_traj = data_batch["target_positions"][:,:horizon].reshape(bs,-1)
+        pred_traj = pout["x_recons"]["trajectories"][:,:,:horizon,:2].reshape(bs,M,-1)
         if "logvar" in pout["x_recons"]:
-            var = torch.exp(pout["x_recons"]["logvar"][...,:2]).reshape(bs,M,-1).clamp(min=1e-4)
+            var = torch.exp(pout["x_recons"]["logvar"][:,:,:horizon,:2]).reshape(bs,M,-1).clamp(min=1e-4)
         else:
             var = None
         self.algo_config.eval.mode="mean"
         with torch.no_grad():
             loglikelihood = Metrics.GMM_loglikelihood(GT_traj, pred_traj, var, pout["p"],mode=self.algo_config.eval.mode)
-
         return OrderedDict(loglikelihood=loglikelihood)
 
     def get_action(self, obs_dict, sample=True, num_action_samples=1, plan_samples=None, **kwargs):
@@ -1277,7 +1279,13 @@ class L5TreeVAETrafficModel(pl.LightningModule):
         return {"valLoss": "val/losses_prediction_loss"}
 
     def forward(self, obs_dict):
-        return self.nets["policy"].predict(obs_dict)["predictions"]
+        return self.nets["policy"](obs_dict)["predictions"]
+
+    def get_EC_pred(self,obs_dict,cond_traj,goal=None):
+        if goal is None:
+            return self.nets["policy"](obs_dict,cond_traj=cond_traj)
+        else:
+            return self.nets["policy"](obs_dict,cond_traj=cond_traj,goal=goal)
 
 
     def training_step(self, batch, batch_idx):

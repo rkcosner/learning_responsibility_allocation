@@ -59,12 +59,14 @@ class EnvironmentBuilder(object):
         learned_occu_metric = OccupancyMetrics(
             eval_config=self.eval_cfg,
             device=self.device,
-            ckpt_root_dir=self.eval_cfg.ckpt_root_dir
+            ckpt_root_dir=self.eval_cfg.ckpt_root_dir,
         )
 
         metrics = dict(
-            ego_cvae_metrics=cvae_metrics.get_metrics(perturbations=perturbations),
-            ego_occu_likelihood=learned_occu_metric.get_metrics(perturbations=perturbations)
+            ego_cvae_metrics=cvae_metrics.get_metrics(perturbations=perturbations,rolling = self.eval_cfg.cvae.rolling,
+            rolling_horizon = self.eval_cfg.cvae.rolling_horizon),
+            ego_occu_likelihood=learned_occu_metric.get_metrics(perturbations=perturbations,rolling = self.eval_cfg.occupancy.rolling,
+            rolling_horizon = self.eval_cfg.occupancy.rolling_horizon)
         )
         return metrics
 
