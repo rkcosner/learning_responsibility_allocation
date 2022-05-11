@@ -42,6 +42,8 @@ class RolloutLogger(object):
                 else:
                     combined["action"][k] = agents_action[k]
             if action.agents_info is not None and "action_samples" in action.agents_info:
+                if "action_samples" not in combined:
+                    combined["action_samples"] = dict()
                 samples = action.agents_info["action_samples"]
                 for k in samples:
                     if k in combined["action_samples"]:

@@ -30,6 +30,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
             seed=0,
             prediction_only=False,
             metrics=None,
+            log_data=True,
             renderer=None
     ):
         """
@@ -62,6 +63,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         self.timers = Timers()
 
         self._metrics = dict() if metrics is None else metrics
+        self._log_data = log_data
         self.logger = None
 
     def update_random_seed(self, seed):
@@ -212,8 +214,10 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
     def get_info(self):
         info = dict(scene_index=self.current_scene_names)
-        # sim_buffer = self.logger.get_serialized_scene_buffer()
-        # sim_buffer = [sim_buffer[k] for k in self.current_scene_index]
+        if self._log_data:
+            sim_buffer = self.logger.get_serialized_scene_buffer()
+            sim_buffer = [sim_buffer[k] for k in self.current_scene_index]
+            info["buffer"] = sim_buffer
         return info
 
     def get_multi_episode_metrics(self):
@@ -313,13 +317,18 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         action = step_actions.agents.to_dict()
         assert action["positions"].shape[0] == obs["centroid"].shape[0]
         for action_index in range(num_steps_to_take):
+            if action_index >= action["positions"].shape[1]:  # GT actions may be shorter
+                self._done = True
+                self._frame_index += action_index
+                self._cached_observation = None
+                return
             # # log state and action
-            # with self.timers.timed("logging"):
-            #     action_to_log = RolloutAction(
-            #         agents=Action.from_dict(TensorUtils.map_ndarray(action, lambda x: x[:, action_index:])),
-            #         agents_info=step_actions.agents_info
-            #     )
-            #     self.logger.log_step(self.get_observation_skimp(), action_to_log)
+            if self._log_data:
+                action_to_log = RolloutAction(
+                    agents=Action.from_dict(TensorUtils.map_ndarray(action, lambda x: x[:, action_index:])),
+                    agents_info=step_actions.agents_info
+                )
+                self.logger.log_step(self.get_observation_skimp(), action_to_log)
 
             idx = 0
             for scene in self._current_scenes:
@@ -337,6 +346,8 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                     if not np.any(np.isnan(action["positions"][idx, action_index])):  # ground truth action may be NaN
                         next_state[:2] = action["positions"][idx, action_index] @ world_from_agent + curr_pos
                         next_state[2] = curr_yaw + action["yaws"][idx, action_index, 0]
+                    else:
+                        print("invalid action!")
                     scene_action[agent.name] = next_state
                     idx += 1
                 scene.step(scene_action, return_obs=False)

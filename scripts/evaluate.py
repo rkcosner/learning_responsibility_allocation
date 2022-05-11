@@ -6,6 +6,7 @@ import random
 import yaml
 import importlib
 from collections import Counter
+from pprint import pprint
 
 import os
 import torch
@@ -108,7 +109,7 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
         )
 
         print(info["scene_index"])
-        print(stats)
+        pprint(stats)
 
         # aggregate metrics stats
         if result_stats is None:

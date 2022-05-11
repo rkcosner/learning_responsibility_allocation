@@ -21,10 +21,17 @@ def parse(args):
                 print("{} = {}".format(k, rnum))
             results[k] = rnum
     print("num_scenes: {}".format(len(rjson["scene_index"])))
+    ade = results["ade"] if "ade" in results else results["ADE"]
+    fde = results["fde"] if "fde" in results else results["FDE"]
 
     pprint(cfg["ckpt"])
     results_str = [
+        ade,
+        fde,
         results["all_failure_any"] * 100,
+        results["all_failure_coll"] * 100,
+        results["all_failure_offroad"] * 100,
+        results["all_diversity"],
         results["all_coverage_success"],
         results["all_coverage_total"],
         results["all_collision_rate_coll_any"] * 100,
