@@ -353,6 +353,8 @@ class RolloutCallback(pl.Callback):
 
                 stats = self._run_rollout(pl_module, trainer.global_step)
                 for k, v in stats.items():
+                    if "ttf" in k:  # avoid cluttering the plot
+                        continue
                     # Set on_step=True and on_epoch=False to force the logger to log stats at the step
                     # See https://github.com/PyTorchLightning/pytorch-lightning/issues/9772 for explanation
                     pl_module.log(

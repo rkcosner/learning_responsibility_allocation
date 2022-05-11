@@ -314,7 +314,7 @@ class CriticalFailure(EnvMetrics):
         coll_per_step = np.stack(self._per_step["coll"])
         offroad_per_step = np.stack(self._per_step["offroad"])
 
-        coll_ttf = np.ones(len(self._agent_track_id)) * -1  # time-to-failure
+        coll_ttf = np.ones(len(self._agent_track_id)) * np.inf  # time-to-failure
         offroad_ttf = coll_ttf.copy()
         num_steps = coll_per_step.shape[0]
         for i in range(num_steps):
@@ -324,25 +324,24 @@ class CriticalFailure(EnvMetrics):
             offroad = offroad_per_step[:i + 1].sum(axis=0)  # [A]
             offroad_failure = offroad >= self._num_offroad_frames
 
-            coll_ttf[np.bitwise_and(coll_failure, coll_ttf < 0)] = i
-            offroad_ttf[np.bitwise_and(offroad_failure, offroad_ttf < 0)] = i
-
-        offroad_failure = offroad_ttf >= 0
-        coll_failure = coll_ttf >= 0
-        any_failure = np.bitwise_or(offroad_failure, coll_failure)
+            coll_ttf[np.bitwise_and(coll_failure, np.isinf(coll_ttf))] = i
+            offroad_ttf[np.bitwise_and(offroad_failure, np.isinf(offroad_ttf))] = i
 
         any_ttf = np.minimum(coll_ttf, offroad_ttf)
 
-        bracket_step = 5
-        ttf_brackets = np.arange(bracket_step, num_steps + 1, bracket_step)
+        offroad_failure = offroad_ttf < num_steps
+        coll_failure = coll_ttf < num_steps
+        any_failure = any_ttf < num_steps
+
+        ttf_brackets = np.arange(0, num_steps + 1, 5)
         ttfs = dict()
-        for i in range(len(ttf_brackets)):
-            ttfs["offroad_ttf@{}".format(ttf_brackets[i])] = \
-                np.bitwise_and(offroad_ttf >= 0, offroad_ttf < ttf_brackets[i])
-            ttfs["coll_ttf@{}".format(ttf_brackets[i])] = \
-                np.bitwise_and(coll_ttf >= 0, coll_ttf < ttf_brackets[i])
-            ttfs["any_ttf@{}".format(ttf_brackets[i])] = \
-                np.bitwise_and(any_ttf >= 0, any_ttf < ttf_brackets[i])
+        for i in range(len(ttf_brackets) - 1):
+            ttfs["offroad_ttf@{}".format(ttf_brackets[i + 1])] = \
+                np.bitwise_and(offroad_ttf >= ttf_brackets[i], offroad_ttf < ttf_brackets[i + 1])
+            ttfs["coll_ttf@{}".format(ttf_brackets[i + 1])] = \
+                np.bitwise_and(coll_ttf >= ttf_brackets[i], coll_ttf < ttf_brackets[i + 1])
+            ttfs["any_ttf@{}".format(ttf_brackets[i + 1])] = \
+                np.bitwise_and(any_ttf >= ttf_brackets[i], any_ttf < ttf_brackets[i + 1])
 
         for k in ttfs:
             ttfs[k] = ttfs[k].astype(np.float32)
