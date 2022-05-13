@@ -44,8 +44,8 @@ class CVAEMetrics(MetricsComposer):
 
 
         ckpt_path, config_path = get_checkpoint(
-            ngc_job_id="1000001",
-            ckpt_key="iter27000_ep0_minADE0.60",
+            ngc_job_id="1000002",
+            ckpt_key="iter13000_ep0_minADE0.97",
             ckpt_root_dir=self.eval_config.ckpt_root_dir
         )
 
@@ -91,8 +91,8 @@ class OccupancyMetrics(MetricsComposer):
         # TODO: adding checkpoints
         
         ckpt_path, config_path = get_checkpoint(
-            ngc_job_id="0000001",
-            ckpt_key="iter62000_ep1_posErr0.71",
+            ngc_job_id="0000003",
+            ckpt_key="iter51000_ep1_posErr0.61",
             ckpt_root_dir=self.eval_config.ckpt_root_dir
         )
 

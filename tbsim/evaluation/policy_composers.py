@@ -258,6 +258,10 @@ class Hierarchical(PolicyComposer):
             algo_config=planner_cfg.algo,
             modality_shapes=self.get_modality_shapes(planner_cfg),
         ).to(self.device).eval()
+        # planner_cfg = get_experiment_config_from_file("/home/yuxiaoc/repos/behavior-generation/experiments/templates/l5_spatial_planner.json")
+        # planner = SpatialPlanner(algo_config=planner_cfg.algo,
+        #     modality_shapes=self.get_modality_shapes(planner_cfg),
+        # ).to(self.device).eval()
         return planner, planner_cfg.clone()
 
     def _get_gt_planner(self):

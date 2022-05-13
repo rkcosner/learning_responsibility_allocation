@@ -275,6 +275,8 @@ class ContingencyPlanner(Policy):
             self.agent_planner.eval()
     
     def get_action(self,obs,**kwargs)-> Tuple[Action, Dict]:
+        import pdb
+        pdb.set_trace()
         assert "agent_obs" in kwargs
         agent_obs = kwargs["agent_obs"]
         if self.agent_planner is not None:
@@ -304,12 +306,14 @@ class ContingencyPlanner(Policy):
             
             def expand_func(x): return self.ego_sampler.gen_trajectory_batch(
                     x, self.step_time*self.num_frames_per_stage, lanes,N=self.num_frames_per_stage+1)
-            x0 = TrajTree(traj0, None, 0)
             
+            x0 = TrajTree(traj0, None, 0)
             x0.grow_tree(expand_func, self.stage)
+            
             ego_trees.append(x0)
-            nodes = TrajTree.get_nodes_by_level(x0)
+            nodes,_ = TrajTree.get_nodes_by_level(x0,depth=self.stage)
             ego_nodes_by_stage.append(nodes)
+
             if len(nodes[self.stage]) > 0:
                 ego_trajs_i = torch.stack([leaf.total_traj for leaf in nodes[self.stage]], 0).float()
                 ego_trajs_i = ego_trajs_i[...,1:,[0,1,4]] #TODO: make it less hacky
@@ -332,9 +336,9 @@ class ContingencyPlanner(Policy):
 
             ego_yaw_agent = (ego_trajs[i][...,2:]+obs["yaw"][i].float()).tile(agent_idx.shape[0],1,1,1)-agent_obs["yaw"][agent_idx].float().reshape(-1,1,1,1)
             cond_traj[agent_idx,:ego_trajs[i].shape[0]] = torch.cat((ego_pos_agent,ego_yaw_agent),-1)
-        import pdb
-        pdb.set_trace()
+        
         EC_pred = self.predictor.get_EC_pred(agent_obs,cond_traj,agent_plan)["EC_pred"]
+        
         self.timer.toc("prediction")
         self.timer.tic("planning")
         drivable_map = get_drivable_region_map(obs["image"]).float()
@@ -342,26 +346,37 @@ class ContingencyPlanner(Policy):
         
         opt_traj = list()
         for i in range(bs):
+            
             agent_idx = torch.where(agent_obs["scene_index"]==obs["scene_index"][i])[0]
+            agent_obs_i = TensorUtils.slice_tensor(agent_obs,0,agent_idx[0],agent_idx[-1]+1)
             N_i = ego_trajs[i].shape[0]
+            agent_traj_local = EC_pred["trajectories"][agent_idx,:N_i].float()
+            prob = EC_pred["p"][agent_idx,:N_i]
 
-            agent_pos_world = GeoUtils.batch_nd_transform_points(EC_pred["EC_trajectories"][agent_idx,:N_i,...,:2],agent_obs["world_from_agent"][agent_idx,None,None])
-            agent_pos_ego = GeoUtils.batch_nd_transform_points(agent_pos_world,obs["agent_from_world"][i].unsqueeze(0))
-            agent_yaw_ego =EC_pred["EC_trajectories"][agent_idx,:N_i,...,2:]+agent_obs["yaw"][agent_idx].reshape(-1,1,1,1)-obs["yaw"][i]
+            agent_pos_world = GeoUtils.batch_nd_transform_points(
+                                                                 TensorUtils.join_dimensions(agent_traj_local[...,:2],1,3),
+                                                                 agent_obs["world_from_agent"][agent_idx,None,None].float()
+                                                                 )
+            agent_pos_world = TensorUtils.reshape_dimensions(agent_pos_world,1,2,agent_traj_local.shape[1:3])
+            agent_pos_ego = GeoUtils.batch_nd_transform_points(agent_pos_world,obs["agent_from_world"][i].unsqueeze(0).float())
+            agent_yaw_ego = agent_traj_local[...,2:]+agent_obs["yaw"][agent_idx].reshape(-1,1,1,1,1)-obs["yaw"][i]
             agent_traj = torch.cat((agent_pos_ego,agent_yaw_ego),-1)
 
-            idx = PlanUtils.ego_sample_planning(
-                ego_trajs[i].unsqueeze(0),
-                agent_traj.transpose(0,1).unsqueeze(0),
-                obs["extent"][i:i+1, :2],
-                agent_obs["extent"][None,agent_idx,:2],
-                agent_obs["type"][None,agent_idx],
-                obs["raster_from_world"][i].unsqueeze(0),                
-                dis_map[i].unsqueeze(0),
-                weights={"collision_weight": 1.0, "lane_weight": 1.0},
-            )[0]
+            motion_policy = PlanUtils.Contingency_planning(ego_nodes_by_stage[i],
+                                                           obs["extent"][i,:2],
+                                                           agent_traj,
+                                                           prob,
+                                                           agent_obs_i["extent"][...,:2],
+                                                           agent_obs_i["type"],
+                                                           obs["raster_from_agent"][i],
+                                                           dis_map[i],
+                                                           {"coll": 1.0, "lane": 1.0},
+                                                           self.num_frames_per_stage,
+                                                           self.predictor.algo_config.vae.latent_dim,
+                                                           )
+                                
 
-            opt_traj.append(ego_trajs[i][idx])
+            opt_traj.append(motion_policy.get_plan(None,self.stage*self.num_frames_per_stage))
         self.timer.toc("planning")
         print(self.timer)
         opt_traj = torch.stack(opt_traj,0)

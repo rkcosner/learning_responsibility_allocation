@@ -370,8 +370,8 @@ class L5RasterizedTreeVAEConfig(L5RasterizedPlanningConfig):
         self.map_feature_dim = 256
         self.goal_conditional = True
         self.goal_feature_dim = 32
-        self.stage = 3
-        self.num_frames_per_stage = 6
+        self.stage = 2
+        self.num_frames_per_stage = 10
 
         self.vae.latent_dim = 4
         self.vae.condition_dim = 128
