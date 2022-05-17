@@ -1,5 +1,6 @@
 from collections import defaultdict
 import numpy as np
+from scipy.interpolate import interp1d
 import torch
 import torch.nn as nn
 from tbsim.models.cnn_roi_encoder import obtain_lane_flag
@@ -14,6 +15,16 @@ from tbsim.utils.geometry_utils import (
 import tbsim.utils.tensor_utils as TensorUtils
 try:
     from Pplan.Sampling.tree import Tree
+    class agent_traj_tree(Tree):
+        def __init__(self, traj, parent, depth, prob=None):
+            self.traj = traj
+            self.children = list()
+            self.parent = parent
+            if parent is not None:
+                parent.expand(self)
+            self.depth = depth
+            self.prob = prob
+            self.attribute = dict()
 except:
     print("cannot find Pplan")
 
@@ -78,7 +89,7 @@ def ego_sample_planning(
     raster_from_agent,
     dis_map,
     weights,
-    likelihood=None,
+    log_likelihood=None,
     col_funcs=None,
 ):
     col_loss = get_collision_loss(
@@ -92,14 +103,14 @@ def ego_sample_planning(
     lane_loss = get_drivable_area_loss(
         ego_trajectories, raster_from_agent, dis_map, ego_extents
     )
-    if likelihood is None:
+    if log_likelihood is None:
         total_score = (
             -weights["collision_weight"] * col_loss -
             weights["lane_weight"] * lane_loss
         )
     else:
         total_score = (
-            likelihood
+            log_likelihood
             - weights["collision_weight"] * col_loss
             - weights["lane_weight"] * lane_loss
         )
@@ -107,16 +118,7 @@ def ego_sample_planning(
     return torch.argmax(total_score, dim=1)
 
 
-class agent_traj_tree(Tree):
-    def __init__(self, traj, parent, depth, prob=None):
-        self.traj = traj
-        self.children = list()
-        self.parent = parent
-        if parent is not None:
-            parent.expand(self)
-        self.depth = depth
-        self.prob = prob
-        self.attribute = dict()
+
     
 class tree_motion_policy(object):
     def __init__(self,stage,num_frames_per_stage,ego_root,scenario_root,cost_to_go,leaf_idx,curr_node):
@@ -290,3 +292,37 @@ def Contingency_planning(ego_tree,
     return motion_policy
 
             
+def obtain_ref(line, x, v, N, dt):
+    line_length = line.shape[0]
+    delta_x = line[..., 0:2] - np.repeat(x[..., np.newaxis, 0:2], line_length, axis=-2)
+    dis = np.linalg.norm(delta_x, axis=-1)
+    idx = np.argmin(dis, axis=-1)
+    line_min = line[idx]
+    dx = x[0] - line_min[0]
+    dy = x[1] - line_min[1]
+    delta_y = -dx * np.sin(line_min[2]) + dy * np.cos(line_min[2])
+    delta_x = dx * np.cos(line_min[2]) + dy * np.sin(line_min[2])
+    refx0 = np.array(
+        [
+            line_min[0] + delta_x * np.cos(line_min[2]),
+            line_min[1] + delta_x * np.sin(line_min[2]),
+            line_min[2],
+        ]
+    )
+    s = [np.linalg.norm(line[idx + 1, 0:2] - refx0[0:2])]
+    for i in range(idx + 2, line_length):
+        s.append(s[-1] + np.linalg.norm(line[i, 0:2] - line[i - 1, 0:2]))
+    f = interp1d(
+        np.array(s),
+        line[idx + 1 :],
+        kind="linear",
+        axis=0,
+        copy=True,
+        bounds_error=False,
+        fill_value="extrapolate",
+        assume_sorted=True,
+    )
+    s1 = v * np.arange(1, N + 1) * dt
+    refx = f(s1)
+
+    return refx

@@ -702,18 +702,29 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
         bs, M = pout["x_recons"]["trajectories"].shape[:2]
         if horizon is None:
             horizon = pout["x_recons"]["trajectories"].shape[-2]
+        horizon = min([horizon,pout["x_recons"]["trajectories"].shape[-2]])
+        if "logvar" in pout["x_recons"]:
+            horizon = min([horizon,pout["x_recons"]["logvar"].shape[-2]])
         if traj_batch is not None:
+            horizon = min([traj_batch["target_positions"].shape[-2],horizon])
             GT_traj = traj_batch["target_positions"][:,:horizon].reshape(bs,-1)
         else:
             GT_traj = data_batch["target_positions"][:,:horizon].reshape(bs,-1)
-        pred_traj = pout["x_recons"]["trajectories"][:,:,:horizon,:2].reshape(bs,M,-1)
         if "logvar" in pout["x_recons"]:
             var = torch.exp(pout["x_recons"]["logvar"][:,:,:horizon,:2]).reshape(bs,M,-1).clamp(min=1e-4)
         else:
             var = None
+        pred_traj = pout["x_recons"]["trajectories"][:,:,:horizon,:2].reshape(bs,M,-1)
+        
         self.algo_config.eval.mode="mean"
         with torch.no_grad():
-            loglikelihood = Metrics.GMM_loglikelihood(GT_traj, pred_traj, var, pout["p"],mode=self.algo_config.eval.mode)
+            try:
+                loglikelihood = Metrics.GMM_loglikelihood(GT_traj, pred_traj, var, pout["p"],mode=self.algo_config.eval.mode)
+            except:
+                horizon1 = min([GT_traj.shape[-1],pred_traj.shape[-1]])
+                if var is not None:
+                    horizon1 = min([horizon1,var.shape[-1]])
+                loglikelihood = Metrics.GMM_loglikelihood(GT_traj[...,:horizon1], pred_traj[...,:horizon1], var[...,:horizon1], pout["p"],mode=self.algo_config.eval.mode)    
         return OrderedDict(loglikelihood=loglikelihood)
 
     def get_action(self, obs_dict, sample=True, num_action_samples=1, plan_samples=None, **kwargs):

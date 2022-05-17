@@ -15,11 +15,12 @@ class EvaluationConfig(Dict):
         self.num_scenes_per_batch = 4
         self.num_scenes_to_evaluate = 100
 
-        self.num_episode_repeats = 1
+        self.num_episode_repeats = 4
         self.start_frame_index_each_episode = None  # same length as num_episode_repeats
         self.seed_each_episode = None  # same length as num_episode_repeats
 
         self.ego_only = False
+        self.agent_eval_class = None
 
         self.ckpt_root_dir = "checkpoints/"
         self.experience_hdf5_path = None
@@ -41,7 +42,7 @@ class EvaluationConfig(Dict):
         self.policy.mask_drivable = True
         self.policy.num_plan_samples = 50
         self.policy.num_action_samples = 10
-        self.policy.pos_to_yaw = True
+        self.policy.pos_to_yaw = False
         self.policy.yaw_correction_speed = 1.0
         self.policy.diversification_clearance = None
         self.policy.sample = True
@@ -52,9 +53,9 @@ class EvaluationConfig(Dict):
         self.policy.cost_weights.progress_weight = 0.0  # 0.005
 
         self.metrics.compute_analytical_metrics = True
-        self.metrics.compute_learned_metrics = False
+        self.metrics.compute_learned_metrics = True
 
-        self.perturb.enabled = False
+        self.perturb.enabled = True
         self.perturb.OU.theta = 0.8
         self.perturb.OU.sigma = [0.1,0.2,0.5,1.0,2.0,4.0]
         self.perturb.OU.scale = [1.0,1.0,0.2]
@@ -64,20 +65,20 @@ class EvaluationConfig(Dict):
         self.rolling_perturb.OU.sigma = 0.5
         self.rolling_perturb.OU.scale = [1.0,1.0,0.2]
 
-        self.occupancy.rolling = False
+        self.occupancy.rolling = True
         self.occupancy.rolling_horizon = [5,10,20]
 
-        self.cvae.rolling = False
+        self.cvae.rolling = True
         self.cvae.rolling_horizon = [5,10,20]
 
         self.nusc.eval_scenes = np.arange(100).tolist()
         self.nusc.n_step_action = 5
-        self.nusc.num_simulation_steps = 200
+        self.nusc.num_simulation_steps = 21
         self.nusc.skip_first_n = 0
 
         self.l5kit.eval_scenes = [9058, 5232, 14153, 8173, 10314, 7027, 9812, 1090, 9453, 978, 10263, 874, 5563, 9613, 261, 2826, 2175, 9977, 6423, 1069, 1836, 8198, 5034, 6016, 2525, 927, 3634, 11806, 4911, 6192, 11641, 461, 142, 15493, 4919, 8494, 14572, 2402, 308, 1952, 13287, 15614, 6529, 12, 11543, 4558, 489, 6876, 15279, 6095, 5877, 8928, 10599, 16150, 11296, 9382, 13352, 1794, 16122, 12429, 15321, 8614, 12447, 4502, 13235, 2919, 15893, 12960, 7043, 9278, 952, 4699, 768, 13146, 8827, 16212, 10777, 15885, 11319, 9417, 14092, 14873, 6740, 11847, 15331, 15639, 11361, 14784, 13448, 10124, 4872, 3567, 5543, 2214, 7624, 10193, 7297, 1308, 3951, 14001]
         self.l5kit.n_step_action = 5
-        self.l5kit.num_simulation_steps = 21
+        self.l5kit.num_simulation_steps = 200
         self.l5kit.skip_first_n = 1
         self.l5kit.skimp_rollout = False
 

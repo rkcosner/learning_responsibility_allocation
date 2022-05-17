@@ -24,6 +24,7 @@ setup(
         "pyemd",
         "h5py",
         "imageio-ffmpeg",
+        "casadi",
         "torchtext",  # weird pytorch-lightning dependency bug
     ],
     eager_resources=["*"],

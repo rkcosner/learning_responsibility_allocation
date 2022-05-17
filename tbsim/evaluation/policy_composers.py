@@ -12,7 +12,14 @@ from tbsim.utils.batch_utils import batch_utils
 from tbsim.algos.multiagent_algos import MATrafficModel, HierarchicalAgentAwareModel
 from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.utils.config_utils import get_experiment_config_from_file
-from tbsim.policies.hardcoded import ReplayPolicy, GTPolicy, EC_sampling_controller, ContingencyPlanner
+from tbsim.policies.hardcoded import (
+    ReplayPolicy, 
+    GTPolicy, 
+    EC_sampling_controller, 
+    ContingencyPlanner,
+    ModelPredictiveController,
+    HierSplineSamplingPolicy,
+    )
 from tbsim.configs.base import ExperimentConfig
 
 from tbsim.policies.wrappers import (
@@ -434,6 +441,69 @@ class HierAgentAwareCVAE(Hierarchical):
         policy = SamplingPolicyWrapper(ego_action_sampler=sampler, agent_traj_predictor=predictor)
         return policy, exp_cfg
 
+class HierAgentAwareMPC(Hierarchical):
+    def _get_predictor(self):
+        predictor_ckpt_path, predictor_config_path = get_checkpoint(
+            ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
+            ckpt_key=self.eval_config.ckpt.predictor.ckpt_key,
+            ckpt_root_dir=self.ckpt_root_dir
+        )
+        predictor_cfg = get_experiment_config_from_file(predictor_config_path)
+
+        predictor = MATrafficModel.load_from_checkpoint(
+            predictor_ckpt_path,
+            algo_config=predictor_cfg.algo,
+            modality_shapes=self.get_modality_shapes(predictor_cfg),
+        ).to(self.device).eval()
+        return predictor, predictor_cfg.clone()
+
+    def get_policy(self, planner=None, predictor=None, controller=None):
+        if planner is not None:
+            assert isinstance(planner, SpatialPlanner)
+        else:
+            planner, _ = self._get_planner()
+
+        if predictor is not None:
+            assert isinstance(predictor, MATrafficModel)
+            exp_cfg = None
+        else:
+            predictor, exp_cfg = self._get_predictor()
+            exp_cfg = exp_cfg.clone()
+        exp_cfg.env.data_generation_params.vectorize_lane = True
+        policy = ModelPredictiveController(self.device, exp_cfg.algo.step_time, predictor)
+        return policy, exp_cfg
+
+class HAASplineSampling(Hierarchical):
+    def _get_predictor(self):
+        predictor_ckpt_path, predictor_config_path = get_checkpoint(
+            ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
+            ckpt_key=self.eval_config.ckpt.predictor.ckpt_key,
+            ckpt_root_dir=self.ckpt_root_dir
+        )
+        predictor_cfg = get_experiment_config_from_file(predictor_config_path)
+
+        predictor = MATrafficModel.load_from_checkpoint(
+            predictor_ckpt_path,
+            algo_config=predictor_cfg.algo,
+            modality_shapes=self.get_modality_shapes(predictor_cfg),
+        ).to(self.device).eval()
+        return predictor, predictor_cfg.clone()
+
+    def get_policy(self, planner=None, predictor=None, controller=None):
+        if planner is not None:
+            assert isinstance(planner, SpatialPlanner)
+        else:
+            planner, _ = self._get_planner()
+
+        if predictor is not None:
+            assert isinstance(predictor, MATrafficModel)
+            exp_cfg = None
+        else:
+            predictor, exp_cfg = self._get_predictor()
+            exp_cfg = exp_cfg.clone()
+        exp_cfg.env.data_generation_params.vectorize_lane = True
+        policy = HierSplineSamplingPolicy(self.device, exp_cfg.algo.step_time, predictor)
+        return policy, exp_cfg
 
 class HPnC(PolicyComposer):
     def get_policy(self, policy=None):

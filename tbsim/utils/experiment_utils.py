@@ -246,6 +246,8 @@ def launch_experiments_ngc(
             "pip install -e .; pip install numpy==1.21.4;",
             "cd {}/uadl;".format(ngc_config["workspace_mounting_point"]),
             "pip install -r requirements.txt; pip install -e .;",
+            "cd {}/Pplan;".format(ngc_config["workspace_mounting_point"]),
+            "pip install -e .;",
             "cd {}/tbsim;".format(ngc_config["workspace_mounting_point"]),
         ]
         py_cmd.extend(script_command)

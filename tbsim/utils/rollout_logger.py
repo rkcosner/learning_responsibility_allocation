@@ -42,14 +42,14 @@ class RolloutLogger(object):
                 else:
                     combined["action"][k] = agents_action[k]
             if action.agents_info is not None and "action_samples" in action.agents_info:
-                if "action_samples" not in combined:
-                    combined["action_samples"] = dict()
-                samples = action.agents_info["action_samples"]
-                for k in samples:
-                    if k in combined["action_samples"]:
-                        combined["action_samples"][k] = np.concatenate((combined["action_samples"][k], samples[k]), axis=0)
-                    else:
-                        combined["action_samples"][k] = samples[k]
+                if "action_samples" in combined:
+                    samples = action.agents_info["action_samples"]
+                    for k in samples:
+                        if k in combined["action_samples"]:
+                            combined["action_samples"][k] = np.concatenate((combined["action_samples"][k], samples[k]), axis=0)
+                        else:
+                            combined["action_samples"][k] = samples[k]
+
         return combined
 
     def _maybe_initialize(self, obs):
@@ -82,8 +82,10 @@ class RolloutLogger(object):
             state["action_sample_yaws"] = action["action_samples"]["yaws"][:, :10]
 
         for si in self._scene_indices:
+
             scene_mask = np.where(si == obs["scene_index"])[0]
             scene_state = TensorUtils.map_ndarray(state, lambda x: x[scene_mask])
+
             reassignment_index = np.zeros(len(scene_mask), dtype=np.int64)
             scene_track_id = scene_state["track_id"]
             for i, ti in enumerate(scene_track_id):

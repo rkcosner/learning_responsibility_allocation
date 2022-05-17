@@ -34,6 +34,7 @@ class EnvironmentBuilder(object):
         metrics = dict(
             all_off_road_rate=EnvMetrics.OffRoadRate(),
             all_collision_rate=EnvMetrics.CollisionRate(),
+            agents_collision_rate=EnvMetrics.CollisionRate(),
             all_coverage=EnvMetrics.OccupancyCoverage(
                 gridinfo={"offset": np.zeros(2), "step": 2.0*np.ones(2)},
             ),
@@ -55,7 +56,7 @@ class EnvironmentBuilder(object):
         cvae_metrics = CVAEMetrics(
             eval_config=self.eval_cfg,
             device=self.device,
-            ckpt_root_dir=self.eval_cfg.ckpt_root_dir
+            ckpt_root_dir=self.eval_cfg.ckpt_root_dir,
         )
 
         learned_occu_metric = OccupancyMetrics(
@@ -65,10 +66,10 @@ class EnvironmentBuilder(object):
         )
 
         metrics = dict(
-            ego_cvae_metrics=cvae_metrics.get_metrics(perturbations=perturbations,rolling = self.eval_cfg.cvae.rolling,
-            rolling_horizon = self.eval_cfg.cvae.rolling_horizon),
-            ego_occu_likelihood=learned_occu_metric.get_metrics(perturbations=perturbations,rolling = self.eval_cfg.occupancy.rolling,
-            rolling_horizon = self.eval_cfg.occupancy.rolling_horizon)
+            all_cvae_metrics=cvae_metrics.get_metrics(perturbations=perturbations,rolling = self.eval_cfg.cvae.rolling,
+            rolling_horizon = self.eval_cfg.cvae.rolling_horizon,env=self.eval_cfg.env,),
+            all_occu_likelihood=learned_occu_metric.get_metrics(perturbations=perturbations,rolling = self.eval_cfg.occupancy.rolling,
+            rolling_horizon = self.eval_cfg.occupancy.rolling_horizon,env=self.eval_cfg.env,)
         )
         return metrics
 
@@ -166,7 +167,6 @@ class EnvNuscBuilder(EnvironmentBuilder):
             metrics.update(self._get_analytical_metrics())
         if self.eval_cfg.metrics.compute_learned_metrics:
             metrics.update(self._get_learned_metrics())
-
         env = EnvUnifiedSimulation(
             exp_cfg.env,
             dataset=env_dataset,

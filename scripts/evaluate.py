@@ -69,13 +69,21 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
         OU_pert = OrnsteinUhlenbeckPerturbation(theta=eval_cfg.rolling_perturb.OU.theta*np.ones(3),
                     sigma=eval_cfg.rolling_perturb.OU.sigma*np.array(eval_cfg.rolling_perturb.OU.scale))
         policy = PerturbationWrapper(policy,OU_pert)
+    
+    if eval_cfg.agent_eval_class is not None:
+        composer_class = getattr(policy_composers, eval_cfg.agent_eval_class)
+        composer = composer_class(eval_cfg, device, ckpt_root_dir=eval_cfg.ckpt_root_dir)
+        agent_policy, _ = composer.get_policy()
 
     if eval_cfg.env == "nusc":
         rollout_policy = RolloutWrapper(agents_policy=policy)
     elif eval_cfg.ego_only:
         rollout_policy = RolloutWrapper(ego_policy=policy)
     else:
-        rollout_policy = RolloutWrapper(ego_policy=policy, agents_policy=policy)
+        if eval_cfg.agent_eval_class is not None:
+            rollout_policy = RolloutWrapper(ego_policy=policy, agents_policy=agent_policy)
+        else:
+            rollout_policy = RolloutWrapper(ego_policy=policy, agents_policy=policy)
 
     print(exp_config.algo)
 
@@ -201,6 +209,13 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--agent_eval_class",
+        type=str,
+        default=None,
+        help="Optionally specify the evaluation class for agents if it's different from ego"
+    )
+
+    parser.add_argument(
         "--ckpt_root_dir",
         type=str,
         default=None,
@@ -280,11 +295,15 @@ if __name__ == "__main__":
     if args.prefix is not None:
         cfg.name = args.prefix + cfg.name
 
+    if args.agent_eval_class is not None:
+        cfg.agent_eval_class = args.agent_eval_class
+
     if args.seed is not None:
         cfg.seed = args.seed
-
     if args.results_root_dir is not None:
         cfg.results_dir = os.path.join(args.results_root_dir, cfg.name)
+    else:
+        cfg.results_dir = os.path.join(cfg.results_dir, cfg.name)
 
     if args.env is not None:
         cfg.env = args.env

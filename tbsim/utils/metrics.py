@@ -564,16 +564,17 @@ class OrnsteinUhlenbeckPerturbation(object):
     def perturb(self,obs):
         target_traj = np.concatenate((obs["target_positions"], obs["target_yaws"]), axis=-1)
         bs = target_traj.shape[0]
+        T = target_traj.shape[-2]
         if bs in self.buffers:
             buffer = self.buffers[bs]
         else:
             buffer = [np.zeros([bs,3])]
             self.buffers[bs]=buffer
-        while len(buffer)<target_traj.shape[-2]:
+        while len(buffer)<T:
             buffer.append(buffer[-1]-self.theta*buffer[-1]+np.random.randn(bs,3)*self.sigma)
         noise = np.stack(buffer,axis=1)
-        target_traj += noise
+        target_traj += noise[...,:T,:]
         obs["target_positions"] = target_traj[..., :2].astype(np.float32)
-        obs["target_yaws"] = target_traj[..., :1].astype(np.float32)
+        obs["target_yaws"] = target_traj[..., 2:].astype(np.float32)
         buffer.pop(0)
         return obs

@@ -11,26 +11,41 @@ from tbsim.utils.experiment_utils import ParamConfig, create_evaluation_configs,
 def configs_to_search(base_cfg):
     """Override this with your hyperparameter search plan"""
     plan = ParamSearchPlan()
-    # plan.extend(plan.compose_cartesian([
-    #                                     ParamRange("l5kit.num_simulation_steps", alias="horizon", range=[21]),
-    #                                     ParamRange("start_frame_index_each_episode", alias="t0", range=[[25,50,75,100]]),
-    #                                     ParamRange("num_episode_repeats", alias="repeats", range=[4]),
-    #                                     ParamRange("cvae.rolling", alias="cr", range=[False]),
-    #                                     ParamRange("occupancy.rolling", alias="or", range=[False])
-    #                                     ]))
-    # plan.extend(plan.compose_cartesian([
-    #                                     ParamRange("l5kit.num_simulation_steps", alias="horizon", range=[200]),
-    #                                     ParamRange("num_episode_repeats", alias="repeats", range=[4]),
-    #                                     ParamRange("cvae.rolling", alias="cr", range=[True]),
-    #                                     ParamRange("occupancy.rolling", alias="or", range=[True])
-    #                                     ]))
-    plan.extend(plan.compose_cartesian([
-                                        ParamRange("perturb.enabled", alias="p", range=[False]),
-                                        ParamRange("cvae.rolling", alias="cr", range=[True]),
-                                        ParamRange("occupancy.rolling", alias="or", range=[True]),
-                                        ParamRange("rolling_perturb.enabled", alias="rp", range=[True]),
-                                        ParamRange("rolling_perturb.OU.sigma", alias="sigma", range=[0.1,0.2,0.5,1.0,2.0]),
-                                        ]))
+    if base_cfg.env=="l5kit":
+        if base_cfg.eval_class not in ["HierAgentAwareMPC", "HAASplineSampling"]:
+            plan.extend(plan.compose_cartesian([
+                                                ParamRange("l5kit.num_simulation_steps", alias="horizon", range=[200]),
+                                                ParamRange("perturb.enabled", alias="p", range=[False]),
+                                                ParamRange("num_episode_repeats", alias="repeats", range=[4]),
+                                                ParamRange("cvae.rolling", alias="cr", range=[True]),
+                                                ParamRange("occupancy.rolling", alias="or", range=[True]),
+                                                ParamRange("rolling_perturb.enabled", alias="rp", range=[True]),
+                                                ParamRange("policy.pos_to_yaw", alias="p2y", range=[False]),
+                                                ParamRange("rolling_perturb.OU.sigma", alias="sigma", range=[0.0,0.1,0.2,0.5,1.0,2.0]),
+                                                ]))
+        else:
+            plan.extend(plan.compose_cartesian([
+                                                ParamRange("l5kit.num_simulation_steps", alias="horizon", range=[200]),
+                                                ParamRange("perturb.enabled", alias="p", range=[False]),
+                                                ParamRange("num_episode_repeats", alias="repeats", range=[4]),
+                                                ParamRange("cvae.rolling", alias="cr", range=[True]),
+                                                ParamRange("occupancy.rolling", alias="or", range=[True]),
+                                                ParamRange("rolling_perturb.enabled", alias="rp", range=[False]),
+                                                ParamRange("policy.pos_to_yaw", alias="p2y", range=[False]),
+                                                ParamRange("agent_eval_class", alias="ac", range=["HierAgentAware"]),
+                                                ]))
+        
+    elif base_cfg.env=="nusc":
+        plan.extend(plan.compose_cartesian([
+                                            ParamRange("nusc.num_simulation_steps", alias="horizon", range=[200]),
+                                            ParamRange("perturb.enabled", alias="p", range=[False]),
+                                            ParamRange("num_episode_repeats", alias="repeats", range=[4]),
+                                            ParamRange("cvae.rolling", alias="cr", range=[True]),
+                                            ParamRange("occupancy.rolling", alias="or", range=[True]),
+                                            ParamRange("rolling_perturb.enabled", alias="rp", range=[True]),
+                                            ParamRange("policy.pos_to_yaw", alias="p2y", range=[True]),
+                                            ParamRange("rolling_perturb.OU.sigma", alias="sigma", range=[0.0,0.1,0.2,0.5,1.0,2.0]),
+                                            ]))
     return plan.generate_configs(base_cfg=base_cfg)
 
 

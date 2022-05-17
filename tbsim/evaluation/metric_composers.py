@@ -39,15 +39,21 @@ class MetricsComposer(object):
 
 
 class CVAEMetrics(MetricsComposer):
-    def get_metrics(self, perturbations = None,rolling = False, **kwargs):
+    def get_metrics(self, perturbations = None,rolling = False,env="l5kit", **kwargs):
         # TODO: pass in perturbations through kwargs
 
-
-        ckpt_path, config_path = get_checkpoint(
-            ngc_job_id="1000002",
-            ckpt_key="iter13000_ep0_minADE0.97",
-            ckpt_root_dir=self.eval_config.ckpt_root_dir
-        )
+        if env=="nusc":
+            ckpt_path, config_path = get_checkpoint(
+                ngc_job_id="1000002",
+                ckpt_key="iter13000_ep0_minADE0.97",
+                ckpt_root_dir=self.eval_config.ckpt_root_dir
+            )
+        elif env=="l5kit":
+            ckpt_path, config_path = get_checkpoint(
+                ngc_job_id="1000001",
+                ckpt_key="iter27000_ep0_minADE0.60",
+                ckpt_root_dir=self.eval_config.ckpt_root_dir
+            )
 
         controller_cfg = get_experiment_config_from_file(config_path)
         modality_shapes = batch_utils().get_modality_shapes(controller_cfg)
@@ -87,14 +93,21 @@ class learnedEBMMetric(MetricsComposer):
 
 
 class OccupancyMetrics(MetricsComposer):
-    def get_metrics(self, perturbations = None, rolling=False, **kwargs):
+    def get_metrics(self, perturbations = None, rolling=False, env="l5kit", **kwargs):
         # TODO: adding checkpoints
         
-        ckpt_path, config_path = get_checkpoint(
-            ngc_job_id="0000003",
-            ckpt_key="iter51000_ep1_posErr0.61",
-            ckpt_root_dir=self.eval_config.ckpt_root_dir
-        )
+        if env=="nusc":
+            ckpt_path, config_path = get_checkpoint(
+                ngc_job_id="0000003",
+                ckpt_key="iter51000_ep1_posErr0.61",
+                ckpt_root_dir=self.eval_config.ckpt_root_dir
+            )
+        elif env=="l5kit":
+            ckpt_path, config_path = get_checkpoint(
+                ngc_job_id="0000001",
+                ckpt_key="iter62000_ep1_posErr0.71",
+                ckpt_root_dir=self.eval_config.ckpt_root_dir
+            )
 
         cfg = get_experiment_config_from_file(config_path)
 

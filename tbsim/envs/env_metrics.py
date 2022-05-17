@@ -603,7 +603,8 @@ class LearnedCVAENLLRolling(LearnedCVAENLL):
     def compute_per_step(self, all_scene_index):
         if len(self.state_buffer)<self.traj_len + 1:
             return None
-        assert len(self.state_buffer) == self.traj_len + 1
+        # assert len(self.state_buffer) == self.traj_len + 1
+        self.state_buffer = self.state_buffer[-self.traj_len-1:]
         appearance_idx = obtain_active_agent_index(self.state_buffer)
         agent_selected = np.where((appearance_idx>=0).all(axis=1))[0]
         # assemble score function input
@@ -636,13 +637,14 @@ class LearnedCVAENLLRolling(LearnedCVAENLL):
         metrics = dict()
 
         traj_torch = TensorUtils.to_torch(traj_to_eval, self.metric_algo.device)
+
         if isinstance(self.rolling_horizon,int):
-            m = self.metric_algo.get_metrics(state_torch,horizon=self.rolling_horizon)
+            m = self.metric_algo.get_metrics(state_torch,traj_torch,horizon=self.rolling_horizon)
             for mk in m:
                 metrics[mk] = m[mk]
         elif isinstance(self.rolling_horizon,list):
             for horizon in self.rolling_horizon:
-                m = self.metric_algo.get_metrics(state_torch,horizon=horizon)
+                m = self.metric_algo.get_metrics(state_torch,traj_torch,horizon=horizon)
                 for mk in m:
                     metrics["{}_horizon_{}".format(mk,horizon)] = m[mk]
         
@@ -650,12 +652,11 @@ class LearnedCVAENLLRolling(LearnedCVAENLL):
             traj_perturbed = TensorUtils.to_torch(v.perturb(traj_to_eval), self.metric_algo.device)
             for kk,vv in traj_perturbed.items():
                 traj_perturbed[kk]=vv.type(torch.float32)
-            state_torch.update(traj_perturbed)
             if isinstance(self.rolling_horizon,int):
                 rolling_horizon = self.rolling_horizon
             elif isinstance(self.rolling_horizon,list):
-                rolling_horizon = self.rolling_horizon[0]
-            m = self.metric_algo.get_metrics(state_torch,horizon=rolling_horizon)
+                rolling_horizon = self.rolling_horizon[1]
+            m = self.metric_algo.get_metrics(state_torch,traj_perturbed,horizon=rolling_horizon)
             for mk in m:
                 metrics["{}_{}".format(k, mk)] = m[mk]
 
@@ -1049,7 +1050,12 @@ class Occupancy_rolling(Occupancy_likelihood):
         if len(self.state_buffer)<self.traj_len + 1:
             return None
         else:
-            assert len(self.state_buffer)==self.traj_len+1
+            self.state_buffer = self.state_buffer[-self.traj_len-1:]
+            # try:
+            #     assert len(self.state_buffer) == self.traj_len+1
+            # except:
+            #     import pdb
+            #     pdb.set_trace()
         appearance_idx = obtain_active_agent_index(self.state_buffer)
         agent_selected = np.where((appearance_idx>=0).all(axis=1))[0]
         # assemble score function input
@@ -1077,6 +1083,8 @@ class Occupancy_rolling(Occupancy_likelihood):
 
 
         state_torch = TensorUtils.to_torch(state, self.metric_algo.device)
+        if state_torch["target_positions"].shape[-2]<self.traj_len:
+            return None
         metrics = dict()
         state_torch["target_positions"] = TensorUtils.to_torch(agent_traj_pos,self.metric_algo.device).type(torch.float32)
         state_torch["target_yaws"] = TensorUtils.to_torch(agent_traj_yaw,self.metric_algo.device).type(torch.float32)
