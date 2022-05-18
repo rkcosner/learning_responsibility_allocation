@@ -725,7 +725,7 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
                 if var is not None:
                     horizon1 = min([horizon1,var.shape[-1]])
                 loglikelihood = Metrics.GMM_loglikelihood(GT_traj[...,:horizon1], pred_traj[...,:horizon1], var[...,:horizon1], pout["p"],mode=self.algo_config.eval.mode)    
-        return OrderedDict(loglikelihood=loglikelihood)
+        return OrderedDict(loglikelihood=loglikelihood.detach())
 
     def get_action(self, obs_dict, sample=True, num_action_samples=1, plan_samples=None, **kwargs):
         obs_dict = dict(obs_dict)

@@ -113,7 +113,7 @@ class EBMMetric(pl.LightningModule):
     def get_metrics(self, obs_dict):
         preds = self.forward(obs_dict)
         return dict(
-            scores=preds["scores"]
+            scores=preds["scores"].detach()
         )
 
 
@@ -314,7 +314,7 @@ class OccupancyMetric(pl.LightningModule):
         else:
             assert horizon<=t
         li = self.compute_likelihood(occup_map, obs_dict["target_positions"], obs_dict["raster_from_agent"])
-        li["joint_likelihood"] = li["joint_likelihood"][:,:horizon].mean(dim=-1)
-        li["indep_likelihood"] = li["indep_likelihood"][:,:horizon].mean(dim=-1)
+        li["joint_likelihood"] = li["joint_likelihood"][:,:horizon].mean(dim=-1).detach()
+        li["indep_likelihood"] = li["indep_likelihood"][:,:horizon].mean(dim=-1).detach()
 
         return li

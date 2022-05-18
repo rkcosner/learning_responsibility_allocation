@@ -157,6 +157,7 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
                 info["scene_index"],
                 h5_path=eval_cfg.experience_hdf5_path
             )
+        torch.cuda.empty_cache()
 
 
 def dump_episode_buffer(buffer, scene_index, h5_path):
