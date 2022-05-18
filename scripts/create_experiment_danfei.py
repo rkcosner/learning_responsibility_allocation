@@ -10,17 +10,26 @@ def configs_to_search_nusc(base_cfg):
     base_cfg.train.training.num_data_workers = 18
     base_cfg.train.validation.num_data_workers = 6
 
+    # base_cfg.eval.ckpt.planner.ngc_job_id = "2852894"
+    # base_cfg.eval.ckpt.planner.ckpt_key = "46000"
+    # base_cfg.eval.ckpt_root_dir = "/workspace/ws_mount/tbsim/checkpoints/"
+
     plan.add_const_param(Param("algo.history_num_frames", alias="ht", value=10))
     plan.add_const_param(Param("algo.future_num_frames", alias="ft", value=20))
     plan.add_const_param(Param("algo.step_time", alias="dt", value=0.1))
+    plan.add_const_param(Param("algo.loss_weights.yaw_reg_loss", alias="yrl", value=0.01))
+    plan.add_const_param(Param("algo.dynamics.type", alias="dyn", value=None))
+    plan.add_const_param(Param("train.rollout.enabled", alias="rl", value=True))
+
     plan.extend(plan.compose_cartesian([
-        ParamRange("algo.loss_weights.pixel_ce_loss", alias="clw", range=[1.0]),
-        ParamRange("algo.loss_weights.pixel_bce_loss", alias="blw", range=[0.0]),
-        # ParamRange("algo.loss_weights.yaw_reg_loss", alias="yrl", range=[0.01]),
+        # ParamRange("algo.loss_weights.pixel_ce_loss", alias="clw", range=[1.0]),
+        # ParamRange("algo.loss_weights.pixel_bce_loss", alias="blw", range=[0.0]),
         # ParamRange("algo.dynamics.type", alias="dyn", range=[None, "Unicycle"]),
-        # ParamRange("algo.vae.latent_dim", alias="ld", range=[10]),
+        ParamRange("algo.vae.latent_dim", alias="ld", range=[10, 15, 20]),
+        # ParamRange("algo.vae.latent_dim", alias="ld", range=[2, 4]),
+        # ParamRange("algo.gan.latent_dim", alias="ld", range=[1, 2]),
         # ParamRange("algo.vae.recon_loss_type", alias="loss", range=["MSE"]),
-        # ParamRange("algo.future_num_frames", alias="ft", range=[20, 50, 80])
+        # ParamRange("algo.future_num_frames", alias="ft", range=[10, 30, 50, 80])
     ]))
 
     return plan.generate_configs(base_cfg=base_cfg)
@@ -31,19 +40,28 @@ def configs_to_search_l5kit(base_cfg):
     base_cfg.train.training.num_data_workers = 18
     base_cfg.train.validation.num_data_workers = 6
 
+    base_cfg.eval.ckpt.planner.ngc_job_id = "2862213"
+    base_cfg.eval.ckpt.planner.ckpt_key = "64000_ep0_pos"
+    base_cfg.eval.ckpt_root_dir = "/workspace/ws_mount/tbsim/checkpoints/"
+
     ht = 10
     base_cfg.algo.history_num_frames_ego = ht
     base_cfg.algo.history_num_frames_agents = ht
     plan.add_const_param(Param("algo.history_num_frames", alias="ht", value=ht))
-    plan.add_const_param(Param("algo.future_num_frames", alias="ft", value=20))
+    # plan.add_const_param(Param("algo.future_num_frames", alias="ft", value=20))
     plan.add_const_param(Param("algo.step_time", alias="dt", value=0.1))
+    plan.add_const_param(Param("algo.loss_weights.yaw_reg_loss", alias="yrl", value=0.01))
+    plan.add_const_param(Param("train.rollout.enabled", alias="rl", value=False))
 
     plan.extend(plan.compose_cartesian([
-        ParamRange("algo.loss_weights.pixel_ce_loss", alias="clw", range=[0.0]),
-        ParamRange("algo.loss_weights.pixel_bce_loss", alias="blw", range=[1.0]),
-        # ParamRange("algo.vae.latent_dim", alias="ld", range=[10]),
+        # ParamRange("eval.policy.sample", alias="sample", range=[True]),
+        # ParamRange("algo.history_conditioning", alias="hc", range=[True]),
+        # ParamRange("algo.loss_weights.pixel_ce_loss", alias="clw", range=[1.0, 0.0]),
+        # ParamRange("algo.loss_weights.pixel_bce_loss", alias="blw", range=[0.0, 1.0]),
+        # ParamRange("algo.vae.latent_dim", alias="ld", range=[2, 4]),
         # ParamRange("algo.vae.recon_loss_type", alias="loss", range=["MSE"]),
-        # ParamRange("algo.future_num_frames", alias="ft", range=[20, 50, 80])
+        ParamRange("algo.future_num_frames", alias="ft", range=[10, 30, 50, 80]),
+        # ParamRange("algo.gan.latent_dim", alias="ld", range=(1, 2, 4))
     ]))
 
     return plan.generate_configs(base_cfg=base_cfg)

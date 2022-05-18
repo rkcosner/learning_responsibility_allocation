@@ -11,10 +11,21 @@ from tbsim.utils.experiment_utils import create_evaluation_configs, ParamSearchP
 def configs_to_search(base_cfg):
     """Override this with your hyperparameter search plan"""
     plan = ParamSearchPlan()
-    base_cfg.seed_each_episode = [0, 1, 2, 3, 4]
+    num_ep = 5
+    base_cfg.seed_each_episode = list(range(num_ep))
+    plan.add_const_param(Param("policy.cost_weights.likelihood_weight", alias="liw", value=0.0))
+    plan.add_const_param(Param("policy.cost_weights.progress_weight", alias="progw", value=0.0))
+    plan.add_const_param(Param("policy.cost_weights.collision_weight", alias="clw", value=10.0))
+    plan.add_const_param(Param("num_episode_repeats", alias="ep", value=num_ep))
+
     plan.extend(plan.compose_cartesian([
-        ParamRange("num_episode_repeats", alias="ep", range=[5]),
+        # ParamRange("num_episode_repeats", alias="ep", range=[num_ep]),
+        # ParamRange("num_scenes_to_evaluate", alias="ns", range=[100]),
         # ParamRange("policy.diversification_clearance", alias="div", range=[3])
+        # ParamRange("policy.cost_weights.likelihood_weight", alias="liw", range=[0.0]),
+        # ParamRange("policy.cost_weights.progress_weight", alias="progw", range=[0.0, 0.005]),
+        # ParamRange("policy.cost_weights.collision_weight", alias="clw", range=[0.0, 0.01, 0.05, 0.1, 0.5]),
+        # ParamRange("policy.cost_weights.lane_weight", alias="lw", range=[0.0, 1.0]),
     ]))
     return plan.generate_configs(base_cfg=base_cfg)
 

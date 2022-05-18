@@ -252,7 +252,8 @@ def render_state_l5kit_ego_view(
 
     state_im, raster_from_agent, _ = get_state_image_with_boxes_l5kit(
         ego_obs, agents_obs, rasterizer)
-    im = draw_actions(
+
+    state_im = draw_actions(
         state_image=state_im,
         trans_mat=raster_from_agent,
         pred_action=pred_actions,
@@ -261,7 +262,7 @@ def render_state_l5kit_ego_view(
         ego_action_samples=ego_action_samples
     )
 
-    return im
+    return state_im
 
 
 def render_state_l5kit_agents_view(
