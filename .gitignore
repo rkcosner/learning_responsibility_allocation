@@ -1,9 +1,13 @@
 TransformerGAN_trained_models/
 TransformerPred_trained_models/
 l5_rasterized_vae_trained_models/
+l5_rasterized_discrete_vae_trained_models/
+hier_agent_aware_trained_models/
+l5_rasterized_tree_vae_trained_models/
+occupancy_trained_models/
 wandb/
-tbsim-ws/
 videos/
+figures/
 result/
 ngc/ngc_config.json
 checkpoints
@@ -11,9 +15,13 @@ experiments/test/
 l5_rasterized_gc_trained_models/
 ma_rasterized_trained_models/
 spatial_planner_trained_models/
-
+results/
+scripts/create_experiment.py
+scripts/create_evaluation.py
+tbsim/configs/eval_configs.py
+scripts/evaluate.py
 ## config files
-*.yaml
+#*.yaml
 
 ## local test files
 
@@ -21,7 +29,7 @@ cnn_test.ipynb
 test_rollout.py
 visualize_agent.ipynb
 test.py
-experiments/templates/
+experiments/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -73,3 +81,16 @@ coverage.xml
 
 # Sphinx documentation
 docs/_build/
+scripts/create_evaluation.py
+scripts/evaluate.py
+tbsim/configs/eval_configs.py
+
+l5_rasterized_tree_vae_trained_models/test/run0/logs/log.txt
+scripts/create_evaluation.py
+scripts/create_evaluation.py
+tbsim/configs/eval_configs.py
+generate_all_evaluations.sh
+generate_all_evaluations_l5kit.sh
+generate_all_evaluations_nusc.sh
+plot_result_l5kit.ipynb
+plot_result_nusc.ipynb

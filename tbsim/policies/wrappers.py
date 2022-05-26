@@ -1,11 +1,12 @@
 import torch
-from typing import Tuple, Dict
+from typing import OrderedDict, Tuple, Dict
 
 import tbsim.utils.tensor_utils as TensorUtils
-from tbsim.utils.l5_utils import get_drivable_region_map
+from tbsim.utils.batch_utils import batch_utils
 from tbsim.utils.geometry_utils import calc_distance_map
 from tbsim.utils.planning_utils import ego_sample_planning
 from tbsim.policies.common import Action, Plan, RolloutAction
+from tbsim.algos.algo_utils import yaw_from_pos
 
 
 class HierarchicalWrapper(object):
@@ -28,7 +29,7 @@ class HierarchicalWrapper(object):
             init_u=plan.controls
         )
         action_info["plan"] = plan.to_dict()
-        plan_info.pop("plan_samples")
+        plan_info.pop("plan_samples", None)
         action_info["plan_info"] = plan_info
         return actions, action_info
 
@@ -54,8 +55,10 @@ class HierarchicalSamplerWrapper(HierarchicalWrapper):
         action_info = dict(
             plan_samples=plan_samples,
             action_samples=action_samples,
-            plan_info=plan_info
+            plan_info=plan_info,
         )
+        if "log_likelihood" in plan_info:
+            action_info["log_likelihood"] = plan_info["log_likelihood"]
         return None, action_info
 
 
@@ -82,13 +85,18 @@ class SamplingPolicyWrapper(object):
         agent_preds, _ = self.predictor.get_prediction(
             obs)  # preds of shape [B, A - 1, ...]
 
+        if isinstance(action_samples, dict):
+            action_samples = Action.from_dict(action_samples)
+
         ego_trajs = action_samples.trajectories
         agent_pred_trajs = agent_preds.trajectories
 
-        agent_extents = obs["all_other_agents_future_extents"][..., :2].max(
+        agent_extents = obs["all_other_agents_history_extents"][..., :2].max(
             dim=-2)[0]
-        drivable_map = get_drivable_region_map(obs["image"]).float()
+        drivable_map = batch_utils().get_drivable_region_map(obs["image"]).float()
         dis_map = calc_distance_map(drivable_map)
+        log_likelihood = action_info.get("log_likelihood", None)
+
         action_idx = ego_sample_planning(
             ego_trajectories=ego_trajs,
             agent_trajectories=agent_pred_trajs,
@@ -97,14 +105,14 @@ class SamplingPolicyWrapper(object):
             raw_types=obs["all_other_agents_types"],
             raster_from_agent=obs["raster_from_agent"],
             dis_map=dis_map,
-            weights={"collision_weight": 1.0, "lane_weight": 1.0},
+            log_likelihood=log_likelihood,
+            weights=kwargs["cost_weights"],
         )
 
         ego_trajs_best = torch.gather(
             ego_trajs,
             dim=1,
-            index=action_idx[:, None, None,
-                  None].expand(-1, 1, *ego_trajs.shape[2:])
+            index=action_idx[:, None, None, None].expand(-1, 1, *ego_trajs.shape[2:])
         ).squeeze(1)
 
         ego_actions = Action(
@@ -112,7 +120,6 @@ class SamplingPolicyWrapper(object):
         action_info["action_samples"] = action_samples.to_dict()
         if "plan_samples" in action_info:
             action_info["plan_samples"] = action_info["plan_samples"].to_dict()
-
         return ego_actions, action_info
 
 
@@ -143,13 +150,41 @@ class PolicyWrapper(object):
         return cls(model=model, get_plan_kwargs=kwargs)
 
 
+class Pos2YawWrapper(object):
+    """A wrapper that computes action yaw from action positions"""
+    def __init__(self, policy, dt, yaw_correction_speed):
+        """
+
+        Args:
+            policy: policy to be wrapped
+            dt:
+            speed_filter:
+        """
+        self.device = policy.device
+        self.policy = policy
+        self._dt = dt
+        self._yaw_correction_speed = yaw_correction_speed
+
+    def eval(self):
+        self.policy.eval()
+
+    def get_action(self, obs, **kwargs):
+        action, action_info = self.policy.get_action(obs, **kwargs)
+        curr_pos = torch.zeros_like(action.positions[..., [0], :])
+        pos_seq = torch.cat((curr_pos, action.positions), dim=-2)
+        yaws = yaw_from_pos(pos_seq, dt=self._dt, yaw_correction_speed=self._yaw_correction_speed)
+        action.yaws = yaws
+        return action, action_info
+
+
 class RolloutWrapper(object):
     """A wrapper policy that can (optionally) control both ego and other agents in a scene"""
 
-    def __init__(self, ego_policy=None, agents_policy=None):
+    def __init__(self, ego_policy=None, agents_policy=None, pass_agent_obs=True):
         self.device = ego_policy.device if agents_policy is None else agents_policy.device
         self.ego_policy = ego_policy
         self.agents_policy = agents_policy
+        self.pass_agent_obs = pass_agent_obs
 
     def eval(self):
         self.ego_policy.eval()
@@ -163,11 +198,35 @@ class RolloutWrapper(object):
         if self.ego_policy is not None:
             assert obs["ego"] is not None
             with torch.no_grad():
-                ego_action, ego_action_info = self.ego_policy.get_action(
-                    obs["ego"], step_index = step_index)
+                if self.pass_agent_obs:
+                    ego_action, ego_action_info = self.ego_policy.get_action(
+                        obs["ego"], step_index = step_index,agent_obs = obs["agents"])
+                else:
+                    ego_action, ego_action_info = self.ego_policy.get_action(
+                        obs["ego"], step_index = step_index)
         if self.agents_policy is not None:
             assert obs["agents"] is not None
             with torch.no_grad():
                 agents_action, agents_action_info = self.agents_policy.get_action(
                     obs["agents"], step_index = step_index)
         return RolloutAction(ego_action, ego_action_info, agents_action, agents_action_info)
+
+
+class PerturbationWrapper(object):
+    """A wrapper policy that perturbs the policy action with Ornstein Uhlenbeck noise"""
+
+    def __init__(self, policy, noise):
+        self.device = policy.device
+        self.noise = noise
+        self.policy = policy
+
+    def eval(self):
+        self.policy.eval()
+
+    def get_action(self, obs, **kwargs) -> Tuple[Action, Dict]:
+        actions, action_info = self.policy.get_action(obs, **kwargs)
+        actions_dict = OrderedDict(target_positions=actions.positions,target_yaws=actions.yaws) 
+        perturbed_action_dict = self.noise.perturb(TensorUtils.to_numpy(actions_dict))
+        perturbed_action_dict = TensorUtils.to_torch(perturbed_action_dict,self.device)
+        perturbed_actions = Action(perturbed_action_dict["target_positions"],perturbed_action_dict["target_yaws"])
+        return perturbed_actions, action_info

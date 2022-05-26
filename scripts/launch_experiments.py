@@ -91,12 +91,13 @@ if __name__ == "__main__":
         "python",
         args.script_path,
         "--output_dir",
-        ngc_cfg["result_dir"],
+        ngc_cfg["output_dir"],
         "--dataset_path",
         ngc_cfg["dataset_path"],
         "--wandb_project_name",
         ngc_cfg["wandb_project_name"],
         "--remove_exp_dir",
+        "--on_ngc"
     ]
 
     res = input("upload codebase to ngc workspace? (y/n)")

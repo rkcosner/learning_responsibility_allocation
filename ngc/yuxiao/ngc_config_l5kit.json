@@ -1,13 +1,15 @@
 {
   "wandb_apikey": "4c0609b869ad8f8b7e572ed41370c18679b8a1c7",
-  "wandb_project_name": "rasterized_MA_model",
+  "wandb_project_name": "discrete_cvae_l5kit",
   "workspace_mounting_point": "/workspace/tbsim-ws/",
-  "result_dir": "/workspace/tbsim-ws/result/",
+  "result_dir": "/workspace/result/",
+  "output_dir": "/workspace/tbsim-ws/result/",
+  "eval_output_dir": "/workspace/tbsim-ws/eval_result",
   "workspace_id": "EIk1t_UvSqCQozjTnbEfRA",
   "dataset_id": "90893",
   "dataset_mounting_point": "/workspace/tbsim-ws/lyft_prediction/",
   "dataset_path": "/workspace/tbsim-ws/lyft_prediction/lyft_prediction",
   "docker_image": "nvcr.io/nvidian/nvr-av/tbsim:latest",
   "total_runtime": "48h",
-  "workspace_mounting_point_local": "/home/chenyx/repos/ngc_workspace"
+  "workspace_mounting_point_local": "/home/yuxiaoc/repos/ngc_workspace"
 }

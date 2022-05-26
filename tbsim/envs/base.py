@@ -9,15 +9,27 @@ class BaseEnv(abc.ABC):
     """TODO: Make a Simulator MetaClass"""
 
     @abc.abstractmethod
-    def reset(self):
+    def reset(self, scene_indices=None, start_frame_index=None):
         return
+
+    @abc.abstractmethod
+    def reset_multi_episodes_metrics(self):
+        pass
 
     @abc.abstractmethod
     def step(self, action, num_steps_to_take, render):
         return
 
     @abc.abstractmethod
+    def update_random_seed(self, seed):
+        return
+
+    @abc.abstractmethod
     def get_metrics(self):
+        return
+
+    @abc.abstractmethod
+    def get_multi_episode_metrics(self):
         return
 
     @abc.abstractmethod

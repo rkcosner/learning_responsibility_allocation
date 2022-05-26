@@ -8,7 +8,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import tbsim.utils.tensor_utils as TensorUtils
-import tbsim.utils.l5_utils as L5Utils
+from tbsim.utils.batch_utils import batch_utils
 from tbsim.utils.geometry_utils import (
     VEH_VEH_collision,
     VEH_PED_collision,
@@ -64,7 +64,18 @@ def KLD_gaussian_loss(mu_1, logvar_1, mu_2, logvar_2):
                    ).sum(dim=1).mean()
 
 
-def log_normal(x, m, v):
+def KLD_discrete(logp,logq):
+    """KL divergence loss between two discrete distributions. This function
+    computes the average loss across the batch.
+
+    Args:
+        logp (torch.Tensor): log probability of first discrete distribution (B,D)
+        logq (torch.Tensor): log probability of second discrete distribution (B,D)
+    """
+    return (torch.exp(logp)*(logp-logq)).sum(dim=1)
+
+
+def log_normal(x, m, v, avails=None):
     """
     Log probability of tensor x under diagonal multivariate normal with
     mean m and variance v. The last dimension of the tensors is treated
@@ -74,10 +85,14 @@ def log_normal(x, m, v):
         x (torch.Tensor): tensor with shape (B, ..., D)
         m (torch.Tensor): means tensor with shape (B, ..., D) or (1, ..., D)
         v (torch.Tensor): variances tensor with shape (B, ..., D) or (1, ..., D)
+        avails (torch.Tensor): availability of  x and m
     Returns:
         log_prob (torch.Tensor): log probabilities of shape (B, ...)
     """
-    element_wise = -0.5 * (torch.log(v) + (x - m).pow(2) / v + np.log(2 * np.pi))
+    if avails is None:
+        element_wise = -0.5 * (torch.log(v) + (x - m).pow(2) / v + np.log(2 * np.pi))
+    else:
+        element_wise = -0.5 * (torch.log(v) + ((x - m) * avails).pow(2) / v + np.log(2 * np.pi))
     log_prob = element_wise.sum(-1)
     return log_prob
 
@@ -118,6 +133,45 @@ def log_normal_mixture(x, m, v, w=None, log_w=None):
         log_prob = log_mean_exp(log_prob , dim=1) # mean accounts for uniform weights
     return log_prob
 
+def NLL_GMM_loss(x, m, v, pi, avails=None, detach=True, mode="sum"):
+    """
+    Log probability of tensor x under a uniform mixture of Gaussians.
+    Adapted from CS 236 at Stanford.
+    Args:
+        x (torch.Tensor): tensor with shape (B, D)
+        m (torch.Tensor): means tensor with shape (B, M, D) or (1, M, D), where
+            M is number of mixture components
+        v (torch.Tensor): variances tensor with shape (B, M, D) or (1, M, D) where
+            M is number of mixture components
+        logpi (torch.Tensor): log probability of the modes (B,M)
+        detach (bool): option whether to detach all modes but the best one
+        mode (string): mode of loss, sum or max
+
+    Returns:
+        -log_prob (torch.Tensor): log probabilities of shape (B,)
+    """
+    if v is None:
+        v = torch.ones_like(m)
+
+    # (B , D) -> (B , 1, D)
+    x = x.unsqueeze(1)
+    # (B, 1, D) -> (B, M, D) -> (B, M)
+    if avails is not None:
+        avails = avails.unsqueeze(1)
+    log_prob = log_normal(x, m, v, avails=avails)
+    if mode=="sum":
+        if detach:
+            max_flag = (log_prob==log_prob.max(dim=1,keepdim=True)[0])
+            nonmax_flag = torch.logical_not(max_flag)
+            log_prob_detach = log_prob.detach()
+            NLL_loss = (-pi*log_prob*max_flag).sum(1).mean()+(-pi*log_prob_detach*nonmax_flag).sum(1).mean()
+        else:
+            NLL_loss = (-pi*log_prob).sum(1).mean()
+    elif mode=="max":
+        max_flag = (log_prob==log_prob.max(dim=1,keepdim=True)[0])
+        NLL_loss = (-pi*log_prob*max_flag).sum(1).mean()
+    return NLL_loss
+
 
 def log_mean_exp(x, dim):
     """
@@ -142,8 +196,10 @@ def log_sum_exp(x, dim=0):
     Returns:
         y (torch.Tensor): log(sum(exp(x), dim))
     """
+
     max_x = torch.max(x, dim)[0]
     new_x = x - max_x.unsqueeze(dim).expand_as(x)
+
     return max_x + (new_x.exp().sum(dim)).log()
 
 
@@ -223,6 +279,36 @@ def trajectory_loss(predictions, targets, availabilities, weights_scaling=None, 
     loss = torch.mean(crit(predictions, targets) * target_weights)
     return loss
 
+def MultiModal_trajectory_loss(predictions, targets, availabilities, prob, weights_scaling=None, crit=nn.MSELoss(reduction="none")):
+    """
+    Aggregated per-step loss between gt and predicted trajectories
+    Args:
+        predictions (torch.Tensor): predicted trajectory [B, M, (A), T, D]
+        targets (torch.Tensor): target trajectory [B, (A), T, D]
+        availabilities (torch.Tensor): [B, (A), T]
+        prob (torch.Tensor): [B, M]
+        weights_scaling (torch.Tensor): [D]
+        crit (nn.Module): loss function
+
+    Returns:
+        loss (torch.Tensor)
+    """
+
+    if weights_scaling is None:
+        weights_scaling = torch.ones(targets.shape[-1]).to(targets.device)
+    assert weights_scaling.shape[-1] == targets.shape[-1]
+    target_weights = (availabilities.unsqueeze(-1) * weights_scaling).unsqueeze(1)
+    loss_v = crit(predictions,targets.unsqueeze(1))*target_weights
+    loss_v_aggregated = loss_v.sum(dim=[2,3])
+    loss_v_detached = loss_v.detach()
+    min_flag = (loss_v_aggregated==loss_v_aggregated.min(dim=1,keepdim=True)[0])
+    nonmin_flag = torch.logical_not(min_flag)
+    min_weight = (min_flag*prob)[...,None,None]*target_weights
+    nonmin_weight = (nonmin_flag*prob)[...,None,None]*target_weights
+    loss = ((loss_v*min_weight).sum()+(loss_v_detached*nonmin_weight).sum())/availabilities.sum()
+    return loss
+
+        
 
 def goal_reaching_loss(predictions, targets, availabilities, weights_scaling=None, crit=nn.MSELoss(reduction="none")):
     """
@@ -239,7 +325,7 @@ def goal_reaching_loss(predictions, targets, availabilities, weights_scaling=Non
     """
     # compute loss mask by finding the last available target
     num_frames = availabilities.shape[-1]
-    last_inds = L5Utils.get_last_available_index(availabilities)  # [B, (A)]
+    last_inds = batch_utils().get_last_available_index(availabilities)  # [B, (A)]
     goal_mask = TensorUtils.to_one_hot(last_inds, num_class=num_frames)  # [B, (A), T] with the last frame set to 1
     # filter out samples that do not have available frames
     available_samples_mask = availabilities.sum(-1) > 0  # [B, (A)]
@@ -389,7 +475,7 @@ def goal_reaching_loss(
     """
     # compute loss mask by finding the last available target
     num_frames = availabilities.shape[-1]
-    last_inds = L5Utils.get_last_available_index(availabilities)  # [B, (A)]
+    last_inds = batch_utils().get_last_available_index(availabilities)  # [B, (A)]
     goal_mask = TensorUtils.to_one_hot(
         last_inds, num_class=num_frames
     )  # [B, (A), T] with the last frame set to 1
@@ -424,7 +510,7 @@ def collision_loss(pred_edges: Dict[str, torch.Tensor], col_funcs=None):
             "PP": PED_PED_collision,
         }
 
-    coll_loss = 0
+    coll_loss = 0.0
     for et, fun in col_funcs.items():
         if et not in pred_edges:
             continue
@@ -442,7 +528,63 @@ def collision_loss(pred_edges: Dict[str, torch.Tensor], col_funcs=None):
         coll_loss += torch.mean(torch.sigmoid(-dis - 4.0))  # smooth collision loss
     return coll_loss
 
+def collision_loss_masked(edges, type_mask, col_funcs=None):
+    if col_funcs is None:
+        col_funcs = {
+            "VV": VEH_VEH_collision,
+            "VP": VEH_PED_collision,
+            "PV": PED_VEH_collision,
+            "PP": PED_PED_collision,
+        }
+
+    coll_loss = 0.0
+    for k,v in type_mask.items():
+        if edges.shape[0] == 0:
+            continue
+        dis = col_funcs[k](
+            edges[..., 0:3],
+            edges[..., 3:6],
+            edges[..., 6:8],
+            edges[..., 8:],
+        ).min(dim=-1)[0]
+        coll_loss += torch.sum(torch.sigmoid(-dis - 4.0)*v)/(v.sum()+1e-3)
+    return coll_loss
 
 def discriminator_loss(likelihood_pred,likelihood_GT):
     label = torch.cat((torch.zeros_like(likelihood_pred),torch.ones_like(likelihood_GT)),0)
     return F.binary_cross_entropy(torch.cat((likelihood_pred,likelihood_GT)),label)
+
+def compute_pred_loss(recon_loss_type,pred_batch,target_traj,avails,prob,weights_scaling=None):
+    if "z" in pred_batch:
+        z1 = torch.argmax(pred_batch["z"],dim=-1)
+    else:
+        z1 = None
+    if recon_loss_type=="NLL":
+        assert "logvar" in pred_batch["x_recons"]
+        bs, M, T, D = pred_batch["trajectories"].shape
+        var = (torch.exp(pred_batch["x_recons"]["logvar"])+torch.ones_like(pred_batch["x_recons"]["logvar"])*1e-4).reshape(bs,M,-1)
+        if z1 is not None:
+            var = torch.gather(var,1,z1.unsqueeze(-1).repeat(1,1,var.size(-1)))
+        avails = avails.unsqueeze(-1).repeat(1, 1, target_traj.shape[-1]).reshape(bs, -1)
+        pred_loss = NLL_GMM_loss(
+            x=target_traj.reshape(bs,-1),
+            m=pred_batch["trajectories"].reshape(bs,M,-1),
+            v=var,
+            pi=prob,
+            avails=avails
+        )
+        pred_loss = pred_loss.mean()
+
+
+    elif recon_loss_type=="MSE":
+        
+        pred_loss = MultiModal_trajectory_loss(
+            predictions=pred_batch["trajectories"],
+            targets=target_traj,
+            availabilities=avails,
+            prob = prob,
+            weights_scaling=weights_scaling,
+        )
+    else:
+        raise NotImplementedError("{} is not implemented".format(recon_loss_type))
+    return pred_loss

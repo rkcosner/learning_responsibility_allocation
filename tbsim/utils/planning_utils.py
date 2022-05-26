@@ -1,24 +1,41 @@
+from collections import defaultdict
 import numpy as np
+from scipy.interpolate import interp1d
 import torch
 import torch.nn as nn
 from tbsim.models.cnn_roi_encoder import obtain_lane_flag
 from tbsim.utils.loss_utils import collision_loss
-from tbsim.utils.l5_utils import gen_ego_edges
+from tbsim.utils.l5_utils import gen_ego_edges, gen_EC_edges
 from tbsim.utils.geometry_utils import (
     VEH_VEH_collision,
     VEH_PED_collision,
     PED_VEH_collision,
     PED_PED_collision,
 )
-import pdb
+import tbsim.utils.tensor_utils as TensorUtils
+try:
+    from Pplan.Sampling.tree import Tree
+    class agent_traj_tree(Tree):
+        def __init__(self, traj, parent, depth, prob=None):
+            self.traj = traj
+            self.children = list()
+            self.parent = parent
+            if parent is not None:
+                parent.expand(self)
+            self.depth = depth
+            self.prob = prob
+            self.attribute = dict()
+except:
+    print("cannot find Pplan")
 
-
+TRAJ_INDEX = [0, 1, 4]
 def get_collision_loss(
     ego_trajectories,
     agent_trajectories,
     ego_extents,
     agent_extents,
     raw_types,
+    prob=None,
     col_funcs=None,
 ):
     with torch.no_grad():
@@ -39,9 +56,10 @@ def get_collision_loss(
                 ego_edges[..., 6:8],
                 ego_edges[..., 8:],
             ).min(dim=-1)[0]
-            col_loss += torch.max(
-                torch.sigmoid(-dis - 4.0) * type_mask[et].unsqueeze(1), dim=2
-            )[0]
+            if dis.nelement()>0:
+                col_loss += torch.max(
+                    torch.sigmoid(-dis - 4.0) * type_mask[et].unsqueeze(1), dim=2
+                )[0]
     return col_loss
 
 
@@ -71,7 +89,7 @@ def ego_sample_planning(
     raster_from_agent,
     dis_map,
     weights,
-    likelihood=None,
+    log_likelihood=None,
     col_funcs=None,
 ):
     col_loss = get_collision_loss(
@@ -85,17 +103,226 @@ def ego_sample_planning(
     lane_loss = get_drivable_area_loss(
         ego_trajectories, raster_from_agent, dis_map, ego_extents
     )
-    if likelihood is None:
+    if log_likelihood is None:
         total_score = (
             -weights["collision_weight"] * col_loss -
             weights["lane_weight"] * lane_loss
         )
     else:
         total_score = (
-            likelihood
+            log_likelihood
             - weights["collision_weight"] * col_loss
             - weights["lane_weight"] * lane_loss
         )
-    # if total_score.shape[0] == 1 and total_score.min() < -0.5:
-    #     pdb.set_trace()
+
     return torch.argmax(total_score, dim=1)
+
+
+
+    
+class tree_motion_policy(object):
+    def __init__(self,stage,num_frames_per_stage,ego_root,scenario_root,cost_to_go,leaf_idx,curr_node):
+        self.stage = stage
+        self.num_frames_per_stage = num_frames_per_stage
+        self.ego_root = ego_root
+        self.scenario_root = scenario_root
+        self.cost_to_go = cost_to_go
+        self.leaf_idx = leaf_idx
+        self.curr_node= curr_node
+
+    
+    def identify_branch(self,ego_node,scene_traj):
+
+        assert scene_traj.shape[-2]<self.stage*self.num_frames_per_stage
+        assert ego_node.total_traj.shape[0]-1>=scene_traj.shape[-2]
+
+        remain_traj = scene_traj
+        curr_scenario_node = self.scenario_root
+        ego_leaf_index = self.leaf_idx[ego_node]
+        while remain_traj.shape[0]>0:
+            seg_length = min(remain_traj.shape[-2],self.num_frames_per_stage)
+            dis = list()
+            for child in curr_scenario_node.children:
+                dis_i = torch.linalg.norm(child.traj[:,ego_leaf_index,:seg_length],remain_traj[:,:seg_length],dim=-1).sum()
+                dis.append(dis_i)
+            idx = torch.argmin(torch.tensor(dis)).item()
+            curr_scenario_node = curr_scenario_node.children[idx]
+            
+            remain_traj = remain_traj[...,seg_length:,:]
+            remain_num_frames = curr_scenario_node.traj.shape[-2]-seg_length
+        return curr_scenario_node,remain_num_frames
+
+    def get_plan(self,scene_traj,horizon):
+        if scene_traj is None:
+            T = 0
+            remain_num_frames = self.num_frames_per_stage
+        else:
+            T = scene_traj.shape[-2]
+            remain_num_frames = self.curr_node.total_traj.shape[0]-1-T
+            assert remain_num_frames>-self.num_frames_per_stage
+            if remain_num_frames<=0:
+                assert not self.curr_node.isleaf()
+                curr_scenario_node, remain_num_frames = self.identify_branch(self.curr_node,scene_traj)
+                V = []
+                for child in self.curr_node.children:
+                    V.append(self.cost_to_go[(child,curr_scenario_node)])
+                idx = torch.argmin(torch.tensor(V)).item()
+                self.curr_node = self.curr_node.children[idx]
+
+        traj = self.curr_node.traj[-remain_num_frames:,TRAJ_INDEX]
+        if not self.curr_node.isleaf():
+            traj = torch.cat((traj,self.curr_node.children[0].traj[:,TRAJ_INDEX]),-2)
+        if traj.shape[0]>=horizon:
+            return traj[:horizon]
+        else:
+            traj_patched = torch.cat((traj,traj[-1].tile(horizon-traj.shape[0],1)))
+            return traj_patched
+            
+
+def tiled_to_tree(total_traj,prob,num_stage,num_frames_per_stage,M):
+    # total_traj = TensorUtils.reshape_dimensions_single(total_traj,2,3,[M]*num_stage)
+    x0 = agent_traj_tree(None,None,0)
+    nodes = defaultdict(lambda:list())
+    nodes[0].append(x0)
+    for t in range(num_stage):
+        interval = M**(num_stage-t-1)
+        tiled_traj = total_traj[...,::interval,t*num_frames_per_stage:(t+1)*num_frames_per_stage,:]
+        for i in range(M**(t+1)):
+            parent_idx = int(i/M)
+            p = prob[:,i*interval:(i+1)*interval].sum(-1)
+            node = agent_traj_tree(tiled_traj[...,i,:,:],nodes[t][parent_idx],t+1,prob=p)
+
+            nodes[t+1].append(node)
+    return nodes
+
+
+
+def Contingency_planning(ego_tree,
+                         ego_extents,
+                         agent_traj,
+                         mode_prob,
+                         agent_extents,
+                         agent_types,
+                         raster_from_agent,
+                         dis_map,
+                         weights,
+                         num_frames_per_stage,
+                         M,
+                         col_funcs=None):
+
+    num_stage = len(ego_tree)-1
+    ego_root = ego_tree[0][0]
+
+    leaf_idx = defaultdict(lambda:list())
+    for stage in range(num_stage,-1,-1):
+        for node in ego_tree[stage]:
+            if node.isleaf():
+                leaf_idx[node]=[ego_tree[stage].index(node)]
+            else:
+                leaf_idx[node] = []
+                for child in node.children:
+                    leaf_idx[node] = leaf_idx[node]+leaf_idx[child]
+    
+
+    cost_to_go = dict()
+    stage_cost = dict()
+    scenario_tree = tiled_to_tree(agent_traj,mode_prob[0],num_stage,num_frames_per_stage,M)
+    scenario_root = scenario_tree[0][0]
+    for stage in range(num_stage,0,-1):
+        ego_nodes = ego_tree[stage]
+        indices = [leaf_idx[node][0] for node in ego_nodes]
+        ego_traj = [node.traj[:,TRAJ_INDEX] for node in ego_nodes]
+        ego_traj = torch.stack(ego_traj,0)
+        agent_nodes = scenario_tree[stage]
+        agent_traj = [node.traj[:,indices] for node in agent_nodes]
+        agent_traj = torch.stack(agent_traj,0)
+        ego_traj_tiled = ego_traj.unsqueeze(0).repeat(len(agent_nodes),1,1,1)
+        col_loss = get_collision_loss(ego_traj_tiled,
+                                      agent_traj.transpose(1,2),
+                                      ego_extents.tile(len(agent_nodes),1),
+                                      agent_extents.tile(len(agent_nodes),1,1),
+                                      agent_types.tile(len(agent_nodes),1),
+                                      col_funcs,
+                                      )
+
+        lane_loss = get_drivable_area_loss(ego_traj.unsqueeze(0), raster_from_agent.unsqueeze(0), dis_map.unsqueeze(0), ego_extents.unsqueeze(0))
+        total_loss = weights["coll"]*col_loss+weights["lane"]*lane_loss
+        for i in range(len(ego_nodes)):
+            for j in range(len(agent_nodes)):
+                stage_cost[(ego_nodes[i],agent_nodes[j])] = total_loss[j,i]
+                if stage==num_stage:
+                    cost_to_go[(ego_nodes[i],agent_nodes[j])] = float(total_loss[j,i])
+                else:
+                    children_cost_to_go = [cost_to_go[(child,agent_nodes[j])] for child in ego_nodes[i].children]
+                    cost_to_go[(ego_nodes[i],agent_nodes[j])] = float(total_loss[j,i])+min(children_cost_to_go)
+
+            if stage>1:
+                for agent_node in scenario_tree[stage-1]:
+                    cost_i = []
+                    prob_i = []
+                    for child in agent_node.children:
+                        cost_i.append(cost_to_go[ego_nodes[i],child])
+                        prob_i.append(child.prob[leaf_idx[ego_nodes[i]]].sum())
+                    cost_i = torch.tensor(cost_i,device=mode_prob.device)
+                    prob_i = torch.stack(prob_i)
+                    cost_to_go[(ego_nodes[i],agent_node)] = float((cost_i*prob_i).sum()/prob_i.sum())
+    cost = list()
+    for ego_node in ego_root.children:
+        cost_i = 0
+        try:
+            leaf_index = leaf_idx[ego_node][0]
+        except:
+            import pdb
+            pdb.set_trace()
+
+        for scene_node in scenario_tree[0][0].children:
+            cost_i+=cost_to_go[(ego_node,scene_node)]*scene_node.prob[leaf_index]
+
+        cost.append(cost_i)
+    idx = torch.argmin(torch.tensor(cost)).item()
+    optimal_node = ego_root.children[idx]
+
+    motion_policy = tree_motion_policy(stage,
+                                       num_frames_per_stage,
+                                       ego_root,
+                                       scenario_root,
+                                       cost_to_go,
+                                       leaf_idx,
+                                       optimal_node)
+    return motion_policy
+
+            
+def obtain_ref(line, x, v, N, dt):
+    line_length = line.shape[0]
+    delta_x = line[..., 0:2] - np.repeat(x[..., np.newaxis, 0:2], line_length, axis=-2)
+    dis = np.linalg.norm(delta_x, axis=-1)
+    idx = np.argmin(dis, axis=-1)
+    line_min = line[idx]
+    dx = x[0] - line_min[0]
+    dy = x[1] - line_min[1]
+    delta_y = -dx * np.sin(line_min[2]) + dy * np.cos(line_min[2])
+    delta_x = dx * np.cos(line_min[2]) + dy * np.sin(line_min[2])
+    refx0 = np.array(
+        [
+            line_min[0] + delta_x * np.cos(line_min[2]),
+            line_min[1] + delta_x * np.sin(line_min[2]),
+            line_min[2],
+        ]
+    )
+    s = [np.linalg.norm(line[idx + 1, 0:2] - refx0[0:2])]
+    for i in range(idx + 2, line_length):
+        s.append(s[-1] + np.linalg.norm(line[i, 0:2] - line[i - 1, 0:2]))
+    f = interp1d(
+        np.array(s),
+        line[idx + 1 :],
+        kind="linear",
+        axis=0,
+        copy=True,
+        bounds_error=False,
+        fill_value="extrapolate",
+        assume_sorted=True,
+    )
+    s1 = v * np.arange(1, N + 1) * dt
+    refx = f(s1)
+
+    return refx

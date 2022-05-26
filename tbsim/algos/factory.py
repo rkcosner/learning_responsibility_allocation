@@ -7,13 +7,18 @@ from tbsim.algos.l5kit_algos import (
     L5TransformerTrafficModel,
     L5TransformerGANTrafficModel,
     L5VAETrafficModel,
+    L5DiscreteVAETrafficModel,
     L5TrafficModelGC,
     SpatialPlanner,
+    GANTrafficModel,
+    L5ECTrafficModel,
+    L5TreeVAETrafficModel,
 )
 
 from tbsim.algos.multiagent_algos import (
     MATrafficModel,
-    MAGANTrafficModel
+    MAGANTrafficModel,
+    HierarchicalAgentAwareModel
 )
 
 from tbsim.algos.selfplay_algos import (
@@ -21,7 +26,8 @@ from tbsim.algos.selfplay_algos import (
 )
 
 from tbsim.algos.metric_algos import (
-    EBMMetric
+    EBMMetric,
+    OccupancyMetric
 )
 
 def algo_factory(config: ExperimentConfig, modality_shapes: dict, data_module: LightningDataModule, **kwargs):
@@ -50,8 +56,24 @@ def algo_factory(config: ExperimentConfig, modality_shapes: dict, data_module: L
         algo = L5VAETrafficModel(
             algo_config=algo_config, modality_shapes=modality_shapes
         )
+    elif algo_name == "l5_rasterized_discrete_vae":
+        algo = L5DiscreteVAETrafficModel(
+            algo_config=algo_config, modality_shapes=modality_shapes
+        )
+    elif algo_name == "l5_rasterized_tree_vae":
+        algo = L5TreeVAETrafficModel(
+            algo_config=algo_config, modality_shapes=modality_shapes
+        )
+    elif algo_name == "l5_rasterized_ec":
+        algo = L5ECTrafficModel(
+            algo_config=algo_config, modality_shapes=modality_shapes
+        )
     elif algo_name == "spatial_planner":
         algo = SpatialPlanner(algo_config=algo_config, modality_shapes=modality_shapes)
+    elif algo_name == "hier_agent_aware":
+        algo = HierarchicalAgentAwareModel(algo_config=algo_config, modality_shapes=modality_shapes)
+    elif algo_name == "occupancy":
+        algo = OccupancyMetric(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "ma_rasterized":
         if algo_config.use_GAN:
             algo = MAGANTrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
@@ -65,6 +87,8 @@ def algo_factory(config: ExperimentConfig, modality_shapes: dict, data_module: L
         algo = SelfPlayHierarchical(cfg=config, data_module=data_module)
     elif algo_name == "l5_ebm":
         algo = EBMMetric(algo_config=algo_config, modality_shapes=modality_shapes)
+    elif algo_name == "gan":
+        algo = GANTrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
     else:
         raise NotImplementedError("{} is not a valid algorithm" % algo_name)
     return algo

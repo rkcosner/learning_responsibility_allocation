@@ -14,7 +14,7 @@ from tbsim.utils.geometry_utils import (
     PED_PED_collision,
     get_box_world_coords,
 )
-
+from tbsim.utils.loss_utils import log_normal
 
 metric_signature = Callable[
     [np.ndarray, np.ndarray, np.ndarray, np.ndarray], np.ndarray
@@ -50,6 +50,7 @@ def _assert_shapes(
         batch_size,
         num_modes,
     ), f"expected 2D (Batch x Modes) array for confidences, got {confidences.shape}"
+
     assert np.allclose(np.sum(confidences, axis=1), 1), "confidences should sum to 1"
     assert avails.shape == (
         batch_size,
@@ -228,11 +229,10 @@ def batch_average_displacement_error(
     )  # reduce coords and use availability
     error = error ** 0.5  # calculate root of error (= L2 norm)
     error = np.mean(error, axis=-1)  # average over timesteps
-
     if mode == "oracle":
         error = np.min(error, axis=1)  # use best hypothesis
     elif mode == "mean":
-        error = np.mean(error, axis=1)  # average over hypotheses
+        error = np.sum(error*confidences, axis=1).mean()  # average over hypotheses
     else:
         raise ValueError(f"mode: {mode} not valid")
 
@@ -261,16 +261,21 @@ def batch_final_displacement_error(
         np.ndarray: final displacement error (FDE) of the batch, an array of float numbers
     """
     _assert_shapes(ground_truth, pred, confidences, avails)
-
+    inds = np.arange(0, pred.shape[2])
+    inds = (avails > 0) * inds  # [B, (A), T] arange indices with unavailable indices set to 0
+    last_inds = inds.max(axis=-1)
+    last_inds = np.tile(last_inds[:, np.newaxis, np.newaxis],(1,pred.shape[1],1))
     ground_truth = np.expand_dims(ground_truth, 1)  # add modes
     avails = avails[:, np.newaxis, :, np.newaxis]  # add modes and cords
-
+    
+    
     error = np.sum(
         ((ground_truth - pred) * avails) ** 2, axis=-1
     )  # reduce coords and use availability
     error = error ** 0.5  # calculate root of error (= L2 norm)
-    error = error[:, :, -1]  # use last timestep
 
+    # error = error[:, :, -1]  # use last timestep
+    error = np.take_along_axis(error,last_inds,axis=2).squeeze(-1)
     if mode == "oracle":
         error = np.min(error, axis=-1)  # use best hypothesis
     elif mode == "mean":
@@ -408,6 +413,39 @@ def batch_pairwise_collision_rate(agent_edges, collision_funcs=None):
             coll_rates[et] = torch.sum(dis <= 0) / float(dis.shape[0])
     return coll_rates
 
+def batch_pairwise_collision_rate_masked(agent_edges, type_mask,collision_funcs=None):
+    """
+    Count number of collisions among edge pairs in a batch
+    Args:
+        agent_edges (dict): A dict that maps collision types to box locations
+        collision_funcs (dict): A dict of collision functions (implemented in tbsim.utils.geometric_utils)
+
+    Returns:
+        collision loss (torch.Tensor)
+    """
+    if collision_funcs is None:
+        collision_funcs = {
+            "VV": VEH_VEH_collision,
+            "VP": VEH_PED_collision,
+            "PV": PED_VEH_collision,
+            "PP": PED_PED_collision,
+        }
+    coll_rates = {}
+    for et, fun in collision_funcs.items():
+        if et in type_mask and type_mask[et].sum()>0:
+            dis = fun(
+                agent_edges[..., 0:3],
+                agent_edges[..., 3:6],
+                agent_edges[..., 6:8],
+                agent_edges[..., 8:],
+            )
+            dis = dis.min(-1)[0]  # reduction over time
+            if isinstance(dis, np.ndarray):
+                coll_rates[et] = np.sum((dis <= 0)*type_mask[et]) / type_mask[et].sum()
+            else:
+                coll_rates[et] = torch.sum((dis <= 0)*type_mask[et]) / type_mask[et].sum()
+    return coll_rates
+
 
 def batch_detect_off_road(positions, drivable_region_map):
     """
@@ -450,3 +488,93 @@ def batch_detect_off_road_boxes(positions, yaws, extents, drivable_region_map):
     off_road = batch_detect_off_road(boxes, drivable_region_map)  # [B, ..., 4]
     box_off_road = off_road.sum(dim=-1) > 0.5
     return box_off_road.float()
+
+
+def GMM_loglikelihood(x, m, v, pi, avails=None, mode="mean"):
+    """
+    Log probability of tensor x under a uniform mixture of Gaussians.
+    Adapted from CS 236 at Stanford.
+    Args:
+        x (torch.Tensor): tensor with shape (B, D)
+        m (torch.Tensor): means tensor with shape (B, M, D) or (1, M, D), where
+            M is number of mixture components
+        v (torch.Tensor): variances tensor with shape (B, M, D) or (1, M, D) where
+            M is number of mixture components
+        logpi (torch.Tensor): log probability of the modes (B,M)
+        detach (bool): option whether to detach all modes but the best one
+        mode (string): mode of loss, sum or max
+
+    Returns:
+        -log_prob (torch.Tensor): log probabilities of shape (B,)
+    """
+
+    if v is None:
+        v = torch.ones_like(m)
+
+    # (B , D) -> (B , 1, D)
+    x = x.unsqueeze(1)
+    # (B, 1, D) -> (B, M, D) -> (B, M)
+    if avails is not None:
+        avails = avails.unsqueeze(1)
+    log_prob = log_normal(x, m, v, avails=avails)
+    if mode == "sum":
+        loglikelihood = (pi*log_prob).sum(1)
+    elif mode == "mean":
+        loglikelihood = (pi*log_prob).mean(1)
+    elif mode == "max":
+        loglikelihood = (pi*log_prob).max(1)
+    return loglikelihood
+
+
+class distance_buffer():
+    def __init__(self):
+        self._buffer = dict()
+    def __getitem__(self,key):
+        if key in self._buffer:
+            return self._buffer[key]
+        else:
+            return self.update(key)
+    def update(self,key):
+        dis = np.linalg.norm(key)
+        self._buffer[key] = dis
+        self._buffer[-key] = dis
+        return dis
+
+class RandomPerturbation(object):
+    def __init__(self, std: np.ndarray):
+        assert std.shape == (3,) and np.all(std >= 0)
+        self.std = std
+
+    def perturb(self, obs):
+        obs = dict(obs)
+        target_traj = np.concatenate((obs["target_positions"], obs["target_yaws"]), axis=-1)
+        std = np.ones_like(target_traj) * self.std[None, :]
+        noise = np.random.normal(np.zeros_like(target_traj), std)
+        target_traj += noise
+        obs["target_positions"] = target_traj[..., :2]
+        obs["target_yaws"] = target_traj[..., :1]
+        return obs
+
+class OrnsteinUhlenbeckPerturbation(object):
+    def __init__(self,theta,sigma):
+        assert theta.shape == (3,) and sigma.shape == (3,)
+        self.theta = theta
+        self.sigma = sigma
+        self.buffers=dict()
+    def perturb(self,obs):
+        target_traj = np.concatenate((obs["target_positions"], obs["target_yaws"]), axis=-1)
+        bs = target_traj.shape[0]
+        T = target_traj.shape[-2]
+        if bs in self.buffers:
+            buffer = self.buffers[bs]
+        else:
+            buffer = [np.zeros([bs,3])]
+            self.buffers[bs]=buffer
+        while len(buffer)<T:
+            buffer.append(buffer[-1]-self.theta*buffer[-1]+np.random.randn(bs,3)*self.sigma)
+        noise = np.stack(buffer,axis=1)
+        target_traj += noise[...,:T,:]
+        obs["target_positions"] = target_traj[..., :2].astype(np.float32)
+        obs["target_yaws"] = target_traj[..., 2:].astype(np.float32)
+        buffer.pop(0)
+        return obs

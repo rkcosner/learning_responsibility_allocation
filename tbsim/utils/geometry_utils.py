@@ -1,9 +1,9 @@
 import collections
+from logging import exception, raiseExceptions
 import numpy as np
 import torch
 from tbsim.utils.tensor_utils import round_2pi
 from enum import IntEnum
-
 
 def get_box_agent_coords(pos, yaw, extent):
     corners = (torch.tensor([[-1, -1], [-1, 1], [1, 1], [1, -1]]) * 0.5).to(pos.device) * (
@@ -58,10 +58,24 @@ def get_upright_box(pos, extent):
 
 def batch_nd_transform_points(points, Mat):
     ndim = Mat.shape[-1] - 1
-    Mat = torch.transpose(Mat, -1, -2)
+    Mat = Mat.transpose(-1, -2)
     return (points.unsqueeze(-2) @ Mat[..., :ndim, :ndim]).squeeze(-2) + Mat[
         ..., -1:, :ndim
     ].squeeze(-2)
+
+def batch_nd_transform_points_np(points, Mat):
+    ndim = Mat.shape[-1] - 1
+    batch = list(range(Mat.ndim-2))+[Mat.ndim-1]+[Mat.ndim-2]
+    Mat = np.transpose(Mat,batch)
+    if points.ndim==Mat.ndim-1:
+        return (points[...,np.newaxis,:] @ Mat[..., :ndim, :ndim]).squeeze(-2) + Mat[
+            ..., -1:, :ndim
+        ].squeeze(-2)
+    elif points.ndim==Mat.ndim:
+        return ((points[...,np.newaxis,:] @ Mat[...,np.newaxis, :ndim, :ndim]) + Mat[
+            ...,np.newaxis, -1:, :ndim]).squeeze(-2)
+    else:
+        raise Exception("wrong shape")
 
 
 def transform_points_tensor(
@@ -334,10 +348,10 @@ def detect_collision(
     """
     from l5kit.planning import utils
     ego_bbox = utils._get_bounding_box(centroid=ego_pos, yaw=ego_yaw, extent=ego_extent)
+    
     # within_range_mask = utils.within_range(ego_pos, ego_extent, other_pos, other_extent)
     for i in range(other_pos.shape[0]):
         agent_bbox = utils._get_bounding_box(other_pos[i], other_yaw[i], other_extent[i])
-
         if ego_bbox.intersects(agent_bbox):
             front_side, rear_side, left_side, right_side = utils._get_sides(ego_bbox)
 
@@ -360,7 +374,7 @@ def detect_collision(
     return None
 
 
-def calc_distance_map(road_flag,max_dis = 10):
+def calc_distance_map(road_flag,max_dis = 10,mode="L1"):
     """mark the image with manhattan distance to the drivable area
 
     Args:
@@ -370,10 +384,21 @@ def calc_distance_map(road_flag,max_dis = 10):
     out = torch.zeros_like(road_flag,dtype=torch.float)
     out[road_flag==0] = max_dis 
     out[road_flag==1] = 0
-    for i in range(max_dis-1):
-        out[...,1:,:] = torch.min(out[...,1:,:],out[...,:-1,:]+1)
-        out[...,:-1,:] = torch.min(out[...,:-1,:],out[...,1:,:]+1)
-        out[...,:,1:] = torch.min(out[...,:,1:],out[...,:,:-1]+1)
-        out[...,:,:-1] = torch.min(out[...,:,:-1],out[...,:,1:]+1)
+    if mode=="L1":
+        for i in range(max_dis-1):
+            out[...,1:,:] = torch.min(out[...,1:,:],out[...,:-1,:]+1)
+            out[...,:-1,:] = torch.min(out[...,:-1,:],out[...,1:,:]+1)
+            out[...,:,1:] = torch.min(out[...,:,1:],out[...,:,:-1]+1)
+            out[...,:,:-1] = torch.min(out[...,:,:-1],out[...,:,1:]+1)
+    elif mode=="Linf":
+        for i in range(max_dis-1):
+            out[...,1:,:] = torch.min(out[...,1:,:],out[...,:-1,:]+1)
+            out[...,:-1,:] = torch.min(out[...,:-1,:],out[...,1:,:]+1)
+            out[...,:,1:] = torch.min(out[...,:,1:],out[...,:,:-1]+1)
+            out[...,:,:-1] = torch.min(out[...,:,:-1],out[...,:,1:]+1)
+            out[...,1:,1:] = torch.min(out[...,1:,1:],out[...,:-1,:-1]+1)
+            out[...,1:,:-1] = torch.min(out[...,1:,:-1],out[...,:-1,1:]+1)
+            out[...,:-1,:-1] = torch.min(out[...,:-1,:-1],out[...,1:,1:]+1)
+            out[...,:-1,1:] = torch.min(out[...,:-1,1:],out[...,1:,:-1]+1)
 
     return out

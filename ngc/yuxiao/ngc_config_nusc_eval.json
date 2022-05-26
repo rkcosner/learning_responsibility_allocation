@@ -1,0 +1,17 @@
+{
+  "wandb_apikey": "4c0609b869ad8f8b7e572ed41370c18679b8a1c7",
+  "wandb_project_name": "evaluation_nusc",
+  "workspace_mounting_point": "/workspace/tbsim-ws/",
+  "result_dir": "/workspace/result/",
+  "output_dir": "/workspace/tbsim-ws/result/",
+  "eval_output_dir": "/workspace/tbsim-ws/eval_result",
+  "workspace_id": "EIk1t_UvSqCQozjTnbEfRA",
+  "second_workspace_id": "OVG6VSVJRjq7TTKBpOdohg",
+  "second_workspace_mounting_point":"/workspace/dxdev/",
+  "dataset_id": "98618",
+  "dataset_mounting_point": "/workspace/nuscenes/",
+  "dataset_path": "/workspace/nuscenes/",
+  "docker_image": "nvcr.io/nvidian/nvr-av/tbsim:latest",
+  "total_runtime": "48h",
+  "workspace_mounting_point_local": "/home/yuxiaoc/repos/ngc_workspace"
+}

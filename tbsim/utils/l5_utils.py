@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import tbsim.dynamics as dynamics
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim import dynamics as dynamics
+from tbsim.configs.base import ExperimentConfig
 
 
 def get_agent_masks(raw_type):
@@ -563,12 +564,13 @@ def generate_edges(
             edges[et] = torch.cat(v, dim=1)
     return edges
 
-def gen_ego_edges(ego_trajectories,agent_trajectories,ego_extents, agent_extents, raw_types):
+
+def gen_ego_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types):
     """generate edges between ego trajectory samples and agent trajectories
 
     Args:
         ego_trajectories (torch.Tensor): [B,N,T,3]
-        agent_trajectories (torch.Tensor): [B,A,T,3]
+        agent_trajectories (torch.Tensor): [B,A,T,3] or [B,N,A,T,3]
         ego_extents (torch.Tensor): [B,2]
         agent_extents (torch.Tensor): [B,A,2]
         raw_types (torch.Tensor): [B,A]
@@ -577,21 +579,61 @@ def gen_ego_edges(ego_trajectories,agent_trajectories,ego_extents, agent_extents
         type_mask (dict)
     """
     B,N,T = ego_trajectories.shape[:3]
-    A = agent_trajectories.shape[1]
+    A = agent_trajectories.shape[-3]
 
     veh_mask = (raw_types >= 3) & (raw_types <= 13)
     ped_mask = (raw_types == 14) | (raw_types == 15)
 
     edges = torch.zeros([B,N,A,T,10]).to(ego_trajectories.device)
-
     edges[...,:3] = ego_trajectories.unsqueeze(2).repeat(1,1,A,1,1)
-    edges[...,3:6] = agent_trajectories.unsqueeze(1).repeat(1,N,1,1,1)
+    if agent_trajectories.ndim==4:
+        edges[...,3:6] = agent_trajectories.unsqueeze(1).repeat(1,N,1,1,1)
+    else:
+        edges[...,3:6] = agent_trajectories
     edges[...,6:8] = ego_extents.reshape(B,1,1,1,2).repeat(1,N,A,T,1)
     edges[...,8:] = agent_extents.reshape(B,1,A,1,2).repeat(1,N,1,T,1)
     type_mask = {"VV":veh_mask,"VP":ped_mask}
+    return edges,type_mask
+
+
+def gen_EC_edges(ego_trajectories,agent_trajectories,ego_extents, agent_extents, raw_types):
+    """generate edges between ego trajectory samples and agent trajectories
+
+    Args:
+        ego_trajectories (torch.Tensor): [B,A,T,3]
+        agent_trajectories (torch.Tensor): [B,A,T,3]
+        ego_extents (torch.Tensor): [B,2]
+        agent_extents (torch.Tensor): [B,A,2]
+        raw_types (torch.Tensor): [B,A]
+    Returns:
+        edges (torch.Tensor): [B,N,A,T,10]
+        type_mask (dict)
+    """
+    
+    B,A = ego_trajectories.shape[:2]
+    T = ego_trajectories.shape[-2]
+
+    veh_mask = (raw_types >= 3) & (raw_types <= 13)
+    ped_mask = (raw_types == 14) | (raw_types == 15)
 
     
-
+    if ego_trajectories.ndim==4:
+        edges = torch.zeros([B,A,T,10]).to(ego_trajectories.device)
+        edges[...,:3] = ego_trajectories
+        edges[...,3:6] = agent_trajectories
+        edges[...,6:8] = ego_extents.reshape(B,1,1,2).repeat(1,A,T,1)
+        edges[...,8:] = agent_extents.unsqueeze(2).repeat(1,1,T,1)
+    elif ego_trajectories.ndim==5:
+        
+        K = ego_trajectories.shape[2]
+        edges = torch.zeros([B,A*K,T,10]).to(ego_trajectories.device)
+        edges[...,:3] = TensorUtils.join_dimensions(ego_trajectories,1,3)
+        edges[...,3:6] = agent_trajectories.repeat(1,K,1,1)
+        edges[...,6:8] = ego_extents.reshape(B,1,1,2).repeat(1,A*K,T,1)
+        edges[...,8:] = agent_extents.unsqueeze(2).repeat(1,K,T,1)
+        veh_mask = veh_mask.tile(1,K)
+        ped_mask = ped_mask.tile(1,K)
+    type_mask = {"VV":veh_mask,"VP":ped_mask}
     return edges,type_mask
     
 
@@ -666,5 +708,11 @@ def get_current_states_all_agents(batch: dict, step_time, dyn_type: dynamics.Dyn
 
 
 def get_drivable_region_map(rasterized_map):
-    assert rasterized_map.shape[-3] in [3, 15]
     return rasterized_map[..., -3, :, :] < 1.
+
+
+def get_modality_shapes(cfg: ExperimentConfig):
+    assert cfg.env.rasterizer.map_type == "py_semantic"
+    num_channels = (cfg.algo.history_num_frames + 1) * 2 + 3
+    h, w = cfg.env.rasterizer.raster_size
+    return dict(image=(num_channels, h, w))

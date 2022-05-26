@@ -1,7 +1,7 @@
 import argparse
 import sys
 import os
-import json
+import socket
 
 import wandb
 import pytorch_lightning as pl
@@ -9,17 +9,23 @@ from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
 
 from tbsim.utils.log_utils import PrintLogger
 import tbsim.utils.train_utils as TrainUtils
-from tbsim.envs.env_l5kit import EnvL5KitSimulation
 from tbsim.utils.env_utils import RolloutCallback
 from tbsim.configs.registry import get_registered_experiment_config
-from tbsim.utils.config_utils import get_experiment_config_from_file
 from tbsim.datasets.factory import datamodule_factory
 from tbsim.utils.config_utils import get_experiment_config_from_file
+from tbsim.utils.batch_utils import set_global_batch_type
 from tbsim.algos.factory import algo_factory
 
 
 def main(cfg, auto_remove_exp_dir=False, debug=False):
     pl.seed_everything(cfg.seed)
+
+    if cfg.env.name == "l5kit":
+        set_global_batch_type("l5kit")
+    elif cfg.env.name == "nusc":
+        set_global_batch_type("avdata")
+    else:
+        raise NotImplementedError("Env {} is not supported".format(cfg.env.name))
 
     print("\n============= New Training Run with Config =============")
     print(cfg)
@@ -28,10 +34,8 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         exp_name=cfg.name,
         output_dir=cfg.root_dir,
         save_checkpoints=cfg.train.save.enabled,
-        auto_remove_exp_dir=auto_remove_exp_dir,
+        auto_remove_exp_dir=auto_remove_exp_dir
     )
-    # Save experiment config to the training dir
-    cfg.dump(os.path.join(root_dir, version_key, "config.json"))
 
     # Save experiment config to the training dir
     cfg.dump(os.path.join(root_dir, version_key, "config.json"))
@@ -66,27 +70,20 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
 
     # Dataset
     datamodule = datamodule_factory(
-        cls_name=cfg.train.datamodule_class, config=cfg, mode="ego"
+        cls_name=cfg.train.datamodule_class, config=cfg
     )
     datamodule.setup()
 
     # Environment for close-loop evaluation
     if cfg.train.rollout.enabled:
-        env = EnvL5KitSimulation(
-            cfg.env,
-            dataset=datamodule.ego_validset,
-            seed=cfg.seed,
-            num_scenes=cfg.train.rollout.num_scenes,
-            compute_metrics=True
-        )
         # Run rollout at regular intervals
         rollout_callback = RolloutCallback(
-            env=env,
-            num_episodes=cfg.train.rollout.num_episodes,
+            exp_config=cfg,
             every_n_steps=cfg.train.rollout.every_n_steps,
-            n_step_action=cfg.train.rollout.n_step_action,
             warm_start_n_steps=cfg.train.rollout.warm_start_n_steps,
-            verbose=False,
+            verbose=True,
+            save_video=cfg.train.rollout.save_video,
+            video_dir=video_dir
         )
         train_callbacks.append(rollout_callback)
 
@@ -136,10 +133,22 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         )
         train_callbacks.append(ckpt_rollout_callback)
 
+    # a ckpt monitor to save at fixed interval
+    ckpt_fixed_callback = pl.callbacks.ModelCheckpoint(
+        dirpath=ckpt_dir,
+        filename="iter{step}",
+        auto_insert_metric_name=False,
+        save_top_k=-1,
+        monitor=None,
+        every_n_train_steps=10000,
+        verbose=True,
+    )
+    train_callbacks.append(ckpt_fixed_callback)
+
     # Logging
     assert not (cfg.train.logging.log_tb and cfg.train.logging.log_wandb)
+    logger = None
     if debug:
-        logger = None
         print("Debugging mode, suppress logging.")
     elif cfg.train.logging.log_tb:
         logger = TensorBoardLogger(
@@ -159,7 +168,6 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         logger.experiment.config.update(cfg.to_dict())
         logger.watch(model=model)
     else:
-        logger = None
         print("WARNING: not logging training stats")
 
     # Train
@@ -244,6 +252,12 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--on_ngc",
+        action="store_true",
+        help="whether running the script on ngc (this will change some behaviors like avoid writing into dataset)"
+    )
+
+    parser.add_argument(
         "--debug", action="store_true", help="Debug mode, suppress wandb logging, etc."
     )
 
@@ -253,7 +267,7 @@ if __name__ == "__main__":
         default_config = get_registered_experiment_config(args.config_name)
     elif args.config_file is not None:
         # Update default config with external json file
-        default_config = get_experiment_config_from_file(args.config_file)
+        default_config = get_experiment_config_from_file(args.config_file, locked=False)
     else:
         raise Exception(
             "Need either a config name or a json file to create experiment config"
@@ -271,10 +285,28 @@ if __name__ == "__main__":
     if args.wandb_project_name is not None:
         default_config.train.logging.wandb_project_name = args.wandb_project_name
 
+    if args.on_ngc:
+        ngc_job_id = socket.gethostname()
+        default_config.name = default_config.name + "_" + ngc_job_id
+
+    default_config.train.on_ngc = args.on_ngc
+
     if args.debug:
         # Test policy rollout
-        default_config.train.rollout.every_n_steps = 100
+        default_config.train.rollout.every_n_steps = 10
         default_config.train.rollout.num_episodes = 1
+
+    # make rollout evaluation config consistent with the rest of the config
+    if default_config.train.rollout.enabled:
+        default_config.eval.env = default_config.env.name
+        assert default_config.algo.eval_class is not None, \
+            "Please set an eval_class for {}".format(default_config.algo.name)
+        default_config.eval.eval_class = default_config.algo.eval_class
+        default_config.eval.dataset_path = default_config.train.dataset_path
+        for k in default_config.eval[default_config.eval.env]:  # copy env-specific config to the global-level
+            default_config.eval[k] = default_config.eval[default_config.eval.env][k]
+        default_config.eval.pop("nusc")
+        default_config.eval.pop("l5kit")
 
     default_config.lock()  # Make config read-only
     main(default_config, auto_remove_exp_dir=args.remove_exp_dir, debug=args.debug)

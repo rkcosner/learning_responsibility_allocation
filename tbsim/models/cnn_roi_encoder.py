@@ -529,7 +529,7 @@ def obtain_map_enc(
 if __name__ == "__main__":
     import numpy as np
     from torchvision.ops.roi_align import RoIAlign
-    import pdb
+
 
     device = torch.device("cuda")
     torch.set_default_tensor_type(torch.cuda.DoubleTensor)

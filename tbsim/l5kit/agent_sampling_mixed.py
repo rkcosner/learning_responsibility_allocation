@@ -20,7 +20,7 @@ from l5kit.rasterization import (
     RenderContext,
 )
 
-import pdb
+
 from l5kit.data.map_api import InterpolationMethod, MapAPI
 from l5kit.rasterization.semantic_rasterizer import indices_in_bounds
 from l5kit.geometry import transform_points
@@ -48,6 +48,7 @@ def generate_agent_sample_mixed(
     vectorize_lane=False,
     skimp_fn=False,
     rasterize_agents=False,
+    vectorize_agents=True,
 ) -> dict:
     """Generates the inputs and targets to train a deep prediction model with vectorized inputs.
     A deep prediction model takes as input the state of the world in vectorized form,
@@ -168,6 +169,7 @@ def generate_agent_sample_mixed(
             agent_yaw_rad,
         )
 
+
         # For vectorized version we require both ego and agent history to be a Tensor of same length
         # => fetch history_num_frames_max for both, and later zero out frames exceeding the set history length.
         # Use history_num_frames_max + 1 because it also includes the current frame.
@@ -217,7 +219,7 @@ def generate_agent_sample_mixed(
     }
 
     with timer.timed("vectorize"):
-        if not skimp_fn():
+        if not skimp_fn() and vectorize_agents:
             vectorized_features = vectorizer.vectorize(
                 selected_track_id,
                 agent_centroid_m,
@@ -273,7 +275,7 @@ def generate_agent_sample_mixed(
                 vectorized_features["other_agents_agent_from_world"] =other_agents_agent_from_world
         else:
             vectorized_features = dict()
-    if vectorize_lane:
+    if not skimp_fn() and vectorize_agents and vectorize_lane:
         other_agents_idx = np.where(
             vectorized_features["all_other_agents_history_availability"][:, 0]
             & (vectorized_features["all_other_agents_types"] >= 3)
@@ -407,13 +409,13 @@ def get_lane_info(
                         dx_curr[i] = -delta_x
                         len_curr[i] = len_cand
 
-                elif min_dy <= -1.5 and min_dy > -5 and abs(dpsi) < np.pi / 2:
+                elif min_dy <= -1.5 and min_dy > -8 and abs(dpsi) < 0.75*np.pi:
                     if right_lane[i] is None or len_right[i] < len_cand:
                         right_lane[i] = lane
                         dx_right[i] = -delta_x
                         len_right[i] = len_cand
 
-                elif min_dy >= 1.5 and min_dy < 5 and abs(dpsi) < np.pi / 2:
+                elif min_dy >= 1.5 and min_dy < 8 and abs(dpsi) < 0.75*np.pi:
                     if left_lane[i] is None or len_left[i] < len_cand:
                         left_lane[i] = lane
                         dx_left[i] = -delta_x

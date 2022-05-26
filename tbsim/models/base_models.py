@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from torchvision.models.resnet import resnet18, resnet50
 from torchvision.models.feature_extraction import create_feature_extractor
 from torchvision.ops import RoIAlign
+from tbsim.models.Transformer import SimpleTransformer
 
 from tbsim.utils.tensor_utils import reshape_dimensions, flatten
 import tbsim.utils.tensor_utils as TensorUtils
@@ -681,7 +682,7 @@ class RasterizeROIEncoder(nn.Module):
             use_rotated_roi=True
     ) -> None:
         super(RasterizeROIEncoder, self).__init__()
-        model = RasterizedMapEncoder(
+        encoder = RasterizedMapEncoder(
             model_arch=model_arch,
             input_image_shape=input_image_shape,
             feature_dim=global_feature_dim,
@@ -693,11 +694,11 @@ class RasterizeROIEncoder(nn.Module):
             'map_model.layer4': 'layer4',
             'map_model.fc': "final"
         }
-        self.encoder_heads = create_feature_extractor(model, feat_nodes)
+        self.encoder_heads = create_feature_extractor(encoder, feat_nodes)
 
         self.roi_layer_key = roi_layer_key
-        roi_scale = model.feature_scales()[roi_layer_key]
-        roi_channel = model.feature_channels()[roi_layer_key]
+        roi_scale = encoder.feature_scales()[roi_layer_key]
+        roi_channel = encoder.feature_channels()[roi_layer_key]
         if use_rotated_roi:
             self.roi_align = RotatedROIAlign(
                 roi_feature_size, roi_scale=roi_scale)
@@ -720,7 +721,7 @@ class RasterizeROIEncoder(nn.Module):
         else:
             self.agent_net = nn.Identity()
 
-    def forward(self, map_inputs: torch.Tensor, rois: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, map_inputs: torch.Tensor, rois: torch.Tensor):
         """
 
         Args:
@@ -738,7 +739,7 @@ class RasterizeROIEncoder(nn.Module):
         agent_feats = self.agent_net(roi_feats)
         global_feats = feats["final"]
 
-        return agent_feats, roi_feats, self.activation(global_feats)
+        return agent_feats, roi_feats, self.activation(global_feats), feats
 
 
 class RasterizedMapKeyPointNet(RasterizedMapEncoder):
@@ -776,7 +777,7 @@ class RasterizedMapUNet(nn.Module):
             spatial_softmax_kwargs=None
     ) -> None:
         super(RasterizedMapUNet, self).__init__()
-        model = RasterizedMapEncoder(
+        encoder = RasterizedMapEncoder(
             model_arch=model_arch,
             input_image_shape=input_image_shape,
             use_spatial_softmax=use_spatial_softmax,
@@ -790,8 +791,8 @@ class RasterizedMapUNet(nn.Module):
             'map_model.layer3': 'layer3',
             'map_model.layer4': 'layer4',
         }
-        self.encoder_heads = create_feature_extractor(model, feat_nodes)
-        encoder_channels = list(model.feature_channels().values())
+        self.encoder_heads = create_feature_extractor(encoder, feat_nodes)
+        encoder_channels = list(encoder.feature_channels().values())
         self.decoder = UNetDecoder(
             input_channel=encoder_channels[-1],
             encoder_channels=encoder_channels[:-1],
@@ -799,9 +800,10 @@ class RasterizedMapUNet(nn.Module):
             up_factor=2
         )
 
-    def forward(self, map_inputs):
-        encoder_feats = self.encoder_heads(map_inputs)
-        encoder_feats = list(encoder_feats.values())
+    def forward(self, map_inputs, encoder_feats=None):
+        if encoder_feats is None:
+            encoder_feats = self.encoder_heads(map_inputs)
+        encoder_feats = [encoder_feats[k] for k in ["layer1", "layer2", "layer3", "layer4"]]
         return self.decoder.forward(
             feat_to_decode=encoder_feats[-1],
             encoder_feats=encoder_feats[:-1],
@@ -810,8 +812,9 @@ class RasterizedMapUNet(nn.Module):
 
 
 class RNNTrajectoryEncoder(nn.Module):
-    def __init__(self, trajectory_dim, rnn_hidden_size, feature_dim=None, mlp_layer_dims: tuple = ()):
+    def __init__(self, trajectory_dim, rnn_hidden_size, feature_dim=None, mlp_layer_dims: tuple = (),mode="last"):
         super(RNNTrajectoryEncoder, self).__init__()
+        self.mode= mode
         self.lstm = nn.LSTM(
             trajectory_dim, hidden_size=rnn_hidden_size, batch_first=True)
         if feature_dim is not None:
@@ -830,10 +833,27 @@ class RNNTrajectoryEncoder(nn.Module):
         return [self._feature_dim]
 
     def forward(self, input_trajectory):
-        traj_feat = self.lstm(input_trajectory)[0][:, -1, :]
+        if self.mode=="last":
+            traj_feat = self.lstm(input_trajectory)[0][:, -1, :]
+        elif self.mode=="all":
+            traj_feat = self.lstm(input_trajectory)[0]
         traj_feat = self.mlp(traj_feat)
         return traj_feat
 
+class RNNFeatureRoller(nn.Module):
+    def __init__(self, trajectory_dim, feature_dim):
+        super(RNNFeatureRoller, self).__init__()
+        self.gru = nn.GRU(
+            trajectory_dim, hidden_size=feature_dim, batch_first=True)
+        self._feature_dim = feature_dim
+
+
+    def output_shape(self, input_shape=None):
+        return [self._feature_dim]
+
+    def forward(self, feature,input_trajectory):
+        _,hn = self.gru(input_trajectory,feature.unsqueeze(0))
+        return hn[0]+feature
 
 class PosteriorEncoder(nn.Module):
     """Posterior Encoder (x, x_c -> q) for CVAE"""
@@ -867,6 +887,7 @@ class PosteriorEncoder(nn.Module):
         return self.mlp(feat)
 
 
+
 class ConditionEncoder(nn.Module):
     """Condition Encoder (x -> c) for CVAE"""
 
@@ -877,12 +898,13 @@ class ConditionEncoder(nn.Module):
             condition_dim: int,
             mlp_layer_dims: tuple = (128, 128),
             goal_encoder=None,
-            rnn_hidden_size: int = 100
+            agent_traj_encoder=None
     ) -> None:
         super(ConditionEncoder, self).__init__()
         self.map_encoder = map_encoder
         self.trajectory_shape = trajectory_shape
         self.goal_encoder = goal_encoder
+        self.agent_traj_encoder = agent_traj_encoder
 
         # TODO: history encoder
         # self.hist_lstm = nn.LSTM(trajectory_shape[-1], hidden_size=rnn_hidden_size, batch_first=True)
@@ -900,7 +922,102 @@ class ConditionEncoder(nn.Module):
         if self.goal_encoder is not None:
             goal_feat = self.goal_encoder(condition_inputs["goal"])
             c_feat = torch.cat([c_feat, goal_feat], dim=-1)
+        if self.agent_traj_encoder is not None and "agent_traj" in condition_inputs:
+            agent_traj_feat = self.agent_traj_encoder(condition_inputs["agent_traj"])
+            c_feat = torch.cat([c_feat, agent_traj_feat], dim=-1)
         return c_feat
+
+
+class ECEncoder(nn.Module):
+    """Condition Encoder (x -> c) for CVAE"""
+
+    def __init__(
+            self,
+            map_encoder,
+            trajectory_shape: tuple,  # [T, D]
+            EC_dim: int,
+            condition_dim: int, 
+            mlp_layer_dims: tuple = (128, 128),
+            goal_encoder=None,
+            rnn_hidden_size: int = 100
+    ) -> None:
+        super(ECEncoder, self).__init__()
+        if isinstance(map_encoder,nn.Module):
+            self.map_encoder = map_encoder
+            visual_feature_size = self.map_encoder.output_shape()[0]
+        elif isinstance(map_encoder,int):
+            visual_feature_size = map_encoder
+            self.map_encoder = None
+        self.trajectory_shape = trajectory_shape
+        self.goal_encoder = goal_encoder
+        self.EC_dim = EC_dim
+        # TODO: history encoder
+        # self.hist_lstm = nn.LSTM(trajectory_shape[-1], hidden_size=rnn_hidden_size, batch_first=True)
+        self.traj_encoder = RNNTrajectoryEncoder(trajectory_shape[-1], rnn_hidden_size, feature_dim=EC_dim)
+        goal_dim = 0 if goal_encoder is None else goal_encoder.output_shape()[0]
+        self.mlp = MLP(
+            input_dim=visual_feature_size+goal_dim+EC_dim,
+            output_dim=condition_dim,
+            layer_dims=mlp_layer_dims,
+            output_activation=nn.ReLU
+        )
+
+    def forward(self, condition_inputs):
+        if self.map_encoder is None:
+            c_feat = condition_inputs["map_feature"]
+        else:
+            c_feat = self.map_encoder(condition_inputs["image"])
+        if self.goal_encoder is not None:
+            goal_feat = self.goal_encoder(condition_inputs["goal"])
+            c_feat = torch.cat([c_feat, goal_feat], dim=-1)
+        if "cond_traj" in condition_inputs and condition_inputs["cond_traj"] is not None:
+            bs,Na,T,D = condition_inputs["cond_traj"].shape
+            EC_feat = self.traj_encoder(condition_inputs["cond_traj"].reshape(-1,T,D)).reshape(bs,Na,-1)
+            EC_feat = torch.cat((EC_feat,torch.zeros([bs,1,self.EC_dim]).to(EC_feat.device)),1)
+        else:
+            bs = c_feat.shape[0]
+            EC_feat = torch.zeros([bs,1,self.EC_dim]).to(c_feat.device)
+        if c_feat.ndim==2:
+            c_feat = c_feat.unsqueeze(1).repeat(1,EC_feat.shape[1],1)
+        else: 
+            assert c_feat.ndim==3 and c_feat.shape[1]==EC_feat.shape[1]
+        c_feat = torch.cat((c_feat,EC_feat),-1)
+        c_feat = self.mlp(c_feat)
+        
+        return c_feat
+
+class AgentTrajEncoder(nn.Module):
+    """Condition Encoder (x -> c) for CVAE"""
+
+    def __init__(
+            self,
+            trajectory_shape: tuple,  # [T, D]
+            feature_dim: int,
+            mlp_layer_dims: tuple = (128, 128),
+            rnn_hidden_size: int = 100,
+            use_transformer = True,
+    ) -> None:
+        super(AgentTrajEncoder, self).__init__()
+        self.trajectory_shape = trajectory_shape
+        self.feature_dim = feature_dim
+        self.traj_encoder = RNNTrajectoryEncoder(trajectory_shape[-1], rnn_hidden_size, feature_dim=feature_dim, mlp_layer_dims=mlp_layer_dims)
+        if use_transformer:
+            self.transformer = SimpleTransformer(
+                src_dim=feature_dim)
+        else:
+            self.transformer = None
+
+    def forward(self, agent_trajs):
+        bs,Na,T,D = agent_trajs.shape
+        feat = self.traj_encoder(agent_trajs.reshape(-1,T,D)).reshape(bs,Na,-1)
+        if self.transformer is not None:
+            agent_pos = agent_trajs[:,:,0,:2]
+            avails = (agent_pos!=0).any(-1)
+            feat = self.transformer(feat,avails,agent_pos)
+        
+        return torch.max(feat,1)[0]
+
+
 
 
 class PosteriorNet(nn.Module):
@@ -966,7 +1083,8 @@ class TrajectoryDecoder(nn.Module):
             dynamics_type: Union[str, dynamics.DynType] = None,
             dynamics_kwargs: dict = None,
             step_time: float = None,
-            network_kwargs: dict = None
+            network_kwargs: dict = None,
+            Gaussian_var = False
     ):
         """
         A class that predict future trajectories based on input features
@@ -979,6 +1097,7 @@ class TrajectoryDecoder(nn.Module):
                 the future trajectories.
             step_time (float): time between steps. required for using dynamics models
             network_kwargs (dict): keyword args for the decoder networks
+            Gaussian_var (bool): whether output the variance of the predicted trajectory
         """
         super(TrajectoryDecoder, self).__init__()
         self.feature_dim = feature_dim
@@ -988,6 +1107,7 @@ class TrajectoryDecoder(nn.Module):
         self._network_kwargs = network_kwargs
         self._dynamics_type = dynamics_type
         self._dynamics_kwargs = dynamics_kwargs
+        self.Gaussian_var = Gaussian_var
         self._create_dynamics()
         self._create_networks()
 
@@ -1020,32 +1140,34 @@ class TrajectoryDecoder(nn.Module):
         assert current_states.shape[-1] == self.dyn.xdim
         assert actions.shape[-1] == self.dyn.udim
         assert isinstance(self.step_time, float) and self.step_time > 0
-        _, pos, yaw = dynamics.forward_dynamics(
+        x, pos, yaw = dynamics.forward_dynamics(
             self.dyn,
             initial_states=current_states,
             actions=actions,
             step_time=self.step_time
         )
         traj = torch.cat((pos, yaw), dim=-1)
-        return traj
+        return traj,x
 
     def forward(self, inputs, current_states=None, num_steps=None):
         preds = self._forward_networks(
             inputs, current_states=current_states, num_steps=num_steps)
         if self.dyn is not None:
             preds["controls"] = preds["trajectories"]
-            preds["trajectories"] = self._forward_dynamics(
+            preds["trajectories"], x = self._forward_dynamics(
                 current_states=current_states,
                 actions=preds["trajectories"]
             )
+            preds["terminal_state"] = x[...,-1,:]
         return preds
 
-
 class MLPTrajectoryDecoder(TrajectoryDecoder):
+    
     def _create_networks(self):
         net_kwargs = dict() if self._network_kwargs is None else dict(self._network_kwargs)
         if self._network_kwargs is None:
             net_kwargs = dict()
+        
         assert isinstance(self.num_steps, int)
         if self.dyn is None:
             pred_shapes = OrderedDict(
@@ -1053,6 +1175,8 @@ class MLPTrajectoryDecoder(TrajectoryDecoder):
         else:
             pred_shapes = OrderedDict(
                 trajectories=(self.num_steps, self.dyn.udim))
+        if self.Gaussian_var:
+            pred_shapes["logvar"] = (self.num_steps, self.state_dim)
 
         state_as_input = net_kwargs.pop("state_as_input")
         if self.dyn is not None:
@@ -1074,6 +1198,7 @@ class MLPTrajectoryDecoder(TrajectoryDecoder):
         if self._network_kwargs["state_as_input"] and self.dyn is not None:
             inputs = torch.cat((inputs, current_states), dim=-1)
 
+
         if inputs.ndim == 2:
             # [B, D]
             preds = self.mlp(inputs)
@@ -1084,6 +1209,161 @@ class MLPTrajectoryDecoder(TrajectoryDecoder):
             raise ValueError(
                 "Expecting inputs to have ndim == 2 or 3, got {}".format(inputs.ndim))
         return preds
+
+
+
+class MLPECTrajectoryDecoder(TrajectoryDecoder):
+    def __init__(
+            self,
+            feature_dim: int,
+            state_dim: int = 3,
+            num_steps: int = None,
+            dynamics_type: Union[str, dynamics.DynType] = None,
+            dynamics_kwargs: dict = None,
+            step_time: float = None,
+            EC_feature_dim = 64,
+            network_kwargs: dict = None,
+            Gaussian_var = False,
+            
+    ):
+        """
+        A class that predict future trajectories based on input features
+        Args:
+            feature_dim (int): dimension of the input feature
+            state_dim (int): dimension of the output trajectory at each step
+            num_steps (int): (optional) number of future state to predict
+            dynamics_type (str, dynamics.DynType): (optional) if specified, the network predicts action
+                for the dynamics model instead of future states. The actions are then used to predict
+                the future trajectories.
+            step_time (float): time between steps. required for using dynamics models
+            network_kwargs (dict): keyword args for the decoder networks
+            Gaussian_var (bool): whether output the variance of the predicted trajectory
+        """
+        super(TrajectoryDecoder, self).__init__()
+        self.feature_dim = feature_dim
+        self.state_dim = state_dim
+        self.num_steps = num_steps
+        self.step_time = step_time
+        self.EC_feature_dim = EC_feature_dim
+        self._network_kwargs = network_kwargs
+        self._dynamics_type = dynamics_type
+        self._dynamics_kwargs = dynamics_kwargs
+        self.Gaussian_var = Gaussian_var
+        self._create_dynamics()
+        self._create_networks()
+    def _create_networks(self):
+        net_kwargs = dict() if self._network_kwargs is None else dict(self._network_kwargs)
+        if self._network_kwargs is None:
+            net_kwargs = dict()
+        
+        assert isinstance(self.num_steps, int)
+        if self.dyn is None:
+            pred_shapes = OrderedDict(
+                trajectories=(self.num_steps, self.state_dim))
+        else:
+            pred_shapes = OrderedDict(
+                trajectories=(self.num_steps, self.dyn.udim))
+        if self.Gaussian_var:
+            pred_shapes["logvar"] = (self.num_steps, self.state_dim)
+
+        state_as_input = net_kwargs.pop("state_as_input")
+        if self.dyn is not None:
+            assert state_as_input   # TODO: deprecated, set default to True and remove from configs
+
+        if state_as_input and self.dyn is not None:
+            feature_dim = self.feature_dim + self.dyn.xdim
+        else:
+            feature_dim = self.feature_dim
+
+        self.mlp = SplitMLP(
+            input_dim=feature_dim,
+            output_shapes=pred_shapes,
+            output_activation=None,
+            **net_kwargs
+        )
+        self.offsetmlp = SplitMLP(
+            input_dim=feature_dim+self.EC_feature_dim,
+            output_shapes=pred_shapes,
+            output_activation=None,
+            **net_kwargs
+        )
+
+    def _forward_networks(self, inputs, EC_feat=None, current_states=None, num_steps=None):
+        if self._network_kwargs["state_as_input"] and self.dyn is not None:
+            inputs = torch.cat((inputs, current_states), dim=-1)
+        if inputs.ndim == 2:
+            # [B, D]
+            
+            preds = self.mlp(inputs)
+            if EC_feat is not None:
+                bs,Na = EC_feat.shape[:2]
+
+                # EC_feat = self.traj_encoder(cond_traj.reshape(-1,T,D)).reshape(bs,Na,-1)
+                inputs_tile = inputs.unsqueeze(1).tile(1,Na,1)
+                EC_feat = torch.cat((inputs_tile,EC_feat),dim=-1)
+                EC_preds = TensorUtils.time_distributed(EC_feat, self.offsetmlp)
+                EC_preds["trajectories"] = EC_preds["trajectories"] + preds["trajectories"].unsqueeze(1)
+            else:
+                EC_preds = None
+
+        elif inputs.ndim == 3:
+            # [B, A, D]
+            preds = TensorUtils.time_distributed(inputs, self.mlp)
+            if EC_feat is not None:
+                assert EC_feat.ndim==4
+                bs,A,Na= EC_feat.shape[:3]
+                # EC_feat = self.traj_encoder(cond_traj.reshape(-1,T,D)).reshape(bs,Na,-1)
+                inputs_tile = inputs.tile(1,Na,1)
+                EC_feat = torch.cat((inputs_tile,EC_feat),dim=-1)
+                EC_preds = TensorUtils.time_distributed(EC_feat, self.offsetmlp)
+                EC_preds = reshape_dimensions(EC_preds,1,2,(A,Na))
+                EC_preds["trajectories"] = EC_preds["trajectories"] + preds["trajectories"].unsqueeze(2)
+            else:
+                EC_preds = None
+        else:
+            raise ValueError(
+                "Expecting inputs to have ndim == 2 or 3, got {}".format(inputs.ndim))
+        return preds, EC_preds
+    
+    def _forward_dynamics(self, current_states, actions):
+        assert self.dyn is not None
+        assert current_states.shape[-1] == self.dyn.xdim
+        assert actions.shape[-1] == self.dyn.udim
+        assert isinstance(self.step_time, float) and self.step_time > 0
+
+        _, pos, yaw = dynamics.forward_dynamics(
+            self.dyn,
+            initial_states=current_states,
+            actions=actions,
+            step_time=self.step_time
+        )
+        traj = torch.cat((pos, yaw), dim=-1)
+        return traj
+    def forward(self, inputs, current_states=None, EC_feat=None, num_steps=None):
+        preds, EC_preds = self._forward_networks(
+            inputs, EC_feat, current_states=current_states, num_steps=num_steps)
+        if self.dyn is not None:
+            preds["controls"] = preds["trajectories"]
+            if EC_preds is None:
+                preds["trajectories"] = self._forward_dynamics(
+                    current_states=current_states,
+                    actions=preds["trajectories"]
+                )
+            else:
+                total_actions = torch.cat((preds["trajectories"].unsqueeze(1),EC_preds["trajectories"]),1)
+                bs,A,T,D = total_actions.shape
+                current_states_tiled = current_states.unsqueeze(1).repeat(1,total_actions.size(1),1)
+                total_trajectories = self._forward_dynamics(
+                    current_states=current_states_tiled.reshape(bs*A,-1),
+                    actions=total_actions.reshape(bs*A,T,D)
+                ).reshape(*total_actions.shape[:-1],-1)
+                preds["trajectories"] = total_trajectories[:,0]
+                preds["EC_trajectories"] = total_trajectories[:,1:]
+        else:
+            preds["EC_trajectories"] = EC_preds["trajectories"]
+                
+        return preds
+
 
 
 if __name__ == "__main__":

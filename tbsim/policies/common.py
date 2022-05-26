@@ -27,9 +27,17 @@ class Trajectory(object):
     def positions(self):
         return TensorUtils.clone(self._positions)
 
+    @positions.setter
+    def positions(self, x):
+        self._positions = TensorUtils.clone(x)
+
     @property
     def yaws(self):
         return TensorUtils.clone(self._yaws)
+
+    @yaws.setter
+    def yaws(self, x):
+        self._yaws = TensorUtils.clone(x)
 
     def to_dict(self):
         return dict(
