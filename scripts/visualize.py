@@ -2,15 +2,18 @@ import argparse
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
+from collections import defaultdict
 import torch
 import pathlib
 import json
-
+from scipy.signal import savgol_filter
 import os
 
 from l5kit.data import LocalDataManager
 from l5kit.geometry import transform_points
 from avdata.simulation.sim_stats import calc_stats
+from avdata.simulation.sim_df_cache import SimulationDataFrameCache
+from avdata import AgentType, UnifiedDataset
 
 from tbsim.utils.geometry_utils import get_box_world_coords_np
 from tbsim.utils.config_utils import translate_l5kit_cfg, translate_avdata_cfg
@@ -81,6 +84,29 @@ def get_l5_rasterizer(dataset_path):
     return render_rasterizer
 
 
+def get_nusc_renderer(dataset_path):
+    kwargs = dict(
+        desired_data=["nusc-val"],
+        future_sec=(1.5, 1.5),
+        history_sec=(1.0, 1.0),
+        data_dirs={
+            "nusc": dataset_path,
+            "nusc_mini": dataset_path,
+        },
+        only_types=[AgentType.VEHICLE],
+        agent_interaction_distances=defaultdict(lambda: 30),
+        incl_map=False,
+        num_workers=os.cpu_count(),
+        desired_dt=0.1
+    )
+
+    dataset = UnifiedDataset(**kwargs)
+
+    renderer = NuscRenderer(dataset, raster_size=500, resolution=5)
+
+    return renderer
+
+
 def get_state_image_l5(rasterizer, ras_pos, ras_yaw):
     state_im = rasterizer.rasterize(
         ras_pos,
@@ -95,7 +121,75 @@ def get_state_image_l5(rasterizer, ras_pos, ras_yaw):
     return state_im, raster_from_world
 
 
-def draw_trajectories(ax, trajectories, raster_from_world):
+class NuscRenderer(object):
+    def __init__(self, dataset, raster_size=500, resolution=2):
+        self.dataset = dataset
+        self.raster_size = raster_size
+        self.resolution = resolution
+        num_total_scenes = dataset.num_scenes()
+        scene_info = dict()
+        for i in range(num_total_scenes):
+            si = dataset.get_scene(i)
+            scene_info[si.name] = si
+        self.scene_info = scene_info
+
+    def render(self, ras_pos, ras_yaw, scene_name):
+        scene_info = self.scene_info[scene_name]
+        cache = SimulationDataFrameCache(
+            self.dataset.cache_path,
+            scene_info,
+            0,
+            self.dataset.augmentations,
+        )
+
+        patch_data, _ = cache.load_map_patch(
+            ras_pos[0],
+            ras_pos[1],
+            self.raster_size,
+            self.resolution,
+            (0, 0),
+            ras_yaw,
+            return_rgb=False
+        )
+
+        """
+        [
+                    "lane",
+                    "road_segment",
+                    "drivable_area",
+                    "road_divider",
+                    "lane_divider",
+                    "ped_crossing",
+                    "walkway",
+                ]
+        """
+        state_im = np.ones((self.raster_size, self.raster_size, 3))
+        state_im[patch_data[2] > 0] = np.array([200, 211, 213]) / 255.
+        state_im[patch_data[3] > 0] = np.array([164, 184, 196]) / 255.
+        state_im[patch_data[4] > 0] = np.array([164, 184, 196]) / 255.
+        state_im[patch_data[5] > 0] = np.array([96, 117, 138]) / 255.
+
+        raster_from_agent = np.array([
+            [self.resolution, 0, 0.5 * self.raster_size],
+            [0, self.resolution, 0.5 * self.raster_size],
+            [0, 0, 1]
+        ])
+
+        world_from_agent: np.ndarray = np.array(
+            [
+                [np.cos(ras_yaw), np.sin(ras_yaw), ras_pos[0]],
+                [-np.sin(ras_yaw), np.cos(ras_yaw), ras_pos[1]],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+        agent_from_world = np.linalg.inv(world_from_agent)
+
+        raster_from_world = raster_from_agent @ agent_from_world
+
+        return state_im, raster_from_world
+
+
+def draw_trajectories(ax, trajectories, raster_from_world, linewidth):
     raster_trajs = transform_points(trajectories, raster_from_world)
     for traj in raster_trajs:
         colorline(
@@ -103,10 +197,8 @@ def draw_trajectories(ax, trajectories, raster_from_world):
             traj[..., 0],
             traj[..., 1],
             cmap="viridis",
-            # z=np.linspace(1.0, 0.0, len(traj[..., 0],)),
-            linewidth=3
+            linewidth=linewidth
         )
-    # lplot.set_label("Trajectories")
 
 
 def draw_agent_boxes_plt(ax, pos, yaw, extent, raster_from_agent, outline_color, fill_color):
@@ -120,88 +212,134 @@ def draw_agent_boxes_plt(ax, pos, yaw, extent, raster_from_agent, outline_color,
         ax.add_patch(rect_border)
 
 
-def draw_scene_data(ax, scene_data, starting_frame, rasterizer):
+def draw_scene_data(ax, scene_name, scene_data, starting_frame, rasterizer, draw_trajectory=True, ras_pos=None):
     t = starting_frame
+    if ras_pos is None:
+        ras_pos = scene_data["centroid"][0, t]
+
     traj_len = 200
-    state_im, raster_from_world = get_state_image_l5(
-        rasterizer,
-        ras_pos=scene_data["centroid"][0, t],
-        # ras_yaw=scene_data["yaw"][0, t],
-        ras_yaw=np.pi
-    )
+    if isinstance(rasterizer, NuscRenderer):
+        state_im, raster_from_world = rasterizer.render(
+            ras_pos=ras_pos,
+            # ras_yaw=scene_data["yaw"][0, t],
+            ras_yaw=0,
+            # ras_yaw=np.pi,
+            scene_name=scene_name
+        )
+        extent_scale = 1.0
+        linewidth = 3.0
+    else:
+        state_im, raster_from_world = get_state_image_l5(
+            rasterizer,
+            ras_pos=ras_pos,
+            # ras_yaw=scene_data["yaw"][0, t],
+            ras_yaw=np.pi
+        )
+        extent_scale = 1.0
+        linewidth = 3.0
     ax.imshow(state_im)
 
-    draw_trajectories(
-        ax,
-        trajectories=scene_data["centroid"][:, t:t+traj_len],
-        raster_from_world=raster_from_world,
-    )
+    if draw_trajectory:
+        draw_trajectories(
+            ax,
+            trajectories=scene_data["centroid"][:, t:t+traj_len],
+            raster_from_world=raster_from_world,
+            linewidth=linewidth
+        )
 
     draw_agent_boxes_plt(
         ax,
         pos=scene_data["centroid"][:, t],
         yaw=scene_data["yaw"][:, [t]],
-        extent=scene_data["extent"][:, t, :2],
+        extent=scene_data["extent"][:, t, :2] * extent_scale,
         raster_from_agent=raster_from_world,
         outline_color=COLORS["agent_contour"],
         fill_color=COLORS["agent_fill"]
     )
 
-    ax.set_xlim([0, state_im.shape[1] - 140])
-    ax.set_ylim([80, state_im.shape[0] - 130])
-    # ax.set_xlim([0, state_im.shape[1]])
-    # ax.set_ylim([0, state_im.shape[0]])
+    # ax.set_xlim([0, state_im.shape[1] - 140])
+    # ax.set_ylim([80, state_im.shape[0] - 130])
+    ax.set_xlim([0, state_im.shape[1]])
+    ax.set_ylim([0, state_im.shape[0]])
     ax.grid(False)
     ax.axis("off")
     ax.invert_xaxis()
 
 
-# def visualize_l5_scene(rasterizer, h5f, scene_index, starting_frame, output_dir, gt_h5f=None):
-#     fig, axes = plt.subplots(1, 5, figsize=(30, 6))
-#     for ep_i in range(5):
-#         ax = axes[ep_i]
-#         scene_name = "{}_{}".format(scene_index, ep_i)
-#         if scene_name not in list(h5f.keys()):
-#             continue
-#         scene_data = h5f[scene_name]
-#         draw_scene_data(ax, scene_data, starting_frame, rasterizer)
-#
-#     if not os.path.exists(output_dir):
-#         os.makedirs(output_dir)
-#     ffn = os.path.join(output_dir, "{}_t{}.png").format(scene_index, starting_frame)
-#     plt.savefig(ffn, dpi=400, bbox_inches="tight")
-#     plt.close()
-#     print("Figure written to {}".format(ffn))
-
-
-def visualize_l5_scene(rasterizer, h5f, scene_index, starting_frame, output_dir, gt_h5f=None):
-    # fig, axes = plt.subplots(1, 5, figsize=(30, 6))
+def visualize_scene(rasterizer, h5f, scene_index, starting_frame, output_dir):
+    fig, axes = plt.subplots(1, 5, figsize=(30, 6))
     for ep_i in range(5):
-        fig, ax = plt.subplots()
+        ax = axes[ep_i]
         scene_name = "{}_{}".format(scene_index, ep_i)
         if scene_name not in list(h5f.keys()):
             continue
         scene_data = h5f[scene_name]
-        draw_scene_data(ax, scene_data, starting_frame, rasterizer)
+        draw_scene_data(ax, scene_index, scene_data, starting_frame, rasterizer)
 
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-        ffn = os.path.join(output_dir, "{}_t{}_{}.png").format(scene_index, starting_frame, ep_i)
-        plt.savefig(ffn, dpi=400, bbox_inches="tight", pad_inches = 0)
-        plt.close()
-        print("Figure written to {}".format(ffn))
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    ffn = os.path.join(output_dir, "{}_t{}.png").format(scene_index, starting_frame)
+    plt.savefig(ffn, dpi=400, bbox_inches="tight")
+    plt.close()
+    print("Figure written to {}".format(ffn))
 
 
-def main(hdf5_path, dataset_path, output_dir):
+def preprocess(scene_data):
+    data = dict()
+    for k in scene_data.keys():
+        data[k] = scene_data[k][:].copy()
+
+    data["yaw"] = savgol_filter(data["yaw"], 10, 3)
+    return data
+
+
+def scene_to_video(rasterizer, h5f, scene_index, output_dir):
+    for ep_i in range(5):
+        scene_name = "{}_{}".format(scene_index, ep_i)
+        if scene_name not in list(h5f.keys()):
+            continue
+        scene_data = h5f[scene_name]
+        scene_data = preprocess(scene_data)
+        for frame_i in range(scene_data["centroid"].shape[1]):
+            fig, ax = plt.subplots()
+            draw_scene_data(
+                ax,
+                scene_index,
+                scene_data,
+                frame_i,
+                rasterizer,
+                draw_trajectory=False,
+                ras_pos=scene_data["centroid"][0, 0]
+            )
+
+            video_dir = os.path.join(output_dir, scene_name)
+            if not os.path.exists(video_dir):
+                os.makedirs(video_dir)
+            ffn = os.path.join(video_dir, "{:03d}.png").format(frame_i)
+            plt.savefig(ffn, dpi=400, bbox_inches="tight", pad_inches=0)
+            plt.close()
+            print("Figure written to {}".format(ffn))
+
+
+def main(hdf5_path, dataset_path, output_dir, env):
     # SOI_l5kit: [1069, 1090, 4558, ]
-    rasterizer = get_l5_rasterizer(dataset_path)
+    if env == "l5kit":
+        rasterizer = get_l5_rasterizer(dataset_path)
+        sids = EvaluationConfig().l5kit.eval_scenes
+        sids = [1069, 1090, 4558, ]
+    else:
+        rasterizer = get_nusc_renderer(dataset_path)
+        sids = EvaluationConfig().nusc.eval_scenes
+        scene_names = list(rasterizer.scene_info.keys())
+        # sids = [scene_names[si] for si in sids]
+        sids = ["scene-0018", "scene-0095", "scene-0098", "scene-0521", "scene-0523",
+                "scene-0560", "scene-0627", "scene-0638", "scene-0904"]
+
     h5f = h5py.File(hdf5_path, "r")
-    sids = EvaluationConfig().l5kit.eval_scenes
-    sids = [1069]
+    # sids = [1069]
     for si in sids:
-        visualize_l5_scene(rasterizer, h5f, si, 0, output_dir=output_dir)
-        # visualize_l5_scene(rasterizer, h5f, si, 50, output_dir=output_dir)
-        # visualize_l5_scene(rasterizer, h5f, si, 100, output_dir=output_dir)
+        # visualize_scene(rasterizer, h5f, si, 0, output_dir=output_dir)
+        scene_to_video(rasterizer, h5f, si, output_dir=output_dir)
 
 
 if __name__ == "__main__":
@@ -227,6 +365,13 @@ if __name__ == "__main__":
         default="visualizations/"
     )
 
+    parser.add_argument(
+        "--env",
+        type=str,
+        choices=["nusc", "l5kit"],
+        required=True
+    )
+
     args = parser.parse_args()
 
-    main(args.hdf5_path, args.dataset_path, args.output_dir)
+    main(args.hdf5_path, args.dataset_path, args.output_dir, args.env)
