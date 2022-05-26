@@ -468,6 +468,7 @@ class DiscreteCVAE(nn.Module):
             c = self.c_net(condition_inputs)  # [B, ...]
         logp = self.p_net(c)["logp"]
         p = torch.exp(logp)
+        p = p.nan_to_num(nan=0.0, posinf=1.0, neginf=0.0)
         p = p/p.sum(dim=-1,keepdim=True)
         # z = (-logp).argsort()[...,:n]
         # z = F.one_hot(z,self.K)

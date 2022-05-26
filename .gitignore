@@ -2,6 +2,9 @@ TransformerGAN_trained_models/
 TransformerPred_trained_models/
 l5_rasterized_vae_trained_models/
 l5_rasterized_discrete_vae_trained_models/
+hier_agent_aware_trained_models/
+l5_rasterized_tree_vae_trained_models/
+occupancy_trained_models/
 wandb/
 videos/
 figures/
@@ -26,7 +29,7 @@ cnn_test.ipynb
 test_rollout.py
 visualize_agent.ipynb
 test.py
-experiments/templates/
+experiments/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -87,3 +90,7 @@ scripts/create_evaluation.py
 scripts/create_evaluation.py
 tbsim/configs/eval_configs.py
 generate_all_evaluations.sh
+generate_all_evaluations_l5kit.sh
+generate_all_evaluations_nusc.sh
+plot_result_l5kit.ipynb
+plot_result_nusc.ipynb

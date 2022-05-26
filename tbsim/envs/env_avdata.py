@@ -311,8 +311,8 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
         obs = self.get_observation()["agents"]
         # record metrics
-        with self.timers.timed("metrics"):
-            self._add_per_step_metrics(obs)
+        # with self.timers.timed("metrics"):
+        #     self._add_per_step_metrics(obs)
 
         action = step_actions.agents.to_dict()
         assert action["positions"].shape[0] == obs["centroid"].shape[0]
@@ -323,12 +323,15 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 self._cached_observation = None
                 return
             # # log state and action
+            obs_skimp = self.get_observation()
+            self._add_per_step_metrics(obs_skimp["agents"])
             if self._log_data:
                 action_to_log = RolloutAction(
                     agents=Action.from_dict(TensorUtils.map_ndarray(action, lambda x: x[:, action_index:])),
                     agents_info=step_actions.agents_info
                 )
-                self.logger.log_step(self.get_observation_skimp(), action_to_log)
+                self.logger.log_step(obs_skimp, action_to_log)
+
 
             idx = 0
             for scene in self._current_scenes:

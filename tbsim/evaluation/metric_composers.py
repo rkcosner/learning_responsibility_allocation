@@ -1,4 +1,5 @@
 """A script for evaluating closed-loop simulation"""
+from numpy import roll
 from tbsim.algos.l5kit_algos import (
     L5DiscreteVAETrafficModel,
 )
@@ -17,8 +18,8 @@ from tbsim.configs.base import ExperimentConfig
 from tbsim.utils.experiment_utils import get_checkpoint
 
 try:
-    from Pplan.spline_planner import SplinePlanner
-    from Pplan.trajectory_tree import TrajTree
+    from Pplan.Sampling.spline_planner import SplinePlanner
+    from Pplan.Sampling.trajectory_tree import TrajTree
 except ImportError:
     print("Cannot import Pplan")
 
@@ -38,15 +39,21 @@ class MetricsComposer(object):
 
 
 class CVAEMetrics(MetricsComposer):
-    def get_metrics(self, perturbations = None, **kwargs):
+    def get_metrics(self, perturbations = None,rolling = False,env="l5kit", **kwargs):
         # TODO: pass in perturbations through kwargs
 
-
-        ckpt_path, config_path = get_checkpoint(
-            ngc_job_id="2874790",
-            ckpt_key="iter27000_ep0_minADE0.61",
-            ckpt_root_dir=self.eval_config.ckpt_root_dir
-        )
+        if env=="nusc":
+            ckpt_path, config_path = get_checkpoint(
+                ngc_job_id="1000002",
+                ckpt_key="iter13000_ep0_minADE0.97",
+                ckpt_root_dir=self.eval_config.ckpt_root_dir
+            )
+        elif env=="l5kit":
+            ckpt_path, config_path = get_checkpoint(
+                ngc_job_id="1000001",
+                ckpt_key="iter27000_ep0_minADE0.60",
+                ckpt_root_dir=self.eval_config.ckpt_root_dir
+            )
 
         controller_cfg = get_experiment_config_from_file(config_path)
         modality_shapes = batch_utils().get_modality_shapes(controller_cfg)
@@ -55,8 +62,14 @@ class CVAEMetrics(MetricsComposer):
             algo_config=controller_cfg.algo,
             modality_shapes=modality_shapes
         ).to(self.device).eval()
-        return EnvMetrics.LearnedCVAENLL(metric_algo=CVAE_model, perturbations=perturbations)
-
+        if not rolling:
+            return EnvMetrics.LearnedCVAENLL(metric_algo=CVAE_model, perturbations=perturbations)
+        else:
+            if "rolling_horizon" in kwargs:
+                rolling_horizon = kwargs["rolling_horizon"]
+            else:
+                rolling_horizon = None
+            return EnvMetrics.LearnedCVAENLLRolling(metric_algo=CVAE_model, rolling_horizon=rolling_horizon, perturbations=perturbations)
 
 class learnedEBMMetric(MetricsComposer):
     def get_metrics(self, perturbations = None, **kwargs):
@@ -80,14 +93,21 @@ class learnedEBMMetric(MetricsComposer):
 
 
 class OccupancyMetrics(MetricsComposer):
-    def get_metrics(self, perturbations = None, **kwargs):
+    def get_metrics(self, perturbations = None, rolling=False, env="l5kit", **kwargs):
         # TODO: adding checkpoints
-
-        ckpt_path, config_path = get_checkpoint(
-            ngc_job_id="2878434",
-            ckpt_key="iter74000_ep0_valCELoss1.63",
-            ckpt_root_dir=self.eval_config.ckpt_root_dir
-        )
+        
+        if env=="nusc":
+            ckpt_path, config_path = get_checkpoint(
+                ngc_job_id="0000003",
+                ckpt_key="iter51000_ep1_posErr0.61",
+                ckpt_root_dir=self.eval_config.ckpt_root_dir
+            )
+        elif env=="l5kit":
+            ckpt_path, config_path = get_checkpoint(
+                ngc_job_id="0000001",
+                ckpt_key="iter62000_ep1_posErr0.71",
+                ckpt_root_dir=self.eval_config.ckpt_root_dir
+            )
 
         cfg = get_experiment_config_from_file(config_path)
 
@@ -105,4 +125,13 @@ class OccupancyMetrics(MetricsComposer):
         #     algo_config=cfg.algo,
         #     modality_shapes=modality_shapes
         # ).to(self.device).eval()
-        return EnvMetrics.Occupancy_likelihood(metric_algo=occupancy_model, perturbations=perturbations)
+        if not rolling:
+            return EnvMetrics.Occupancy_likelihood(metric_algo=occupancy_model, perturbations=perturbations)
+        else:
+            if "rolling_horizon" in kwargs:
+                rolling_horizon = kwargs["rolling_horizon"]
+            else:
+                rolling_horizon = None
+            return EnvMetrics.Occupancy_rolling(metric_algo=occupancy_model, rolling_horizon=rolling_horizon, perturbations=perturbations)
+
+        

@@ -10,12 +10,9 @@ def configs_to_search_nusc(base_cfg):
     base_cfg.train.training.num_data_workers = 24
     base_cfg.train.validation.num_data_workers = 8
 
-    plan.add_const_param(Param("algo.history_num_frames", alias="ht", value=3))
-    plan.add_const_param(Param("algo.future_num_frames", alias="ft", value=10))
-    plan.add_const_param(Param("algo.step_time", alias="dt", value=0.5))
     plan.extend(plan.compose_cartesian([
-        ParamRange("algo.loss_weights.yaw_reg_loss", alias="yrl", range=[0.01]),
-        ParamRange("algo.dynamics.type", alias="dyn", range=[None, "Unicycle"])
+        ParamRange("algo.vae.latent_dim", alias="vae_dim", range=[10,15,20]),
+        ParamRange("algo.model_architecture", alias="arch", range=["resnet50"]),
     ]))
 
     return plan.generate_configs(base_cfg=base_cfg)

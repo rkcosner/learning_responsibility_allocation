@@ -585,7 +585,6 @@ def gen_ego_edges(ego_trajectories, agent_trajectories, ego_extents, agent_exten
     ped_mask = (raw_types == 14) | (raw_types == 15)
 
     edges = torch.zeros([B,N,A,T,10]).to(ego_trajectories.device)
-
     edges[...,:3] = ego_trajectories.unsqueeze(2).repeat(1,1,A,1,1)
     if agent_trajectories.ndim==4:
         edges[...,3:6] = agent_trajectories.unsqueeze(1).repeat(1,N,1,1,1)

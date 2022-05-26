@@ -1,6 +1,7 @@
 """A script for evaluating closed-loop simulation"""
 from tbsim.algos.l5kit_algos import (
     L5TrafficModel,
+    L5TreeVAETrafficModel,
     L5VAETrafficModel,
     SpatialPlanner,
     GANTrafficModel,
@@ -11,7 +12,14 @@ from tbsim.utils.batch_utils import batch_utils
 from tbsim.algos.multiagent_algos import MATrafficModel, HierarchicalAgentAwareModel
 from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.utils.config_utils import get_experiment_config_from_file
-from tbsim.policies.hardcoded import ReplayPolicy, GTPolicy, EC_sampling_controller
+from tbsim.policies.hardcoded import (
+    ReplayPolicy, 
+    GTPolicy, 
+    EC_sampling_controller, 
+    ContingencyPlanner,
+    ModelPredictiveController,
+    HierSplineSamplingPolicy,
+    )
 from tbsim.configs.base import ExperimentConfig
 
 from tbsim.policies.wrappers import (
@@ -20,12 +28,12 @@ from tbsim.policies.wrappers import (
     HierarchicalSamplerWrapper,
     SamplingPolicyWrapper,
 )
-
+from tbsim.configs.config import Dict
 from tbsim.utils.experiment_utils import get_checkpoint
 
 try:
-    from Pplan.spline_planner import SplinePlanner
-    from Pplan.trajectory_tree import TrajTree
+    from Pplan.Sampling.spline_planner import SplinePlanner
+    from Pplan.Sampling.trajectory_tree import TrajTree
 except ImportError:
     print("Cannot import Pplan")
 
@@ -244,6 +252,7 @@ class GANplan(GAN):
 
 
 class Hierarchical(PolicyComposer):
+
     def _get_planner(self):
         planner_ckpt_path, planner_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.planner.ngc_job_id,
@@ -256,6 +265,10 @@ class Hierarchical(PolicyComposer):
             algo_config=planner_cfg.algo,
             modality_shapes=self.get_modality_shapes(planner_cfg),
         ).to(self.device).eval()
+        # planner_cfg = get_experiment_config_from_file("/home/yuxiaoc/repos/behavior-generation/experiments/templates/l5_spatial_planner.json")
+        # planner = SpatialPlanner(algo_config=planner_cfg.algo,
+        #     modality_shapes=self.get_modality_shapes(planner_cfg),
+        # ).to(self.device).eval()
         return planner, planner_cfg.clone()
 
     def _get_gt_planner(self):
@@ -428,6 +441,69 @@ class HierAgentAwareCVAE(Hierarchical):
         policy = SamplingPolicyWrapper(ego_action_sampler=sampler, agent_traj_predictor=predictor)
         return policy, exp_cfg
 
+class HierAgentAwareMPC(Hierarchical):
+    def _get_predictor(self):
+        predictor_ckpt_path, predictor_config_path = get_checkpoint(
+            ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
+            ckpt_key=self.eval_config.ckpt.predictor.ckpt_key,
+            ckpt_root_dir=self.ckpt_root_dir
+        )
+        predictor_cfg = get_experiment_config_from_file(predictor_config_path)
+
+        predictor = MATrafficModel.load_from_checkpoint(
+            predictor_ckpt_path,
+            algo_config=predictor_cfg.algo,
+            modality_shapes=self.get_modality_shapes(predictor_cfg),
+        ).to(self.device).eval()
+        return predictor, predictor_cfg.clone()
+
+    def get_policy(self, planner=None, predictor=None, controller=None):
+        if planner is not None:
+            assert isinstance(planner, SpatialPlanner)
+        else:
+            planner, _ = self._get_planner()
+
+        if predictor is not None:
+            assert isinstance(predictor, MATrafficModel)
+            exp_cfg = None
+        else:
+            predictor, exp_cfg = self._get_predictor()
+            exp_cfg = exp_cfg.clone()
+        exp_cfg.env.data_generation_params.vectorize_lane = True
+        policy = ModelPredictiveController(self.device, exp_cfg.algo.step_time, predictor)
+        return policy, exp_cfg
+
+class HAASplineSampling(Hierarchical):
+    def _get_predictor(self):
+        predictor_ckpt_path, predictor_config_path = get_checkpoint(
+            ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
+            ckpt_key=self.eval_config.ckpt.predictor.ckpt_key,
+            ckpt_root_dir=self.ckpt_root_dir
+        )
+        predictor_cfg = get_experiment_config_from_file(predictor_config_path)
+
+        predictor = MATrafficModel.load_from_checkpoint(
+            predictor_ckpt_path,
+            algo_config=predictor_cfg.algo,
+            modality_shapes=self.get_modality_shapes(predictor_cfg),
+        ).to(self.device).eval()
+        return predictor, predictor_cfg.clone()
+
+    def get_policy(self, planner=None, predictor=None, controller=None):
+        if planner is not None:
+            assert isinstance(planner, SpatialPlanner)
+        else:
+            planner, _ = self._get_planner()
+
+        if predictor is not None:
+            assert isinstance(predictor, MATrafficModel)
+            exp_cfg = None
+        else:
+            predictor, exp_cfg = self._get_predictor()
+            exp_cfg = exp_cfg.clone()
+        exp_cfg.env.data_generation_params.vectorize_lane = True
+        policy = HierSplineSamplingPolicy(self.device, exp_cfg.algo.step_time, predictor)
+        return policy, exp_cfg
 
 class HPnC(PolicyComposer):
     def get_policy(self, policy=None):
@@ -496,4 +572,61 @@ class AgentAwareEC(Hierarchical):
             agent_planner=agent_planner,
             device=self.device
         )
+        return policy, exp_cfg
+
+class TreeContingency(Hierarchical):
+    def _get_tree_predictor(self):
+        # tree_ckpt_path, tree_config_path = get_checkpoint(
+        #     ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
+        #     ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+        #     ckpt_root_dir=self.ckpt_root_dir
+        # )
+        # tree_ckpt_path, tree_config_path = get_checkpoint(
+        #     ngc_job_id="2000000",
+        #     ckpt_key="iter90000",
+        #     ckpt_root_dir=self.ckpt_root_dir
+        # )
+        # predictor_cfg = get_experiment_config_from_file(tree_config_path)
+
+        # predictor = L5TreeVAETrafficModel.load_from_checkpoint(
+        #     tree_ckpt_path,
+        #     algo_config=predictor_cfg.algo,
+        #     modality_shapes=self.get_modality_shapes(predictor_cfg),
+        # ).to(self.device).eval()
+        predictor_cfg = get_experiment_config_from_file("experiments/templates/l5_mixed_tree_vae_plan.json")
+        predictor = L5TreeVAETrafficModel(
+            algo_config=predictor_cfg.algo,
+            modality_shapes=self.get_modality_shapes(predictor_cfg),
+        ).to(self.device).eval()
+        return predictor, predictor_cfg.clone()
+
+    def get_policy(self, planner=None, predictor=None, controller=None):
+        if planner is not None:
+            assert isinstance(planner, SpatialPlanner)
+            assert isinstance(predictor, L5ECTrafficModel)
+            exp_cfg = None
+        else:
+            planner, _ = self._get_planner()
+            predictor, exp_cfg = self._get_tree_predictor()
+
+        ego_sampler = SplinePlanner(self.device, N_seg=planner.algo_config.future_num_frames+1)
+        agent_planner = PolicyWrapper.wrap_planner(
+            planner,
+            mask_drivable=self.eval_config.policy.mask_drivable,
+            sample=False
+        )
+        config = Dict()
+        config.stage = exp_cfg.algo.stage
+        config.num_frames_per_stage = exp_cfg.algo.num_frames_per_stage
+        config.step_time = exp_cfg.algo.step_time
+
+
+        policy = ContingencyPlanner(
+            ego_sampler=ego_sampler,
+            predictor=predictor,
+            config = config,
+            agent_planner=agent_planner,
+            device=self.device
+        )
+        exp_cfg.env.data_generation_params.vectorize_lane=True
         return policy, exp_cfg

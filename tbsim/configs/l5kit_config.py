@@ -180,10 +180,10 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.name = "l5_rasterized"
         self.model_architecture = "resnet18"
         self.map_feature_dim = 256
-        self.history_num_frames = 5
-        self.history_num_frames_ego = 5
-        self.history_num_frames_agents = 5
-        self.future_num_frames = 50
+        self.history_num_frames = 10
+        self.history_num_frames_ego = 10
+        self.history_num_frames_agents = 10
+        self.future_num_frames = 20
         self.step_time = 0.1
         self.render_ego_history = False
 
@@ -370,8 +370,8 @@ class L5RasterizedTreeVAEConfig(L5RasterizedPlanningConfig):
         self.map_feature_dim = 256
         self.goal_conditional = True
         self.goal_feature_dim = 32
-        self.stage = 3
-        self.num_frames_per_stage = 16
+        self.stage = 2
+        self.num_frames_per_stage = 10
 
         self.vae.latent_dim = 4
         self.vae.condition_dim = 128
@@ -457,12 +457,12 @@ class L5TransformerPredConfig(AlgoConfig):
 
         self.name = "TransformerPred"
         self.model_architecture = "Factorized"
-        self.history_num_frames = 5
+        self.history_num_frames = 10
         # this will also create raster history (we need to remove the raster from train/eval dataset - only visualization)
-        self.history_num_frames_ego = 5
-        self.history_num_frames_agents = 5
-        self.future_num_frames = 25
-        self.step_time = 0.2
+        self.history_num_frames_ego = 10
+        self.history_num_frames_agents = 10
+        self.future_num_frames = 20
+        self.step_time = 0.1
         self.N_t = 2
         self.N_a = 1
         self.d_model = 128

@@ -1018,17 +1018,16 @@ class RasterizedTreeVAEModel(nn.Module):
         ).squeeze(1)  # -> [B, 3]
         return goal_state
 
-    def forward(self, batch_inputs: dict,sample=False):
+    def forward(self, batch_inputs: dict,sample=False,**kwargs):
         if not sample:
             trajectories = torch.cat((batch_inputs["target_positions"], batch_inputs["target_yaws"]), dim=-1)
-            try:
-                assert batch_inputs["target_positions"].shape[-2]>=self.stage*self.num_frames_per_stage
-            except:
-                import pdb
-                pdb.set_trace()
+            assert batch_inputs["target_positions"].shape[-2]>=self.stage*self.num_frames_per_stage
         H = self.num_frames_per_stage
         if self.algo_config.goal_conditional:
-            goal = self._get_goal_states(batch_inputs)
+            if "goal" in kwargs and kwargs["goal"] is not None:
+                goal = kwargs["goal"]
+            else:
+                goal = self._get_goal_states(batch_inputs)
         else:
             goal = None
         
@@ -1038,7 +1037,10 @@ class RasterizedTreeVAEModel(nn.Module):
         decoder_kwargs = dict()
         bs = batch_inputs["image"].shape[0]
         if self.EC:
-            cond_traj_total = torch.cat((batch_inputs["all_other_agents_future_positions"],batch_inputs["all_other_agents_future_yaws"]),-1)
+            if "cond_traj" not in kwargs:
+                cond_traj_total = torch.cat((batch_inputs["all_other_agents_future_positions"],batch_inputs["all_other_agents_future_yaws"]),-1)
+            else:
+                cond_traj_total = kwargs["cond_traj"]
             cond_traj_total = cond_traj_total[...,:self.stage*self.num_frames_per_stage,:]
             Na = cond_traj_total.shape[1]
             curr_map_feat = TensorUtils.unsqueeze_expand_at(curr_map_feat,Na+1,-2)

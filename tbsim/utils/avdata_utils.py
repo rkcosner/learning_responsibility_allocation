@@ -173,9 +173,9 @@ def parse_avdata_batch(batch: dict):
         all_other_agents_history_availabilities=neigh_hist_mask,
         all_other_agents_history_availability=neigh_hist_mask,  # dump hack to agree with l5kit's typo ...
         all_other_agents_curr_speed=neigh_curr_speed,
-        all_other_agents_target_positions=neigh_fut_pos,
-        all_other_agents_target_yaws=neigh_fut_yaw,
-        all_other_agents_target_availabilities=neigh_fut_mask,
+        all_other_agents_future_positions=neigh_fut_pos,
+        all_other_agents_future_yaws=neigh_fut_yaw,
+        all_other_agents_future_availability=neigh_fut_mask,
         all_other_agents_types=neigh_types,
         all_other_agents_extents=neigh_hist_extents.max(dim=-2)[0] * extent_scale,
         all_other_agents_history_extents=neigh_hist_extents * extent_scale,
