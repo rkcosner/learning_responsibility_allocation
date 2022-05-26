@@ -452,7 +452,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         actions = actions.to_numpy()
         # Convert ego actions to world frame
         obs = self.get_observation()
-
+        self._add_per_step_metrics(obs)
         
 
         actions_world = actions.transform(
@@ -472,7 +472,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
                 break
 
             obs = self.get_observation()
-            self._add_per_step_metrics(obs)
+            
             actions_world_d = actions_world.to_dict()
             if actions.has_agents:
                 # some agents might get dropped in the middle,

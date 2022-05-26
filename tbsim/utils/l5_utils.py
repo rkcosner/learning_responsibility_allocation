@@ -596,7 +596,7 @@ def gen_ego_edges(ego_trajectories, agent_trajectories, ego_extents, agent_exten
     return edges,type_mask
 
 
-def gen_EC_edges(ego_trajectories,agent_trajectories,ego_extents, agent_extents, raw_types):
+def gen_EC_edges(ego_trajectories,agent_trajectories,ego_extents, agent_extents, raw_types,mask=None):
     """generate edges between ego trajectory samples and agent trajectories
 
     Args:
@@ -633,6 +633,9 @@ def gen_EC_edges(ego_trajectories,agent_trajectories,ego_extents, agent_extents,
         edges[...,8:] = agent_extents.unsqueeze(2).repeat(1,K,T,1)
         veh_mask = veh_mask.tile(1,K)
         ped_mask = ped_mask.tile(1,K)
+    if mask is not None:
+        veh_mask = veh_mask*mask
+        ped_mask = ped_mask*mask
     type_mask = {"VV":veh_mask,"VP":ped_mask}
     return edges,type_mask
     

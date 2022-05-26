@@ -112,6 +112,7 @@ def generate_agent_sample_mixed(
     cur_frame = history_frames[0]
     cur_agents = history_agents[0]
 
+
     if selected_track_id is None:
         agent_centroid_m = cur_frame["ego_translation"][:2]
         agent_yaw_rad = rotation33_as_yaw(cur_frame["ego_rotation"])
@@ -243,11 +244,11 @@ def generate_agent_sample_mixed(
                 agent_raster_availability = np.zeros(num_agent,dtype=np.bool)
                 agent_raster_availability[agent_index]=True
                 other_agents_image = np.zeros([num_agent,*rasterizer_out["image"].shape],dtype=np.float32)
-                other_agents_raster_from_world = np.tile(np.eye(3,dtype=np.float32),[num_agent,1,1])
-                other_agents_agent_from_raster = np.tile(np.eye(3,dtype=np.float32),[num_agent,1,1])
-                other_agents_world_from_agent = np.tile(np.eye(3,dtype=np.float32),[num_agent,1,1])
-                other_agents_raster_from_agent = np.tile(np.eye(3,dtype=np.float32),[num_agent,1,1])
-                other_agents_agent_from_world = np.tile(np.eye(3,dtype=np.float32),[num_agent,1,1])
+                other_agents_raster_from_world = np.tile(np.zeros([3,3],dtype=np.float32),[num_agent,1,1])
+                other_agents_agent_from_raster = np.tile(np.zeros([3,3],dtype=np.float32),[num_agent,1,1])
+                other_agents_world_from_agent = np.tile(np.zeros([3,3],dtype=np.float32),[num_agent,1,1])
+                other_agents_raster_from_agent = np.tile(np.zeros([3,3],dtype=np.float32),[num_agent,1,1])
+                other_agents_agent_from_world = np.tile(np.zeros([3,3],dtype=np.float32),[num_agent,1,1])
                 for idx in agent_index:
                     track_id = vectorized_features["all_other_agents_track_id"][idx]
                     agent = filter_agents_by_track_id(cur_agents,track_id)[0]

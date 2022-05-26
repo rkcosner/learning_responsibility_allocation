@@ -245,7 +245,7 @@ class EC_sampling_controller(Policy):
                 agent_obs["type"][None,agent_idx],
                 obs["raster_from_world"][i].unsqueeze(0),                
                 dis_map[i].unsqueeze(0),
-                weights={"collision_weight": 1.0, "lane_weight": 1.0},
+                weights={"collision_weight": 1.0, "lane_weight": 1.0,"likelihood_weight":0.0,"progress_weight":0.0},
             )[0]
 
             opt_traj.append(ego_trajs[i][idx])
@@ -496,7 +496,7 @@ class HierSplineSamplingPolicy(Policy):
                 obs_dict["all_other_agents_types"][i:i+1,agent_idx],
                 obs_dict["raster_from_world"][i].unsqueeze(0),                
                 dis_map[i].unsqueeze(0),
-                weights={"collision_weight": 1.0, "lane_weight": 1.0},
+                weights={"collision_weight": 10.0, "lane_weight": 1.0,"likelihood_weight":0.0,"progress_weight":0.0},
             )[0]
             plan.append(ego_trajs[i][idx])
         plan = torch.stack(plan,0)
