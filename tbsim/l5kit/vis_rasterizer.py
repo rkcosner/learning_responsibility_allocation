@@ -34,6 +34,8 @@ COLORS = {
     RasterEls.ROAD.name: (200, 211, 213),
     RasterEls.CROSSWALK.name: (96, 117, 138),
     # RasterEls.CROSSWALK.name: (255, 117, 69),
+    # "Background": (37, 40, 61),
+    "Background": (255, 255, 255),
 }
 
 
@@ -121,7 +123,7 @@ class VisualizationRasterizer(object):
         """
 
         img = np.ones(shape=(self.raster_size[1], self.raster_size[0], 3))
-        img *= [[[37, 40, 61]]]
+        img *= [[COLORS["Background"]]]
         img = img.astype(np.uint8)
 
         # filter using half a radius from the center
