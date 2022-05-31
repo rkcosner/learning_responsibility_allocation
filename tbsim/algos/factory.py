@@ -75,18 +75,13 @@ def algo_factory(config: ExperimentConfig, modality_shapes: dict, data_module: L
     elif algo_name == "occupancy":
         algo = OccupancyMetric(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "ma_rasterized":
-        if algo_config.use_GAN:
-            algo = MAGANTrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
-        else:
-            algo = MATrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
+        algo = MATrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "TransformerPred":
         algo = L5TransformerTrafficModel(algo_config=algo_config)
     elif algo_name == "TransformerGAN":
         algo = L5TransformerGANTrafficModel(algo_config=algo_config)
     elif algo_name == "sp_hierarchical":
         algo = SelfPlayHierarchical(cfg=config, data_module=data_module)
-    elif algo_name == "l5_ebm":
-        algo = EBMMetric(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "gan":
         algo = GANTrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
     else:

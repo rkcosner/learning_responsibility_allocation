@@ -13,7 +13,6 @@ from tbsim.l5kit.vectorizer import build_vectorizer
 from tbsim.configs.eval_configs import EvaluationConfig
 from tbsim.configs.base import ExperimentConfig
 from tbsim.utils.metrics import OrnsteinUhlenbeckPerturbation
-from tbsim.utils.batch_utils import set_global_batch_type
 from tbsim.envs.env_l5kit import EnvL5KitSimulation
 from tbsim.envs.env_avdata import EnvUnifiedSimulation
 from tbsim.utils.config_utils import translate_l5kit_cfg, translate_avdata_cfg
@@ -25,6 +24,7 @@ from tbsim.utils.vis_utils import build_visualization_rasterizer_l5kit
 
 
 class EnvironmentBuilder(object):
+    """Builds an simulation environment for evaluation."""
     def __init__(self, eval_config: EvaluationConfig, exp_config: ExperimentConfig, device):
         self.eval_cfg = eval_config
         self.exp_cfg = exp_config

@@ -21,6 +21,7 @@ import tbsim.algos.algo_utils as AlgoUtils
 
 
 class MATrafficModel(pl.LightningModule):
+    """Prediction module for prediction-and-planning."""
     def __init__(self, algo_config, modality_shapes):
         super(MATrafficModel, self).__init__()
         self.algo_config = algo_config

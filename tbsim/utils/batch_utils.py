@@ -25,6 +25,7 @@ def batch_utils():
 
 
 class BatchUtils(object):
+    """A base class for processing environment-independent batches"""
     @staticmethod
     def get_last_available_index(avails):
         """
@@ -108,6 +109,7 @@ class BatchUtils(object):
 
 
 class L5BatchUtils(BatchUtils):
+    """Batch utils for L5Kit"""
     @staticmethod
     def parse_batch(data_batch):
         return data_batch
@@ -146,6 +148,7 @@ class L5BatchUtils(BatchUtils):
 
 
 class AVDataBatchUtils(BatchUtils):
+    """Batch utils for AVData"""
     @staticmethod
     def parse_batch(data_batch):
         return av_utils.parse_avdata_batch(data_batch)

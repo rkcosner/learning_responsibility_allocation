@@ -9,7 +9,6 @@ from imageio import get_writer
 from tbsim.envs.base import BatchedEnv, BaseEnv
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.utils.timer import Timers
-from tbsim.policies.common import RolloutAction
 from tbsim.policies.wrappers import RolloutWrapper
 from l5kit.simulation.unroll import ClosedLoopSimulator
 import tbsim.utils.geometry_utils as GeoUtils
@@ -17,7 +16,8 @@ from tbsim.policies.wrappers import Pos2YawWrapper
 from tbsim.evaluation.env_builders import EnvNuscBuilder, EnvL5Builder
 
 
-def set_initial_states(env, obs, adjustment_plan ,device):
+def set_initial_states(env, obs, adjustment_plan, device):
+    """A function that sets initial states of an env based on an observation dictionary (TODO: clean up)"""
     obs = TensorUtils.to_torch(obs, device)
     bs, T = obs["ego"]["target_positions"].shape[:2]
     
@@ -25,9 +25,6 @@ def set_initial_states(env, obs, adjustment_plan ,device):
         obs["ego"]["history_positions"][:, 0],
         obs["ego"]["world_from_agent"]
     )
-    # for obj in ["ego","agents"]:
-    #     for key in ["scene_index","track_id"]:
-    #         obs[obj][key] = obs[obj][key].int()
     ego_yaw = obs["ego"]["history_yaws"][:, 0].flatten()+obs["ego"]["yaw"]
     offset_x = 8.0
     offset_y = 4.0
@@ -79,7 +76,6 @@ def set_initial_states(env, obs, adjustment_plan ,device):
     for k,v in obs["agents"].items():
         agent_obs[k]=v[agent_indices]
 
-    
     agent_action = OrderedDict(positions=torch.stack(positions,0),yaws=torch.stack(yaws,0))
     agent_obs = TensorUtils.to_numpy(agent_obs)
     agent_action = TensorUtils.to_numpy(agent_action)
@@ -227,6 +223,7 @@ def rollout_episodes(
 
 
 class RolloutCallback(pl.Callback):
+    """A pytorch-lightning callback function that runs rollouts during training"""
     def __init__(
             self,
             exp_config,

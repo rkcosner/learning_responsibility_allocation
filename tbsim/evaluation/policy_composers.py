@@ -53,6 +53,7 @@ class PolicyComposer(object):
 
 
 class ReplayAction(PolicyComposer):
+    """A policy that replays stored actions."""
     def get_policy(self):
         print("Loading action log from {}".format(self.eval_config.experience_hdf5_path))
         import h5py
@@ -67,6 +68,7 @@ class ReplayAction(PolicyComposer):
 
 
 class GroundTruth(PolicyComposer):
+    """A fake policy that replays dataset trajectories."""
     def get_policy(self):
         if self.eval_config.env == "nusc":
             exp_cfg = get_registered_experiment_config("nusc_rasterized_plan")
@@ -78,6 +80,7 @@ class GroundTruth(PolicyComposer):
 
 
 class BC(PolicyComposer):
+    """Behavior Cloning (SimNet)"""
     def get_policy(self, policy=None):
         if policy is not None:
             assert isinstance(policy, L5TrafficModel)
@@ -100,6 +103,7 @@ class BC(PolicyComposer):
 
 
 class TrafficSim(PolicyComposer):
+    """Agent-centric TrafficSim"""
     def get_policy(self, policy=None):
         if policy is not None:
             assert isinstance(policy, L5VAETrafficModel)
@@ -126,6 +130,7 @@ class TrafficSim(PolicyComposer):
 
 
 class TrafficSimplan(TrafficSim):
+    """Agent-centric TrafficSim with planner"""
     def _get_predictor(self):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
@@ -151,6 +156,7 @@ class TrafficSimplan(TrafficSim):
 
 
 class TPP(PolicyComposer):
+    """Trajectron++ with prediction-and-planning"""
     def get_policy(self, policy=None):
         if policy is not None:
             assert isinstance(policy, L5DiscreteVAETrafficModel)
@@ -177,6 +183,7 @@ class TPP(PolicyComposer):
 
 
 class TPPplan(TPP):
+    """Trajectron++ with prediction-and-planning"""
     def _get_predictor(self):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
@@ -202,6 +209,7 @@ class TPPplan(TPP):
 
 
 class GAN(PolicyComposer):
+    """SocialGAN"""
     def get_policy(self, policy=None):
         if policy is not None:
             assert isinstance(policy, GANTrafficModel)
@@ -227,6 +235,7 @@ class GAN(PolicyComposer):
 
 
 class GANplan(GAN):
+    """SocialGAN with prediction-and-planning"""
     def _get_predictor(self):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
@@ -252,7 +261,7 @@ class GANplan(GAN):
 
 
 class Hierarchical(PolicyComposer):
-
+    """BITS (max)"""
     def _get_planner(self):
         planner_ckpt_path, planner_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.planner.ngc_job_id,
@@ -316,6 +325,7 @@ class Hierarchical(PolicyComposer):
 
 
 class HierarchicalSample(Hierarchical):
+    """BITS (sample)"""
     def get_policy(self, planner=None, controller=None):
         if planner is not None:
             assert isinstance(planner, SpatialPlanner)
@@ -339,6 +349,7 @@ class HierarchicalSample(Hierarchical):
 
 
 class HierAgentAware(Hierarchical):
+    """BITS"""
     def _get_predictor(self):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
@@ -384,6 +395,7 @@ class HierAgentAware(Hierarchical):
 
 
 class HierAgentAwareCVAE(Hierarchical):
+    """Unused"""
     def _get_controller(self):
         controller_ckpt_path, controller_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
@@ -441,6 +453,7 @@ class HierAgentAwareCVAE(Hierarchical):
         policy = SamplingPolicyWrapper(ego_action_sampler=sampler, agent_traj_predictor=predictor)
         return policy, exp_cfg
 
+
 class HierAgentAwareMPC(Hierarchical):
     def _get_predictor(self):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
@@ -473,6 +486,7 @@ class HierAgentAwareMPC(Hierarchical):
         policy = ModelPredictiveController(self.device, exp_cfg.algo.step_time, predictor)
         return policy, exp_cfg
 
+
 class HAASplineSampling(Hierarchical):
     def _get_predictor(self):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
@@ -504,34 +518,6 @@ class HAASplineSampling(Hierarchical):
         exp_cfg.env.data_generation_params.vectorize_lane = True
         policy = HierSplineSamplingPolicy(self.device, exp_cfg.algo.step_time, predictor)
         return policy, exp_cfg
-
-class HPnC(PolicyComposer):
-    def get_policy(self, policy=None):
-        if policy is not None:
-            assert isinstance(policy, HierarchicalAgentAwareModel)
-            policy_cfg = None
-        else:
-            policy_ckpt_path, policy_config_path = get_checkpoint(
-                ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
-                ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
-                ckpt_root_dir=self.ckpt_root_dir
-            )
-            policy_cfg = get_experiment_config_from_file(policy_config_path)
-            policy = HierarchicalAgentAwareModel.load_from_checkpoint(
-                policy_ckpt_path,
-                algo_config=policy_cfg.algo,
-                modality_shapes=self.get_modality_shapes(policy_cfg),
-            ).to(self.device).eval()
-            policy_cfg = policy_cfg.clone()
-
-        policy = PolicyWrapper.wrap_controller(
-            policy,
-            mask_drivable=self.eval_config.policy.mask_drivable,
-            num_samples=self.eval_config.policy.num_plan_samples,
-            clearance=self.eval_config.policy.diversification_clearance,
-            cost_weights=self.eval_config.policy.cost_weights
-        )
-        return policy, policy_cfg
 
 
 class AgentAwareEC(Hierarchical):
@@ -573,6 +559,7 @@ class AgentAwareEC(Hierarchical):
             device=self.device
         )
         return policy, exp_cfg
+
 
 class TreeContingency(Hierarchical):
     def _get_tree_predictor(self):
@@ -619,7 +606,6 @@ class TreeContingency(Hierarchical):
         config.stage = exp_cfg.algo.stage
         config.num_frames_per_stage = exp_cfg.algo.num_frames_per_stage
         config.step_time = exp_cfg.algo.step_time
-
 
         policy = ContingencyPlanner(
             ego_sampler=ego_sampler,

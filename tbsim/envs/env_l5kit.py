@@ -392,7 +392,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
     def _step(self, step_actions: RolloutAction):
         obs = self.get_observation()
         # record metrics
-        self._add_per_step_metrics(obs)
+        # self._add_per_step_metrics(obs)
 
         # record observations and actions
         self.logger.log_step(obs, step_actions)
@@ -452,7 +452,7 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         actions = actions.to_numpy()
         # Convert ego actions to world frame
         obs = self.get_observation()
-        # self._add_per_step_metrics(obs)
+        self._add_per_step_metrics(obs)
         
         actions_world = actions.transform(
             ego_trans_mats=obs["ego"]["world_from_agent"],

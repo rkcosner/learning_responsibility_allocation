@@ -251,12 +251,6 @@ if __name__ == "__main__":
         help="whether to render videos"
     )
 
-    parser.add_argument(
-        "--mode",
-        type=str,
-        default="evaluate_rollout",
-        choices=["record_rollout", "evaluate_replay", "evaluate_rollout"],
-    )
 
     parser.add_argument(
         "--seed",
@@ -315,6 +309,7 @@ if __name__ == "__main__":
 
     for k in cfg[cfg.env]:  # copy env-specific config to the global-level
         cfg[k] = cfg[cfg.env][k]
+
     cfg.pop("nusc")
     cfg.pop("l5kit")
 
@@ -323,29 +318,10 @@ if __name__ == "__main__":
             ckpt_info = yaml.safe_load(f)
             cfg.ckpt.update(**ckpt_info)
 
-    data_to_disk = False
-    skimp_rollout = False
-    compute_metrics = False
-
-    if args.mode == "record_rollout":
-        data_to_disk = True
-        skimp_rollout = True
-        compute_metrics = False
-    elif args.mode == "evaluate_replay":
-        cfg.eval_class = "ReplayAction"
-        cfg.n_step_action = 1
-        data_to_disk = False
-        skimp_rollout = False
-        compute_metrics = True
-    elif args.mode == "evaluate_rollout":
-        data_to_disk = True
-        skimp_rollout = False
-        compute_metrics = True
-
     cfg.lock()
     run_evaluation(
         cfg,
         save_cfg=True,
-        data_to_disk=data_to_disk,
+        data_to_disk=True,
         render_to_video=args.render
     )
