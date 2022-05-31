@@ -125,8 +125,6 @@ def ego_sample_planning(
     return torch.argmax(total_score, dim=1)
 
 
-
-    
 class tree_motion_policy(object):
     def __init__(self,stage,num_frames_per_stage,ego_root,scenario_root,cost_to_go,leaf_idx,curr_node):
         self.stage = stage
