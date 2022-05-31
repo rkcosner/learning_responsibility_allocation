@@ -7,7 +7,7 @@ from tbsim.utils.experiment_utils import (
     upload_codebase_to_ngc_workspace,
     read_evaluation_configs
 )
-from tbsim.configs.eval_configs import EvaluationConfig
+from tbsim.configs.eval_config import EvaluationConfig
 
 
 if __name__ == "__main__":

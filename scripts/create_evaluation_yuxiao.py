@@ -3,7 +3,7 @@ import argparse
 import os.path
 
 import yaml
-from tbsim.configs.eval_configs import EvaluationConfig
+from tbsim.configs.eval_config import EvaluationConfig
 
 from tbsim.utils.experiment_utils import ParamConfig, create_evaluation_configs, ParamSearchPlan, ParamRange, Param
 

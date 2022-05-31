@@ -1,7 +1,6 @@
 """Functions and classes for dataset I/O"""
 import abc
 from collections import OrderedDict
-import numpy as np
 
 from typing import Optional
 import os
@@ -10,15 +9,13 @@ from torch.utils.data import DataLoader
 
 from l5kit.rasterization import build_rasterizer
 from l5kit.rasterization.rasterizer import Rasterizer
-from tbsim.l5kit.vectorizer import build_vectorizer
 from l5kit.data import LocalDataManager, ChunkedDataset
 from l5kit.dataset import EgoDataset, AgentDataset
 
 from tbsim.configs.base import TrainConfig
-from tbsim.configs.l5kit_online_config import L5KitOnlineTrainConfig
 from tbsim.l5kit.vectorizer import build_vectorizer
 from tbsim.l5kit.l5_ego_dataset import (
-    EgoDatasetMixed, EgoReplayBufferMixed
+    EgoDatasetMixed
 )
 
 from tbsim.l5kit.l5_agent_dataset import AgentDatasetMixed, AgentDataset
@@ -52,7 +49,6 @@ class LazyRasterizer(Rasterizer):
 
     def num_channels(self) -> int:
         return self.rasterizer.num_channels()
-
 
 
 class L5BaseDatasetModule(abc.ABC):
@@ -119,6 +115,7 @@ class L5RasterizedDataModule(pl.LightningDataModule, L5BaseDatasetModule):
             num_workers=self._train_config.validation.num_data_workers,
             drop_last=True,
         )
+
     def test_dataloader(self):
         pass
 

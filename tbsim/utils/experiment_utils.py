@@ -11,7 +11,7 @@ from pathlib import Path
 import tbsim
 from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.configs.config import Dict
-from tbsim.configs.eval_configs import EvaluationConfig
+from tbsim.configs.eval_config import EvaluationConfig
 from tbsim.configs.base import ExperimentConfig
 
 

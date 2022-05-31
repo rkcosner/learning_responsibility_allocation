@@ -90,8 +90,7 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
     # Model
     model = algo_factory(
         config=cfg,
-        modality_shapes=datamodule.modality_shapes,
-        data_module=datamodule
+        modality_shapes=datamodule.modality_shapes
     )
 
     # Checkpointing

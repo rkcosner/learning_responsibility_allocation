@@ -17,22 +17,20 @@ from tbsim.algos.l5kit_algos import (
 
 from tbsim.algos.multiagent_algos import (
     MATrafficModel,
-    HierarchicalAgentAwareModel
 )
 
 from tbsim.algos.metric_algos import (
     OccupancyMetric
 )
 
-def algo_factory(config: ExperimentConfig, modality_shapes: dict, data_module: LightningDataModule, **kwargs):
+
+def algo_factory(config: ExperimentConfig, modality_shapes: dict):
     """
     A factory for creating training algos
 
     Args:
         config (ExperimentConfig): an ExperimentConfig object,
         modality_shapes (dict): a dictionary that maps observation modality names to shapes
-        data_module (LightningDataModule): (optional) a pytorch_lightning data_module object
-        **kwargs: any info needed to create an algo
 
     Returns:
         algo: pl.LightningModule
@@ -64,8 +62,6 @@ def algo_factory(config: ExperimentConfig, modality_shapes: dict, data_module: L
         )
     elif algo_name == "spatial_planner":
         algo = SpatialPlanner(algo_config=algo_config, modality_shapes=modality_shapes)
-    elif algo_name == "hier_agent_aware":
-        algo = HierarchicalAgentAwareModel(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "occupancy":
         algo = OccupancyMetric(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "ma_rasterized":

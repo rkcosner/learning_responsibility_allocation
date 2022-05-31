@@ -10,7 +10,7 @@ from avdata import AgentType, UnifiedDataset
 from tbsim.l5kit.vectorizer import build_vectorizer
 
 
-from tbsim.configs.eval_configs import EvaluationConfig
+from tbsim.configs.eval_config import EvaluationConfig
 from tbsim.configs.base import ExperimentConfig
 from tbsim.utils.metrics import OrnsteinUhlenbeckPerturbation
 from tbsim.envs.env_l5kit import EnvL5KitSimulation

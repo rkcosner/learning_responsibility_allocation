@@ -20,7 +20,7 @@ from tbsim.utils.config_utils import translate_l5kit_cfg, translate_avdata_cfg
 from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.utils.vis_utils import build_visualization_rasterizer_l5kit
 from tbsim.utils.vis_utils import COLORS, draw_agent_boxes
-from tbsim.configs.eval_configs import EvaluationConfig
+from tbsim.configs.eval_config import EvaluationConfig
 import tbsim.utils.tensor_utils as TensorUtils
 from PIL import Image, ImageDraw
 

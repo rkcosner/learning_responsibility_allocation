@@ -1,6 +1,6 @@
 from tbsim.configs.config import Dict
 from copy import deepcopy
-from tbsim.configs.eval_configs import TrainTimeEvaluationConfig
+from tbsim.configs.eval_config import TrainTimeEvaluationConfig
 
 
 class TrainConfig(Dict):

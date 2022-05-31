@@ -13,7 +13,7 @@ from tbsim.utils.metrics import OrnsteinUhlenbeckPerturbation
 import torch
 
 from tbsim.utils.batch_utils import set_global_batch_type
-from tbsim.configs.eval_configs import EvaluationConfig
+from tbsim.configs.eval_config import EvaluationConfig
 from tbsim.utils.env_utils import rollout_episodes
 from tbsim.evaluation.env_builders import EnvNuscBuilder, EnvL5Builder
 
