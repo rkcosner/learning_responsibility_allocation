@@ -13,7 +13,7 @@ from l5kit.rasterization import build_rasterizer
 
 from tbsim.l5kit.vectorizer import build_vectorizer
 import tbsim.utils.geometry_utils as GeoUtils
-from tbsim.algos.l5kit_algos import L5TrafficModel, L5VAETrafficModel, L5TrafficModelGC, SpatialPlanner
+from tbsim.algos.l5kit_algos import BehaviorCloning, VAETrafficModel, BehaviorCloningGC, SpatialPlanner
 from tbsim.algos.multiagent_algos import MATrafficModel
 from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.envs.env_l5kit import EnvL5KitSimulation, BatchedEnv

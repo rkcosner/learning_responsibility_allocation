@@ -13,7 +13,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 
 from tbsim.utils.log_utils import PrintLogger
 import tbsim.utils.train_utils as TrainUtils
-from tbsim.algos.l5kit_algos import L5TrafficModel
+from tbsim.algos.l5kit_algos import BehaviorCloning
 from tbsim.configs import (
     ExperimentConfig,
     L5KitEnvConfig,

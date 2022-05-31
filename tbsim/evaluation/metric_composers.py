@@ -1,5 +1,5 @@
 from tbsim.algos.l5kit_algos import (
-    L5DiscreteVAETrafficModel,
+    DiscreteVAETrafficModel,
 )
 
 from tbsim.algos.metric_algos import (
@@ -55,7 +55,7 @@ class CVAEMetrics(MetricsComposer):
 
         controller_cfg = get_experiment_config_from_file(config_path)
         modality_shapes = batch_utils().get_modality_shapes(controller_cfg)
-        CVAE_model = L5DiscreteVAETrafficModel.load_from_checkpoint(
+        CVAE_model = DiscreteVAETrafficModel.load_from_checkpoint(
             ckpt_path,
             algo_config=controller_cfg.algo,
             modality_shapes=modality_shapes

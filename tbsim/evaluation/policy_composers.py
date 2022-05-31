@@ -1,12 +1,12 @@
 """A script for evaluating closed-loop simulation"""
 from tbsim.algos.l5kit_algos import (
-    L5TrafficModel,
-    L5TreeVAETrafficModel,
-    L5VAETrafficModel,
+    BehaviorCloning,
+    TreeVAETrafficModel,
+    VAETrafficModel,
     SpatialPlanner,
     GANTrafficModel,
-    L5DiscreteVAETrafficModel,
-    L5ECTrafficModel
+    DiscreteVAETrafficModel,
+    BehaviorCloningEC
 )
 from tbsim.utils.batch_utils import batch_utils
 from tbsim.algos.multiagent_algos import MATrafficModel, HierarchicalAgentAwareModel
@@ -83,7 +83,7 @@ class BC(PolicyComposer):
     """Behavior Cloning (SimNet)"""
     def get_policy(self, policy=None):
         if policy is not None:
-            assert isinstance(policy, L5TrafficModel)
+            assert isinstance(policy, BehaviorCloning)
             policy_cfg = None
         else:
             policy_ckpt_path, policy_config_path = get_checkpoint(
@@ -92,7 +92,7 @@ class BC(PolicyComposer):
                 ckpt_root_dir=self.ckpt_root_dir,
             )
             policy_cfg = get_experiment_config_from_file(policy_config_path)
-            policy = L5TrafficModel.load_from_checkpoint(
+            policy = BehaviorCloning.load_from_checkpoint(
                 policy_ckpt_path,
                 algo_config=policy_cfg.algo,
                 modality_shapes=self.get_modality_shapes(policy_cfg),
@@ -106,7 +106,7 @@ class TrafficSim(PolicyComposer):
     """Agent-centric TrafficSim"""
     def get_policy(self, policy=None):
         if policy is not None:
-            assert isinstance(policy, L5VAETrafficModel)
+            assert isinstance(policy, VAETrafficModel)
             policy_cfg = None
         else:
             policy_ckpt_path, policy_config_path = get_checkpoint(
@@ -115,7 +115,7 @@ class TrafficSim(PolicyComposer):
                 ckpt_root_dir=self.ckpt_root_dir,
             )
             policy_cfg = get_experiment_config_from_file(policy_config_path)
-            policy = L5VAETrafficModel.load_from_checkpoint(
+            policy = VAETrafficModel.load_from_checkpoint(
                 policy_ckpt_path,
                 algo_config=policy_cfg.algo,
                 modality_shapes=self.get_modality_shapes(policy_cfg),
@@ -159,7 +159,7 @@ class TPP(PolicyComposer):
     """Trajectron++ with prediction-and-planning"""
     def get_policy(self, policy=None):
         if policy is not None:
-            assert isinstance(policy, L5DiscreteVAETrafficModel)
+            assert isinstance(policy, DiscreteVAETrafficModel)
             policy_cfg = None
         else:
             policy_ckpt_path, policy_config_path = get_checkpoint(
@@ -168,7 +168,7 @@ class TPP(PolicyComposer):
                 ckpt_root_dir=self.ckpt_root_dir,
             )
             policy_cfg = get_experiment_config_from_file(policy_config_path)
-            policy = L5DiscreteVAETrafficModel.load_from_checkpoint(
+            policy = DiscreteVAETrafficModel.load_from_checkpoint(
                 policy_ckpt_path,
                 algo_config=policy_cfg.algo,
                 modality_shapes=self.get_modality_shapes(policy_cfg),
@@ -404,7 +404,7 @@ class HierAgentAwareCVAE(Hierarchical):
         )
         controller_cfg = get_experiment_config_from_file(controller_config_path)
 
-        controller = L5DiscreteVAETrafficModel.load_from_checkpoint(
+        controller = DiscreteVAETrafficModel.load_from_checkpoint(
             controller_ckpt_path,
             algo_config=controller_cfg.algo,
             modality_shapes=self.get_modality_shapes(controller_cfg),
@@ -430,7 +430,7 @@ class HierAgentAwareCVAE(Hierarchical):
         if planner is not None:
             assert isinstance(predictor, MATrafficModel)
             assert isinstance(planner, SpatialPlanner)
-            assert isinstance(controller, L5DiscreteVAETrafficModel)
+            assert isinstance(controller, DiscreteVAETrafficModel)
             exp_cfg = None
         else:
             planner, _ = self._get_planner()
@@ -529,7 +529,7 @@ class AgentAwareEC(Hierarchical):
         )
         EC_cfg = get_experiment_config_from_file(EC_config_path)
 
-        EC_model = L5ECTrafficModel.load_from_checkpoint(
+        EC_model = BehaviorCloningEC.load_from_checkpoint(
             EC_ckpt_path,
             algo_config=EC_cfg.algo,
             modality_shapes=self.get_modality_shapes(EC_cfg),
@@ -539,7 +539,7 @@ class AgentAwareEC(Hierarchical):
     def get_policy(self, planner=None, predictor=None, controller=None):
         if planner is not None:
             assert isinstance(planner, SpatialPlanner)
-            assert isinstance(predictor, L5ECTrafficModel)
+            assert isinstance(predictor, BehaviorCloningEC)
             exp_cfg = None
         else:
             planner, _ = self._get_planner()
@@ -581,7 +581,7 @@ class TreeContingency(Hierarchical):
         #     modality_shapes=self.get_modality_shapes(predictor_cfg),
         # ).to(self.device).eval()
         predictor_cfg = get_experiment_config_from_file("experiments/templates/l5_mixed_tree_vae_plan.json")
-        predictor = L5TreeVAETrafficModel(
+        predictor = TreeVAETrafficModel(
             algo_config=predictor_cfg.algo,
             modality_shapes=self.get_modality_shapes(predictor_cfg),
         ).to(self.device).eval()
@@ -590,7 +590,7 @@ class TreeContingency(Hierarchical):
     def get_policy(self, planner=None, predictor=None, controller=None):
         if planner is not None:
             assert isinstance(planner, SpatialPlanner)
-            assert isinstance(predictor, L5ECTrafficModel)
+            assert isinstance(predictor, BehaviorCloningEC)
             exp_cfg = None
         else:
             planner, _ = self._get_planner()

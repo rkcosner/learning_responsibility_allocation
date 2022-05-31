@@ -3,30 +3,24 @@ from pytorch_lightning import LightningDataModule
 from tbsim.configs.base import ExperimentConfig
 
 from tbsim.algos.l5kit_algos import (
-    L5TrafficModel,
-    L5TransformerTrafficModel,
-    L5TransformerGANTrafficModel,
-    L5VAETrafficModel,
-    L5DiscreteVAETrafficModel,
-    L5TrafficModelGC,
+    BehaviorCloning,
+    TransformerTrafficModel,
+    TransformerGANTrafficModel,
+    VAETrafficModel,
+    DiscreteVAETrafficModel,
+    BehaviorCloningGC,
     SpatialPlanner,
     GANTrafficModel,
-    L5ECTrafficModel,
-    L5TreeVAETrafficModel,
+    BehaviorCloningEC,
+    TreeVAETrafficModel,
 )
 
 from tbsim.algos.multiagent_algos import (
     MATrafficModel,
-    MAGANTrafficModel,
     HierarchicalAgentAwareModel
 )
 
-from tbsim.algos.selfplay_algos import (
-    SelfPlayHierarchical
-)
-
 from tbsim.algos.metric_algos import (
-    EBMMetric,
     OccupancyMetric
 )
 
@@ -47,25 +41,25 @@ def algo_factory(config: ExperimentConfig, modality_shapes: dict, data_module: L
     algo_name = algo_config.name
 
     if algo_name == "l5_rasterized":
-        algo = L5TrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
+        algo = BehaviorCloning(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "l5_rasterized_gc":
-        algo = L5TrafficModelGC(
+        algo = BehaviorCloningGC(
             algo_config=algo_config, modality_shapes=modality_shapes
         )
     elif algo_name == "l5_rasterized_vae":
-        algo = L5VAETrafficModel(
+        algo = VAETrafficModel(
             algo_config=algo_config, modality_shapes=modality_shapes
         )
     elif algo_name == "l5_rasterized_discrete_vae":
-        algo = L5DiscreteVAETrafficModel(
+        algo = DiscreteVAETrafficModel(
             algo_config=algo_config, modality_shapes=modality_shapes
         )
     elif algo_name == "l5_rasterized_tree_vae":
-        algo = L5TreeVAETrafficModel(
+        algo = TreeVAETrafficModel(
             algo_config=algo_config, modality_shapes=modality_shapes
         )
     elif algo_name == "l5_rasterized_ec":
-        algo = L5ECTrafficModel(
+        algo = BehaviorCloningEC(
             algo_config=algo_config, modality_shapes=modality_shapes
         )
     elif algo_name == "spatial_planner":
@@ -77,11 +71,9 @@ def algo_factory(config: ExperimentConfig, modality_shapes: dict, data_module: L
     elif algo_name == "ma_rasterized":
         algo = MATrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "TransformerPred":
-        algo = L5TransformerTrafficModel(algo_config=algo_config)
+        algo = TransformerTrafficModel(algo_config=algo_config)
     elif algo_name == "TransformerGAN":
-        algo = L5TransformerGANTrafficModel(algo_config=algo_config)
-    elif algo_name == "sp_hierarchical":
-        algo = SelfPlayHierarchical(cfg=config, data_module=data_module)
+        algo = TransformerGANTrafficModel(algo_config=algo_config)
     elif algo_name == "gan":
         algo = GANTrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
     else:
