@@ -279,7 +279,7 @@ def trajectory_loss(predictions, targets, availabilities, weights_scaling=None, 
     loss = torch.mean(crit(predictions, targets) * target_weights)
     return loss
 
-def MultiModal_trajectory_loss(predictions, targets, availabilities, prob, weights_scaling=None, crit=nn.MSELoss(reduction="none")):
+def MultiModal_trajectory_loss(predictions, targets, availabilities, prob, weights_scaling=None, crit=nn.MSELoss(reduction="none"),calc_goal_reach=False):
     """
     Aggregated per-step loss between gt and predicted trajectories
     Args:
@@ -299,14 +299,29 @@ def MultiModal_trajectory_loss(predictions, targets, availabilities, prob, weigh
     assert weights_scaling.shape[-1] == targets.shape[-1]
     target_weights = (availabilities.unsqueeze(-1) * weights_scaling).unsqueeze(1)
     loss_v = crit(predictions,targets.unsqueeze(1))*target_weights
-    loss_v_aggregated = loss_v.sum(dim=[2,3])
+    if predictions.ndim==4:
+        loss_v_aggregated = loss_v.sum(dim=[2,3])
+    elif predictions.ndim==5:
+        loss_v_aggregated = loss_v.sum(dim=[2,3,4])
     loss_v_detached = loss_v.detach()
     min_flag = (loss_v_aggregated==loss_v_aggregated.min(dim=1,keepdim=True)[0])
     nonmin_flag = torch.logical_not(min_flag)
-    min_weight = (min_flag*prob)[...,None,None]*target_weights
-    nonmin_weight = (nonmin_flag*prob)[...,None,None]*target_weights
+    if predictions.ndim==4:
+        min_weight = (min_flag*prob)[...,None,None]*target_weights
+        nonmin_weight = (nonmin_flag*prob)[...,None,None]*target_weights
+    elif predictions.ndim==5:
+        min_weight = (min_flag*prob)[...,None,None,None]*target_weights
+        nonmin_weight = (nonmin_flag*prob)[...,None,None,None]*target_weights
     loss = ((loss_v*min_weight).sum()+(loss_v_detached*nonmin_weight).sum())/availabilities.sum()
-    return loss
+    if calc_goal_reach:
+        last_inds = batch_utils().get_last_available_index(availabilities)  # [B, (A)]
+        num_frames = availabilities.shape[-1]
+        goal_mask = TensorUtils.to_one_hot(last_inds, num_class=num_frames)
+        goal_mask = goal_mask.unsqueeze(1).unsqueeze(-1)
+        goal_loss = ((loss_v*min_weight*goal_mask).sum()+(loss_v_detached*nonmin_weight*goal_mask).sum())/goal_mask.sum()
+        return loss, goal_loss
+    else:
+        return loss
 
         
 

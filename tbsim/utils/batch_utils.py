@@ -95,7 +95,7 @@ class BatchUtils(object):
         raise NotImplementedError
 
     @staticmethod
-    def gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types):
+    def gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types, mask=None):
         raise NotImplementedError
 
     @staticmethod
@@ -133,8 +133,8 @@ class L5BatchUtils(BatchUtils):
         return l5_utils.gen_ego_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types)
 
     @staticmethod
-    def gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types):
-        return l5_utils.gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types)
+    def gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types, mask=None):
+        return l5_utils.gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types, mask)
 
     @staticmethod
     def get_drivable_region_map(rasterized_map):
