@@ -72,7 +72,7 @@ def make_segments(x, y):
 
 
 def get_l5_rasterizer(dataset_path):
-    exp_cfg = get_registered_experiment_config("l5_mixed_plan")
+    exp_cfg = get_registered_experiment_config("l5_bc")
     exp_cfg.dataset_path = dataset_path
     os.environ["L5KIT_DATA_FOLDER"] = dataset_path
 

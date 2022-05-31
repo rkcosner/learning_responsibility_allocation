@@ -38,33 +38,23 @@ def algo_factory(config: ExperimentConfig, modality_shapes: dict):
     algo_config = config.algo
     algo_name = algo_config.name
 
-    if algo_name == "l5_rasterized":
+    if algo_name == "bc":
         algo = BehaviorCloning(algo_config=algo_config, modality_shapes=modality_shapes)
-    elif algo_name == "l5_rasterized_gc":
-        algo = BehaviorCloningGC(
-            algo_config=algo_config, modality_shapes=modality_shapes
-        )
-    elif algo_name == "l5_rasterized_vae":
-        algo = VAETrafficModel(
-            algo_config=algo_config, modality_shapes=modality_shapes
-        )
-    elif algo_name == "l5_rasterized_discrete_vae":
-        algo = DiscreteVAETrafficModel(
-            algo_config=algo_config, modality_shapes=modality_shapes
-        )
-    elif algo_name == "l5_rasterized_tree_vae":
-        algo = TreeVAETrafficModel(
-            algo_config=algo_config, modality_shapes=modality_shapes
-        )
-    elif algo_name == "l5_rasterized_ec":
-        algo = BehaviorCloningEC(
-            algo_config=algo_config, modality_shapes=modality_shapes
-        )
+    elif algo_name == "bc_gc":
+        algo = BehaviorCloningGC(algo_config=algo_config, modality_shapes=modality_shapes)
+    elif algo_name == "vae":
+        algo = VAETrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
+    elif algo_name == "discrete_vae":
+        algo = DiscreteVAETrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
+    elif algo_name == "tree_vae":
+        algo = TreeVAETrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
+    elif algo_name == "bc_ec":
+        algo = BehaviorCloningEC(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "spatial_planner":
         algo = SpatialPlanner(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "occupancy":
         algo = OccupancyMetric(algo_config=algo_config, modality_shapes=modality_shapes)
-    elif algo_name == "ma_rasterized":
+    elif algo_name == "agent_predictor":
         algo = MATrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "TransformerPred":
         algo = TransformerTrafficModel(algo_config=algo_config)

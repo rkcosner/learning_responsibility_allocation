@@ -3,12 +3,12 @@ import math
 from tbsim.configs.base import AlgoConfig
 
 
-class L5RasterizedPlanningConfig(AlgoConfig):
+class BehaviorCloningConfig(AlgoConfig):
     def __init__(self):
-        super(L5RasterizedPlanningConfig, self).__init__()
+        super(BehaviorCloningConfig, self).__init__()
         self.eval_class = "BC"
 
-        self.name = "l5_rasterized"
+        self.name = "bc"
         self.model_architecture = "resnet18"
         self.map_feature_dim = 256
         self.history_num_frames = 10
@@ -48,7 +48,7 @@ class L5RasterizedPlanningConfig(AlgoConfig):
         self.optim_params.policy.regularization.L2 = 0.00  # L2 regularization strength
 
 
-class SpatialPlannerConfig(L5RasterizedPlanningConfig):
+class SpatialPlannerConfig(BehaviorCloningConfig):
     def __init__(self):
         super(SpatialPlannerConfig, self).__init__()
         self.eval_class = None
@@ -60,12 +60,12 @@ class SpatialPlannerConfig(L5RasterizedPlanningConfig):
         self.loss_weights.pixel_yaw_loss = 1.0
 
 
-class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
+class AgentPredictorConfig(BehaviorCloningConfig):
     def __init__(self):
-        super(MARasterizedPlanningConfig, self).__init__()
+        super(AgentPredictorConfig, self).__init__()
         self.eval_class = "HierAgentAware"
 
-        self.name = "ma_rasterized"
+        self.name = "agent_predictor"
         self.agent_feature_dim = 128
         self.global_feature_dim = 128
         self.context_size = (30, 30)
@@ -92,31 +92,20 @@ class MARasterizedPlanningConfig(L5RasterizedPlanningConfig):
         self.optim_params.GAN.regularization.L2 = 0.00  # L2 regularization strength
 
 
-class HierachicalAgentAwareConfig(MARasterizedPlanningConfig):
+class BehaviorCloningGCConfig(BehaviorCloningConfig):
     def __init__(self):
-        super(HierachicalAgentAwareConfig, self).__init__()
-        self.eval_class = "HPnC"
-        self.name = "hier_agent_aware"
-        self.loss_weights.pixel_bce_loss = 0.0
-        self.loss_weights.pixel_ce_loss = 1.0
-        self.loss_weights.pixel_res_loss = 1.0
-        self.loss_weights.pixel_yaw_loss = 1.0
-
-
-class L5RasterizedGCConfig(L5RasterizedPlanningConfig):
-    def __init__(self):
-        super(L5RasterizedGCConfig, self).__init__()
+        super(BehaviorCloningGCConfig, self).__init__()
         self.eval_class = None
-        self.name = "l5_rasterized_gc"
+        self.name = "bc_gc"
         self.goal_feature_dim = 32
         self.decoder.layer_dims = (128, 128)
 
 
-class EBMMetricConfig(L5RasterizedPlanningConfig):
+class EBMMetricConfig(BehaviorCloningConfig):
     def __init__(self):
         super(EBMMetricConfig, self).__init__()
         self.eval_class = None
-        self.name = "l5_ebm"
+        self.name = "ebm"
         self.negative_source = "permute"
         self.map_feature_dim = 64
         self.traj_feature_dim = 32
@@ -125,7 +114,7 @@ class EBMMetricConfig(L5RasterizedPlanningConfig):
         self.loss_weights.infoNCE_loss = 1.0
 
 
-class OccupancyMetricConfig(L5RasterizedPlanningConfig):
+class OccupancyMetricConfig(BehaviorCloningConfig):
     def __init__(self):
         super(OccupancyMetricConfig, self).__init__()
         self.eval_class = "metric"
@@ -136,11 +125,11 @@ class OccupancyMetricConfig(L5RasterizedPlanningConfig):
         self.agent_future_cond.every_n_frame = 5
 
 
-class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
+class VAEConfig(BehaviorCloningConfig):
     def __init__(self):
-        super(L5RasterizedVAEConfig, self).__init__()
+        super(VAEConfig, self).__init__()
         self.eval_class = "TrafficSim"
-        self.name = "l5_rasterized_vae"
+        self.name = "vae"
         self.map_feature_dim = 256
         self.goal_conditional = False
         self.goal_feature_dim = 32
@@ -156,12 +145,12 @@ class L5RasterizedVAEConfig(L5RasterizedPlanningConfig):
         self.loss_weights.kl_loss = 1e-4
 
 
-class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
+class DiscreteVAEConfig(BehaviorCloningConfig):
     def __init__(self):
-        super(L5RasterizedDiscreteVAEConfig, self).__init__()
+        super(DiscreteVAEConfig, self).__init__()
         self.eval_class = "TPP"
 
-        self.name = "l5_rasterized_discrete_vae"
+        self.name = "discrete_vae"
         self.map_feature_dim = 256
         self.goal_conditional = False
         self.goal_feature_dim = 32
@@ -191,12 +180,12 @@ class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
         self.min_std = 0.1
 
 
-class L5RasterizedTreeVAEConfig(L5RasterizedPlanningConfig):
+class TreeVAEConfig(BehaviorCloningConfig):
     def __init__(self):
-        super(L5RasterizedTreeVAEConfig, self).__init__()
+        super(TreeVAEConfig, self).__init__()
         self.eval_class = None
 
-        self.name = "l5_rasterized_tree_vae"
+        self.name = "tree_vae"
         self.map_feature_dim = 256
         self.goal_conditional = True
         self.goal_feature_dim = 32
@@ -223,12 +212,12 @@ class L5RasterizedTreeVAEConfig(L5RasterizedPlanningConfig):
         self.min_std = 0.1
 
 
-class L5RasterizedECConfig(L5RasterizedPlanningConfig):
+class BehaviorCloningECConfig(BehaviorCloningConfig):
     def __init__(self):
-        super(L5RasterizedECConfig, self).__init__()
+        super(BehaviorCloningECConfig, self).__init__()
         self.eval_class = None
 
-        self.name = "l5_rasterized_ec"
+        self.name = "bc_ec"
         self.map_feature_dim = 256
         self.goal_conditional = True
         self.goal_feature_dim = 32
@@ -243,14 +232,12 @@ class L5RasterizedECConfig(L5RasterizedPlanningConfig):
         self.loss_weights.deviation_loss = 0.2
 
 
-class L5RasterizedGANConfig(L5RasterizedPlanningConfig):
+class GANConfig(BehaviorCloningConfig):
     def __init__(self):
-        super(L5RasterizedGANConfig, self).__init__()
+        super(GANConfig, self).__init__()
         self.eval_class = "GAN"
 
         self.name = "gan"
-
-        self.dynamics.type = "Unicycle"
 
         self.map_feature_dim = 256
         self.optim_params.disc.learning_rate.initial = 3e-4  # policy learning rate
@@ -281,9 +268,9 @@ class L5RasterizedGANConfig(L5RasterizedPlanningConfig):
         self.optim_params.disc.regularization.L2 = 0.00  # L2 regularization strength
 
 
-class L5TransformerPredConfig(AlgoConfig):
+class TransformerPredConfig(AlgoConfig):
     def __init__(self):
-        super(L5TransformerPredConfig, self).__init__()
+        super(TransformerPredConfig, self).__init__()
 
         self.name = "TransformerPred"
         self.model_architecture = "Factorized"
@@ -370,9 +357,9 @@ class L5TransformerPredConfig(AlgoConfig):
         self.optim_params.policy.regularization.L2 = 0.00  # L2 regularization strength
 
 
-class L5TransformerGANConfig(L5TransformerPredConfig):
+class TransformerGANConfig(TransformerPredConfig):
     def __init__(self):
-        super(L5TransformerGANConfig, self).__init__()
+        super(TransformerGANConfig, self).__init__()
         self.name = "TransformerGAN"
         self.calc_likelihood = True
         self.f_steps = 5

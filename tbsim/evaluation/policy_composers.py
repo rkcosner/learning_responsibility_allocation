@@ -59,9 +59,9 @@ class ReplayAction(PolicyComposer):
         import h5py
         h5 = h5py.File(self.eval_config.experience_hdf5_path, "r")
         if self.eval_config.env == "nusc":
-            exp_cfg = get_registered_experiment_config("nusc_rasterized_plan")
+            exp_cfg = get_registered_experiment_config("nusc_bc")
         elif self.eval_config.env == "l5kit":
-            exp_cfg = get_registered_experiment_config("l5_mixed_plan")
+            exp_cfg = get_registered_experiment_config("l5_bc")
         else:
             raise NotImplementedError("invalid env {}".format(self.eval_config.env))
         return ReplayPolicy(h5, self.device), exp_cfg
@@ -71,9 +71,9 @@ class GroundTruth(PolicyComposer):
     """A fake policy that replays dataset trajectories."""
     def get_policy(self):
         if self.eval_config.env == "nusc":
-            exp_cfg = get_registered_experiment_config("nusc_rasterized_plan")
+            exp_cfg = get_registered_experiment_config("nusc_bc")
         elif self.eval_config.env == "l5kit":
-            exp_cfg = get_registered_experiment_config("l5_mixed_plan")
+            exp_cfg = get_registered_experiment_config("l5_bc")
         else:
             raise NotImplementedError("invalid env {}".format(self.eval_config.env))
         return GTPolicy(device=self.device), exp_cfg
