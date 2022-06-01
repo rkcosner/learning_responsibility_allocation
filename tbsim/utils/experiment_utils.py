@@ -377,7 +377,7 @@ def download_checkpoints_from_ngc(
     return ckpt_target_dir
 
 
-def get_local_checkpoint_dir(ngc_job_id, ckpt_root_dir):
+def get_local_ngc_checkpoint_dir(ngc_job_id, ckpt_root_dir):
     for p in glob(ckpt_root_dir + "/*"):
         if str(ngc_job_id) == p.split("_")[-1] or str(ngc_job_id) == p.split("/")[-1]:
             return p
@@ -385,10 +385,39 @@ def get_local_checkpoint_dir(ngc_job_id, ckpt_root_dir):
 
 
 def get_checkpoint(
-    ngc_job_id, ckpt_key, ckpt_root_dir="checkpoints/", download_tmp_dir="/tmp"
+    ckpt_key, ngc_job_id=None, ckpt_dir=None, ckpt_root_dir="checkpoints/", download_tmp_dir="/tmp"
 ):
+    """
+    Get checkpoint and config path given either a ngc job ID or a local dir.
+
+    If a @ngc_job_id is specified, the function will first look for a directory that ends with @ngc_job_id inside
+    @ckpt_root_dir. E.g., if @ngc_job_id == `1234567`, and @ckpt_root_dir == "checkpoints/", the function will look for
+    a directory "checkpoints/*_1234567", and within the directory a `.ckpt` file that contains @ckpt_key.
+    If no such directory or checkpoint file exists, it will try to download the checkpoint from
+    NGC under the result directory of a job and save it locally such that it will not need to download it again the
+    next time that this function is invoked.
+
+    If a @ckpt_dir is specified, the function will look for the directory locally and return the ckpt that contains
+    @ckpt_key, as well as its config.json.
+
+    Args:
+        ckpt_key (str): a string that uniquely identifies a checkpoint file with a directory, e.g., `iter50000.ckpt`
+        ngc_job_id (str): (Optional) ngc job ID of the checkpoint if the training was done on NGC.
+        ckpt_dir (str): (Optional) a local directory that contains the specified checkpoint
+        ckpt_root_dir (str): (Optional) a directory that the function will look for checkpoints downloaded from NGC
+        download_tmp_dir (str): a temporary storage for the checkpoint.
+
+    Returns:
+        ckpt_path (str): path to a checkpoint file
+        cfg_path (str): path to a config.json file
+    """
     def ckpt_path_func(paths): return [p for p in paths if str(ckpt_key) in p]
-    local_dir = get_local_checkpoint_dir(ngc_job_id, ckpt_root_dir)
+    if ngc_job_id is None or len(str(ngc_job_id)) == 0:
+        local_dir = ckpt_dir
+        assert ckpt_dir is not None
+    else:
+        local_dir = get_local_ngc_checkpoint_dir(ngc_job_id, ckpt_root_dir)
+
     if local_dir is None:
         print("checkpoint does not exist, downloading ...")
         ckpt_dir = download_checkpoints_from_ngc(
@@ -400,13 +429,16 @@ def get_checkpoint(
     else:
         ckpt_paths = glob(local_dir + "/**/*.ckpt", recursive=True)
         if len(ckpt_path_func(ckpt_paths)) == 0:
-            print("checkpoint does not exist, downloading ...")
-            ckpt_dir = download_checkpoints_from_ngc(
-                ngc_job_id=str(ngc_job_id),
-                ckpt_root_dir=ckpt_root_dir,
-                ckpt_path_func=ckpt_path_func,
-                tmp_dir=download_tmp_dir,
-            )
+            if ngc_job_id is not None:
+                print("checkpoint does not exist, downloading ...")
+                ckpt_dir = download_checkpoints_from_ngc(
+                    ngc_job_id=str(ngc_job_id),
+                    ckpt_root_dir=ckpt_root_dir,
+                    ckpt_path_func=ckpt_path_func,
+                    tmp_dir=download_tmp_dir,
+                )
+            else:
+                raise FileNotFoundError("Cannot find checkpoint in {} with key {}".format(local_dir, ckpt_key))
         else:
             ckpt_dir = local_dir
 

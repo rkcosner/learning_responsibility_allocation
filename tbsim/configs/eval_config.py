@@ -26,18 +26,25 @@ class EvaluationConfig(Dict):
         self.experience_hdf5_path = None
         self.results_dir = "results/"
 
-        self.ckpt.policy.ngc_job_id = ""
-        self.ckpt.policy.ckpt_key = ""
-        self.ckpt.planner.ngc_job_id = ""
-        self.ckpt.planner.ckpt_key = ""
-        self.ckpt.predictor.ngc_job_id = ""
-        self.ckpt.predictor.ckpt_key = ""
+        self.ckpt.policy.ngc_job_id = None
+        self.ckpt.policy.ckpt_dir = None
+        self.ckpt.policy.ckpt_key = None
 
-        self.ckpt.cvae_metric.ngc_job_id = ""
-        self.ckpt.cvae_metric.ckpt_key = ""
+        self.ckpt.planner.ngc_job_id = None
+        self.ckpt.planner.ckpt_dir = None
+        self.ckpt.planner.ckpt_key = None
 
-        self.ckpt.occupancy_metric.ngc_job_id = ""
-        self.ckpt.occupancy_metric.ckpt_key = ""
+        self.ckpt.predictor.ngc_job_id = None
+        self.ckpt.predictor.ckpt_dir = None
+        self.ckpt.predictor.ckpt_key = None
+
+        self.ckpt.cvae_metric.ngc_job_id = None
+        self.ckpt.cvae_metric.ckpt_dir = None
+        self.ckpt.cvae_metric.ckpt_key = None
+
+        self.ckpt.occupancy_metric.ngc_job_id = None
+        self.ckpt.occupancy_metric.ckpt_dir = None
+        self.ckpt.occupancy_metric.ckpt_key = None
 
         self.policy.mask_drivable = True
         self.policy.num_plan_samples = 50

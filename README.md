@@ -3,6 +3,7 @@ Software infrastructure for learning-based traffic simulation.
 
 ## Installation
 
+Install `tbsim`
 ```angular2html
 conda env create -n tbsim python=3.8
 conda activate tbsim
@@ -11,12 +12,21 @@ cd tbsim
 pip install -e .
 ```
 
+Install `avdata`
+```
+cd ..
+git clone ssh://git@gitlab-master.nvidia.com:12051/nvr-av/unified-av-data-loader.git avdata
+cd avdata
+# replace requirements.txt with avdata_requirements.txt included in tbsim
+pip install -e .
+```
+
 ## Quick start
 ### 1. Obtain dataset(s)
 We currently support the Lyft Level 5 [dataset](https://level-5.global/data/) and the nuScenes [dataset](https://www.nuscenes.org/nuscenes).
 
 #### Lyft Level 5:
-* Download the Lyft Prediction dataset and organize the dataset directory as follows:
+* Download the Lyft Prediction dataset (only the metadata and the map) and organize the dataset directory as follows:
     ```
     lyft_prediction/
     │   aerial_map/
@@ -52,7 +62,15 @@ See the list of registered algorithms in `configs/registry.py`
 
 ### 3. Evaluate a trained model (closed-loop simulation)
 ```
-python scripts/evaluate.py 
+python scripts/evaluate.py \
+  --results_root_dir results/ \
+  --num_scenes_per_batch 2 \
+  --dataset_path <your-dataset-path> \
+  --env <l5kit|nusc> \
+  --policy_ckpt_dir <path-to-checkpoint-dir> \
+  --policy_ckpt_key <ckpt-file-identifier> \
+  --eval_class BC \
+  --render
 ```
 
 ## Launch training runs on NGC

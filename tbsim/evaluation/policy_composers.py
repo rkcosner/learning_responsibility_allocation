@@ -89,6 +89,7 @@ class BC(PolicyComposer):
             policy_ckpt_path, policy_config_path = get_checkpoint(
                 ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
                 ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+                ckpt_dir=self.eval_config.ckpt.policy.ckpt_dir,
                 ckpt_root_dir=self.ckpt_root_dir,
             )
             policy_cfg = get_experiment_config_from_file(policy_config_path)
@@ -112,6 +113,7 @@ class TrafficSim(PolicyComposer):
             policy_ckpt_path, policy_config_path = get_checkpoint(
                 ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
                 ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+                ckpt_dir=self.eval_config.ckpt.policy.ckpt_dir,
                 ckpt_root_dir=self.ckpt_root_dir,
             )
             policy_cfg = get_experiment_config_from_file(policy_config_path)
@@ -135,6 +137,7 @@ class TrafficSimplan(TrafficSim):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
             ckpt_key=self.eval_config.ckpt.predictor.ckpt_key,
+            ckpt_dir=self.eval_config.ckpt.policy.ckpt_dir,
             ckpt_root_dir=self.ckpt_root_dir
         )
         predictor_cfg = get_experiment_config_from_file(predictor_config_path)
@@ -165,6 +168,7 @@ class TPP(PolicyComposer):
             policy_ckpt_path, policy_config_path = get_checkpoint(
                 ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
                 ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+                ckpt_dir=self.eval_config.ckpt.policy.ckpt_dir,
                 ckpt_root_dir=self.ckpt_root_dir,
             )
             policy_cfg = get_experiment_config_from_file(policy_config_path)
@@ -188,6 +192,7 @@ class TPPplan(TPP):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
             ckpt_key=self.eval_config.ckpt.predictor.ckpt_key,
+            ckpt_dir=self.eval_config.ckpt.policy.ckpt_dir,
             ckpt_root_dir=self.ckpt_root_dir
         )
         predictor_cfg = get_experiment_config_from_file(predictor_config_path)
@@ -218,6 +223,7 @@ class GAN(PolicyComposer):
             policy_ckpt_path, policy_config_path = get_checkpoint(
                 ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
                 ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+                ckpt_dir=self.eval_config.ckpt.policy.ckpt_dir,
                 ckpt_root_dir=self.ckpt_root_dir,
             )
             policy_cfg = get_experiment_config_from_file(policy_config_path)
@@ -240,6 +246,7 @@ class GANplan(GAN):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
             ckpt_key=self.eval_config.ckpt.predictor.ckpt_key,
+            ckpt_dir=self.eval_config.ckpt.policy.ckpt_dir,
             ckpt_root_dir=self.ckpt_root_dir
         )
         predictor_cfg = get_experiment_config_from_file(predictor_config_path)
@@ -266,6 +273,7 @@ class Hierarchical(PolicyComposer):
         planner_ckpt_path, planner_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.planner.ngc_job_id,
             ckpt_key=self.eval_config.ckpt.planner.ckpt_key,
+            ckpt_dir=self.eval_config.ckpt.planner.ckpt_dir,
             ckpt_root_dir=self.ckpt_root_dir,
         )
         planner_cfg = get_experiment_config_from_file(planner_config_path)
@@ -290,6 +298,7 @@ class Hierarchical(PolicyComposer):
         policy_ckpt_path, policy_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
             ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+            ckpt_dir=self.eval_config.ckpt.policy.ckpt_dir,
             ckpt_root_dir=self.ckpt_root_dir,
         )
         policy_cfg = get_experiment_config_from_file(policy_config_path)
@@ -354,6 +363,7 @@ class HierAgentAware(Hierarchical):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
             ckpt_key=self.eval_config.ckpt.predictor.ckpt_key,
+            ckpt_dir=self.eval_config.ckpt.predictor.ckpt_dir,
             ckpt_root_dir=self.ckpt_root_dir
         )
         predictor_cfg = get_experiment_config_from_file(predictor_config_path)
@@ -400,6 +410,7 @@ class HierAgentAwareCVAE(Hierarchical):
         controller_ckpt_path, controller_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
             ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+            ckpt_dir=self.eval_config.ckpt.policy.ckpt_dir,
             ckpt_root_dir=self.ckpt_root_dir
         )
         controller_cfg = get_experiment_config_from_file(controller_config_path)
@@ -415,6 +426,7 @@ class HierAgentAwareCVAE(Hierarchical):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
             ckpt_key=self.eval_config.ckpt.predictor.ckpt_key,
+            ckpt_dir=self.eval_config.ckpt.predictor.ckpt_dir,
             ckpt_root_dir=self.ckpt_root_dir
         )
         predictor_cfg = get_experiment_config_from_file(predictor_config_path)
@@ -459,6 +471,7 @@ class HierAgentAwareMPC(Hierarchical):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
             ckpt_key=self.eval_config.ckpt.predictor.ckpt_key,
+            ckpt_dir=self.eval_config.ckpt.predictor.ckpt_dir,
             ckpt_root_dir=self.ckpt_root_dir
         )
         predictor_cfg = get_experiment_config_from_file(predictor_config_path)
@@ -492,6 +505,7 @@ class HAASplineSampling(Hierarchical):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.predictor.ngc_job_id,
             ckpt_key=self.eval_config.ckpt.predictor.ckpt_key,
+            ckpt_dir=self.eval_config.ckpt.predictor.ckpt_dir,
             ckpt_root_dir=self.ckpt_root_dir
         )
         predictor_cfg = get_experiment_config_from_file(predictor_config_path)
@@ -525,6 +539,7 @@ class AgentAwareEC(Hierarchical):
         EC_ckpt_path, EC_config_path = get_checkpoint(
             ngc_job_id=self.eval_config.ckpt.policy.ngc_job_id,
             ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
+            ckpt_dir=self.eval_config.ckpt.policy.ckpt_dir,
             ckpt_root_dir=self.ckpt_root_dir
         )
         EC_cfg = get_experiment_config_from_file(EC_config_path)

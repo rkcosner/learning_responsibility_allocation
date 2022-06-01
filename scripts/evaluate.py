@@ -220,7 +220,21 @@ if __name__ == "__main__":
         "--ckpt_root_dir",
         type=str,
         default=None,
+        help="Root directory to look for training run directories"
+    )
+
+    parser.add_argument(
+        "--policy_ckpt_dir",
+        type=str,
+        default=None,
         help="Directory to look for saved checkpoints"
+    )
+
+    parser.add_argument(
+        "--policy_ckpt_key",
+        type=str,
+        default=None,
+        help="A string that uniquely identifies a checkpoint file within a directory, e.g., iter50000"
     )
 
     parser.add_argument(
@@ -251,7 +265,6 @@ if __name__ == "__main__":
         help="whether to render videos"
     )
 
-
     parser.add_argument(
         "--seed",
         type=int,
@@ -277,6 +290,11 @@ if __name__ == "__main__":
 
     if args.ckpt_root_dir is not None:
         cfg.ckpt_root_dir = args.ckpt_root_dir
+
+    if args.policy_ckpt_dir is not None:
+        assert args.policy_ckpt_key is not None, "Please specify a key to look for the checkpoint, e.g., 'iter50000'"
+        cfg.ckpt.policy.ckpt_dir = args.policy_ckpt_dir
+        cfg.ckpt.policy.ckpt_key = args.policy_ckpt_key
 
     if args.num_scenes_per_batch is not None:
         cfg.num_scenes_per_batch = args.num_scenes_per_batch
