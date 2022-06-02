@@ -1,17 +1,15 @@
 import numpy as np
+from PIL import Image, ImageDraw
+
 from l5kit.geometry import transform_points
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from matplotlib.figure import Figure
-from tbsim.utils.tensor_utils import map_ndarray
-from tbsim.utils.l5_utils import get_last_available_index
-from tbsim.l5kit.vis_rasterizer import VisualizationRasterizer, cv2_subpixel, CV2_SUB_VALUES
-from tbsim.utils.geometry_utils import get_box_world_coords_np
 from l5kit.rasterization.render_context import RenderContext
 from l5kit.configs.config import load_metadata
-import tbsim.utils.tensor_utils as TensorUtils
-from PIL import Image, ImageDraw
 from avdata.data_structures.map import Map
 
+from tbsim.utils.tensor_utils import map_ndarray
+from tbsim.l5kit.vis_rasterizer import VisualizationRasterizer
+from tbsim.utils.geometry_utils import get_box_world_coords_np
+import tbsim.utils.tensor_utils as TensorUtils
 
 
 COLORS = {
@@ -30,8 +28,6 @@ def agent_to_raster_np(pt_tensor, trans_mat):
 def draw_actions(
         state_image,
         trans_mat,
-        title="",
-        text=None,
         pred_action=None,
         pred_plan=None,
         pred_plan_info=None,

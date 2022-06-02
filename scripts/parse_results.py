@@ -30,19 +30,18 @@ def parse(args):
     if not os.path.exists(hist_stats_fn):
         compute_and_save_stats(os.path.join(args.results_dir, "data.hdf5"))
 
-    hjson = json.load(open(hist_stats_fn, "r"))
-    if cfg["env"] == "l5kit":
-        gt_hjson = json.load(open("/home/danfeix/workspace/tbsim/results/l5kit/GroundTruth/hist_stats.json", "r"))
-    elif cfg["env"] == "nusc":
-        gt_hjson = json.load(open("/home/danfeix/workspace/tbsim/results/nusc/GroundTruth/hist_stats.json", "r"))
-
-    for k in gt_hjson["stats"]:
-        results["{}_dist".format(k)] = calc_hist_distance(
-            hist1=np.array(gt_hjson["stats"][k]),
-            hist2=np.array(hjson["stats"][k]),
-            bin_edges=np.array(gt_hjson["ticks"][k][1:])
-        )
-
+    # hjson = json.load(open(hist_stats_fn, "r"))
+    # if cfg["env"] == "l5kit":
+    #     gt_hjson = json.load(open("/home/danfeix/workspace/tbsim/results/l5kit/GroundTruth/hist_stats.json", "r"))
+    # elif cfg["env"] == "nusc":
+    #     gt_hjson = json.load(open("/home/danfeix/workspace/tbsim/results/nusc/GroundTruth/hist_stats.json", "r"))
+    #
+    # for k in gt_hjson["stats"]:
+    #     results["{}_dist".format(k)] = calc_hist_distance(
+    #         hist1=np.array(gt_hjson["stats"][k]),
+    #         hist2=np.array(hjson["stats"][k]),
+    #         bin_edges=np.array(gt_hjson["ticks"][k][1:])
+    #     )
 
     print("num_scenes: {}".format(len(rjson["scene_index"])))
     ade = results["ade"] if "ade" in results else results["ADE"]
@@ -63,10 +62,10 @@ def parse(args):
         results["all_collision_rate_CollisionType.FRONT"] * 100,
         results["all_collision_rate_CollisionType.SIDE"] * 100,
         results["all_off_road_rate_rate"] * 100,
-        results["velocity_dist"],
-        results["lon_accel_dist"],
-        results["lat_accel_dist"],
-        results["jerk_dist"]
+        # results["velocity_dist"],
+        # results["lon_accel_dist"],
+        # results["lat_accel_dist"],
+        # results["jerk_dist"]
     ]
 
     results_str = ["{:.3f}".format(r) for r in results_str]
@@ -82,6 +81,7 @@ def calc_hist_distance(hist1, hist2, bin_edges):
 
 
 def compute_and_save_stats(h5_path):
+    """Compute histogram statistics for a run"""
     h5f = h5py.File(h5_path, "r")
     bins = {
         "velocity": torch.linspace(0, 30, 21),
@@ -100,12 +100,7 @@ def compute_and_save_stats(h5_path):
         scene_data = h5f[scene_index]
         sim_pos = scene_data["centroid"]
         sim_yaw = scene_data["yaw"][:][:, None]
-
-        # gt_pos = scene_data["gt_centroid"]
-        # gt_yaw = scene_data["gt_yaw"][:][:, None]
-
         sim = calc_stats(positions=torch.Tensor(sim_pos), heading=torch.Tensor(sim_yaw), dt=0.1, bins=bins)
-        # gt = calc_stats(positions=torch.Tensor(gt_pos), heading=torch.Tensor(gt_yaw), dt=0.1, bins=bins)
 
         for k in sim:
             if k not in sim_stats:
@@ -113,19 +108,10 @@ def compute_and_save_stats(h5_path):
             else:
                 sim_stats[k] += sim[k].hist.long()
 
-        # for k in gt:
-        #     if k not in gt_stats:
-        #         gt_stats[k] = gt[k].hist.long()
-        #     else:
-        #         gt_stats[k] += gt[k].hist.long()
-
         if ticks is None:
             ticks = dict()
             for k in sim:
                 ticks[k] = sim[k].bin_edges
-
-    # for k in gt_stats:
-    #     gt_stats[k] = TensorUtils.to_numpy(gt_stats[k] / len(h5f.keys())).tolist()
 
     for k in sim_stats:
         sim_stats[k] = TensorUtils.to_numpy(sim_stats[k] / len(h5f.keys())).tolist()

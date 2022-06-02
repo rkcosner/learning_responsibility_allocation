@@ -3,24 +3,8 @@ from tbsim.configs.base import ExperimentConfig
 
 from tbsim.configs.l5kit_config import (
     L5KitTrainConfig,
-    L5KitMixedTrainConfig,
-    L5KitEnvConfig,
-    L5RasterizedPlanningConfig,
-    L5RasterizedECConfig,
-    SpatialPlannerConfig,
-    L5RasterizedGCConfig,
-    L5TransformerPredConfig,
-    L5TransformerGANConfig,
     L5KitMixedEnvConfig,
     L5KitMixedSemanticMapEnvConfig,
-    MARasterizedPlanningConfig,
-    L5RasterizedVAEConfig,
-    EBMMetricConfig,
-    L5RasterizedGANConfig,
-    L5RasterizedDiscreteVAEConfig,
-    L5RasterizedTreeVAEConfig,
-    OccupancyMetricConfig,
-    HierachicalAgentAwareConfig
 )
 
 from tbsim.configs.nusc_config import (
@@ -28,126 +12,128 @@ from tbsim.configs.nusc_config import (
     NuscEnvConfig
 )
 
+from tbsim.configs.algo_config import (
+    BehaviorCloningConfig,
+    BehaviorCloningECConfig,
+    SpatialPlannerConfig,
+    BehaviorCloningGCConfig,
+    TransformerPredConfig,
+    TransformerGANConfig,
+    AgentPredictorConfig,
+    VAEConfig,
+    EBMMetricConfig,
+    GANConfig,
+    DiscreteVAEConfig,
+    TreeVAEConfig,
+    OccupancyMetricConfig
+)
+
 
 EXP_CONFIG_REGISTRY = dict()
 
-# EXP_CONFIG_REGISTRY["l5_rasterized_plan"] = ExperimentConfig(
-#     train_config=L5KitTrainConfig(),
-#     env_config=L5KitEnvConfig(),
-#     algo_config=L5RasterizedPlanningConfig(),
-#     registered_name="l5_rasterized_plan",
-# )
-
-EXP_CONFIG_REGISTRY["l5_mixed_gc"] = ExperimentConfig(
-    train_config=L5KitMixedTrainConfig(),
+EXP_CONFIG_REGISTRY["l5_bc"] = ExperimentConfig(
+    train_config=L5KitTrainConfig(),
     env_config=L5KitMixedSemanticMapEnvConfig(),
-    algo_config=L5RasterizedGCConfig(),
-    registered_name="l5_mixed_gc",
+    algo_config=BehaviorCloningConfig(),
+    registered_name="l5_bc",
+)
+
+EXP_CONFIG_REGISTRY["l5_gan"] = ExperimentConfig(
+    train_config=L5KitTrainConfig(),
+    env_config=L5KitMixedSemanticMapEnvConfig(),
+    algo_config=GANConfig(),
+    registered_name="l5_gan",
+)
+
+EXP_CONFIG_REGISTRY["l5_bc_gc"] = ExperimentConfig(
+    train_config=L5KitTrainConfig(),
+    env_config=L5KitMixedSemanticMapEnvConfig(),
+    algo_config=BehaviorCloningGCConfig(),
+    registered_name="l5_bc_gc",
 )
 
 EXP_CONFIG_REGISTRY["l5_spatial_planner"] = ExperimentConfig(
-    train_config=L5KitMixedTrainConfig(),
+    train_config=L5KitTrainConfig(),
     env_config=L5KitMixedSemanticMapEnvConfig(),
     algo_config=SpatialPlannerConfig(),
     registered_name="l5_spatial_planner",
 )
 
-EXP_CONFIG_REGISTRY["l5_ma_rasterized_plan"] = ExperimentConfig(
-    train_config=L5KitMixedTrainConfig(),
+EXP_CONFIG_REGISTRY["l5_agent_predictor"] = ExperimentConfig(
+    train_config=L5KitTrainConfig(),
     env_config=L5KitMixedSemanticMapEnvConfig(),
-    algo_config=MARasterizedPlanningConfig(),
-    registered_name="l5_ma_rasterized_plan"
+    algo_config=AgentPredictorConfig(),
+    registered_name="l5_agent_predictor"
 )
 
-EXP_CONFIG_REGISTRY["l5_mixed_plan"] = ExperimentConfig(
-    train_config=L5KitMixedTrainConfig(),
+EXP_CONFIG_REGISTRY["l5_vae"] = ExperimentConfig(
+    train_config=L5KitTrainConfig(),
     env_config=L5KitMixedSemanticMapEnvConfig(),
-    algo_config=L5RasterizedPlanningConfig(),
-    registered_name="l5_mixed_plan",
+    algo_config=VAEConfig(),
+    registered_name="l5_vae",
 )
 
-EXP_CONFIG_REGISTRY["l5_gan_plan"] = ExperimentConfig(
-    train_config=L5KitMixedTrainConfig(),
+EXP_CONFIG_REGISTRY["l5_bc_ec"] = ExperimentConfig(
+    train_config=L5KitTrainConfig(),
     env_config=L5KitMixedSemanticMapEnvConfig(),
-    algo_config=L5RasterizedGANConfig(),
-    registered_name="l5_gan_plan",
+    algo_config=BehaviorCloningECConfig(),
+    registered_name="l5_bc_ec",
 )
 
-EXP_CONFIG_REGISTRY["l5_mixed_vae_plan"] = ExperimentConfig(
-    train_config=L5KitMixedTrainConfig(),
+EXP_CONFIG_REGISTRY["l5_discrete_vae"] = ExperimentConfig(
+    train_config=L5KitTrainConfig(),
     env_config=L5KitMixedSemanticMapEnvConfig(),
-    algo_config=L5RasterizedVAEConfig(),
-    registered_name="l5_mixed_vae_plan",
+    algo_config=DiscreteVAEConfig(),
+    registered_name="l5_discrete_vae",
 )
 
-EXP_CONFIG_REGISTRY["l5_mixed_ec_plan"] = ExperimentConfig(
-    train_config=L5KitMixedTrainConfig(),
+EXP_CONFIG_REGISTRY["l5_tree_vae"] = ExperimentConfig(
+    train_config=L5KitTrainConfig(),
     env_config=L5KitMixedSemanticMapEnvConfig(),
-    algo_config=L5RasterizedECConfig(),
-    registered_name="l5_mixed_ec_plan",
+    algo_config=TreeVAEConfig(),
+    registered_name="l5_tree_vae",
 )
 
-EXP_CONFIG_REGISTRY["l5_mixed_discrete_vae_plan"] = ExperimentConfig(
-    train_config=L5KitMixedTrainConfig(),
-    env_config=L5KitMixedSemanticMapEnvConfig(),
-    algo_config=L5RasterizedDiscreteVAEConfig(),
-    registered_name="l5_mixed_discrete_vae_plan",
-)
-EXP_CONFIG_REGISTRY["l5_mixed_tree_vae_plan"] = ExperimentConfig(
-    train_config=L5KitMixedTrainConfig(),
-    env_config=L5KitMixedSemanticMapEnvConfig(),
-    algo_config=L5RasterizedTreeVAEConfig(),
-    registered_name="l5_mixed_tree_vae_plan",
-)
-
-EXP_CONFIG_REGISTRY["l5_mixed_transformer_plan"] = ExperimentConfig(
-    train_config=L5KitMixedTrainConfig(),
+EXP_CONFIG_REGISTRY["l5_transformer"] = ExperimentConfig(
+    train_config=L5KitTrainConfig(),
     env_config=L5KitMixedEnvConfig(),
-    algo_config=L5TransformerPredConfig(),
-    registered_name="l5_mixed_transformer_plan",
+    algo_config=TransformerPredConfig(),
+    registered_name="l5_transformer",
 )
 
-EXP_CONFIG_REGISTRY["l5_mixed_transformerGAN_plan"] = ExperimentConfig(
-    train_config=L5KitMixedTrainConfig(),
+EXP_CONFIG_REGISTRY["l5_transformer_gan"] = ExperimentConfig(
+    train_config=L5KitTrainConfig(),
     env_config=L5KitMixedEnvConfig(),
-    algo_config=L5TransformerGANConfig(),
-    registered_name="l5_mixed_transformerGAN_plan",
+    algo_config=TransformerGANConfig(),
+    registered_name="l5_transformer_gan",
 )
 
 EXP_CONFIG_REGISTRY["l5_ebm"] = ExperimentConfig(
-    train_config=L5KitMixedTrainConfig(),
+    train_config=L5KitTrainConfig(),
     env_config=L5KitMixedSemanticMapEnvConfig(),
     algo_config=EBMMetricConfig(),
     registered_name="l5_ebm",
 )
 
 EXP_CONFIG_REGISTRY["l5_occupancy"] = ExperimentConfig(
-    train_config=L5KitMixedTrainConfig(),
+    train_config=L5KitTrainConfig(),
     env_config=L5KitMixedSemanticMapEnvConfig(),
     algo_config=OccupancyMetricConfig(),
     registered_name="l5_occupancy"
 )
 
-EXP_CONFIG_REGISTRY["l5_rasterized_ebm"] = ExperimentConfig(
-    train_config=L5KitTrainConfig(),
-    env_config=L5KitEnvConfig(),
-    algo_config=EBMMetricConfig(),
-    registered_name="l5_rasterized_ebm",
-)
-
-EXP_CONFIG_REGISTRY["l5_hier_agent_aware"] = ExperimentConfig(
-    train_config=L5KitMixedTrainConfig(),
-    env_config=L5KitMixedSemanticMapEnvConfig(),
-    algo_config=HierachicalAgentAwareConfig(),
-    registered_name="l5_hier_agent_aware"
-)
-
-
-EXP_CONFIG_REGISTRY["nusc_rasterized_plan"] = ExperimentConfig(
+EXP_CONFIG_REGISTRY["nusc_bc"] = ExperimentConfig(
     train_config=NuscTrainConfig(),
     env_config=NuscEnvConfig(),
-    algo_config=L5RasterizedPlanningConfig(),
-    registered_name="nusc_rasterized_plan"
+    algo_config=BehaviorCloningConfig(),
+    registered_name="nusc_bc"
+)
+
+EXP_CONFIG_REGISTRY["nusc_bc_gc"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=BehaviorCloningGCConfig(),
+    registered_name="nusc_bc_gc"
 )
 
 EXP_CONFIG_REGISTRY["nusc_spatial_planner"] = ExperimentConfig(
@@ -157,46 +143,32 @@ EXP_CONFIG_REGISTRY["nusc_spatial_planner"] = ExperimentConfig(
     registered_name="nusc_spatial_planner"
 )
 
-EXP_CONFIG_REGISTRY["nusc_vae_plan"] = ExperimentConfig(
+EXP_CONFIG_REGISTRY["nusc_vae"] = ExperimentConfig(
     train_config=NuscTrainConfig(),
     env_config=NuscEnvConfig(),
-    algo_config=L5RasterizedVAEConfig(),
-    registered_name="nusc_vae_plan"
+    algo_config=VAEConfig(),
+    registered_name="nusc_vae"
 )
 
-EXP_CONFIG_REGISTRY["nusc_discrete_vae_plan"] = ExperimentConfig(
+EXP_CONFIG_REGISTRY["nusc_discrete_vae"] = ExperimentConfig(
     train_config=NuscTrainConfig(),
     env_config=NuscEnvConfig(),
-    algo_config=L5RasterizedDiscreteVAEConfig(),
-    registered_name="nusc_discrete_vae_plan"
+    algo_config=DiscreteVAEConfig(),
+    registered_name="nusc_discrete_vae"
 )
 
-EXP_CONFIG_REGISTRY["nusc_ma_rasterized_plan"] = ExperimentConfig(
+EXP_CONFIG_REGISTRY["nusc_agent_predictor"] = ExperimentConfig(
     train_config=NuscTrainConfig(),
     env_config=NuscEnvConfig(),
-    algo_config=MARasterizedPlanningConfig(),
-    registered_name="nusc_ma_rasterized_plan"
+    algo_config=AgentPredictorConfig(),
+    registered_name="nusc_agent_predictor"
 )
 
-EXP_CONFIG_REGISTRY["nusc_gan_plan"] = ExperimentConfig(
+EXP_CONFIG_REGISTRY["nusc_gan"] = ExperimentConfig(
     train_config=NuscTrainConfig(),
     env_config=NuscEnvConfig(),
-    algo_config=L5RasterizedGANConfig(),
-    registered_name="nusc_gan_plan"
-)
-
-EXP_CONFIG_REGISTRY["nusc_hier_agent_aware"] = ExperimentConfig(
-    train_config=NuscTrainConfig(),
-    env_config=NuscEnvConfig(),
-    algo_config=HierachicalAgentAwareConfig(),
-    registered_name="nusc_hier_agent_aware"
-)
-
-EXP_CONFIG_REGISTRY["nusc_rasterized_gc"] = ExperimentConfig(
-    train_config=NuscTrainConfig(),
-    env_config=NuscEnvConfig(),
-    algo_config=L5RasterizedGCConfig(),
-    registered_name="nusc_rasterized_gc"
+    algo_config=GANConfig(),
+    registered_name="nusc_gan"
 )
 
 EXP_CONFIG_REGISTRY["nusc_occupancy"] = ExperimentConfig(
@@ -206,7 +178,10 @@ EXP_CONFIG_REGISTRY["nusc_occupancy"] = ExperimentConfig(
     registered_name="nusc_occupancy"
 )
 
+
 def get_registered_experiment_config(registered_name):
+    registered_name = backward_compatible_translate(registered_name)
+
     if registered_name not in EXP_CONFIG_REGISTRY.keys():
         raise KeyError(
             "'{}' is not a registered experiment config please choose from {}".format(
@@ -214,3 +189,26 @@ def get_registered_experiment_config(registered_name):
             )
         )
     return EXP_CONFIG_REGISTRY[registered_name].clone()
+
+
+def backward_compatible_translate(registered_name):
+    """Try to translate registered name to maintain backward compatibility."""
+    translation = {
+        "l5_mixed_plan": "l5_bc",
+        "l5_mixed_gc": "l5_bc_gc",
+        "l5_ma_rasterized_plan": "l5_agent_predictor",
+        "l5_gan_plan": "l5_gan",
+        "l5_mixed_ec_plan": "l5_bc_ec",
+        "l5_mixed_vae_plan": "l5_vae",
+        "l5_mixed_discrete_vae_plan": "l5_discrete_vae",
+        "l5_mixed_tree_vae_plan": "l5_tree_vae",
+        "nusc_rasterized_plan": "nusc_bc",
+        "nusc_mixed_gc": "nusc_bc_gc",
+        "nusc_ma_rasterized_plan": "nusc_agent_predictor",
+        "nusc_gan_plan": "nusc_gan",
+        "nusc_vae_plan": "nusc_vae",
+        "nusc_mixed_tree_vae_plan": "nusc_tree_vae",
+    }
+    if registered_name in translation:
+        registered_name = translation[registered_name]
+    return registered_name

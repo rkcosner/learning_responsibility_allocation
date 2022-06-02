@@ -13,7 +13,7 @@ from tbsim.utils.metrics import OrnsteinUhlenbeckPerturbation
 import torch
 
 from tbsim.utils.batch_utils import set_global_batch_type
-from tbsim.configs.eval_configs import EvaluationConfig
+from tbsim.configs.eval_config import EvaluationConfig
 from tbsim.utils.env_utils import rollout_episodes
 from tbsim.evaluation.env_builders import EnvNuscBuilder, EnvL5Builder
 
@@ -157,6 +157,7 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
                 info["scene_index"],
                 h5_path=eval_cfg.experience_hdf5_path
             )
+        torch.cuda.empty_cache()
 
 
 def dump_episode_buffer(buffer, scene_index, h5_path):
@@ -219,7 +220,21 @@ if __name__ == "__main__":
         "--ckpt_root_dir",
         type=str,
         default=None,
+        help="Root directory to look for training run directories"
+    )
+
+    parser.add_argument(
+        "--policy_ckpt_dir",
+        type=str,
+        default=None,
         help="Directory to look for saved checkpoints"
+    )
+
+    parser.add_argument(
+        "--policy_ckpt_key",
+        type=str,
+        default=None,
+        help="A string that uniquely identifies a checkpoint file within a directory, e.g., iter50000"
     )
 
     parser.add_argument(
@@ -251,13 +266,6 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--mode",
-        type=str,
-        default="evaluate_rollout",
-        choices=["record_rollout", "evaluate_replay", "evaluate_rollout"],
-    )
-
-    parser.add_argument(
         "--seed",
         type=int,
         default=None
@@ -282,6 +290,11 @@ if __name__ == "__main__":
 
     if args.ckpt_root_dir is not None:
         cfg.ckpt_root_dir = args.ckpt_root_dir
+
+    if args.policy_ckpt_dir is not None:
+        assert args.policy_ckpt_key is not None, "Please specify a key to look for the checkpoint, e.g., 'iter50000'"
+        cfg.ckpt.policy.ckpt_dir = args.policy_ckpt_dir
+        cfg.ckpt.policy.ckpt_key = args.policy_ckpt_key
 
     if args.num_scenes_per_batch is not None:
         cfg.num_scenes_per_batch = args.num_scenes_per_batch
@@ -314,6 +327,7 @@ if __name__ == "__main__":
 
     for k in cfg[cfg.env]:  # copy env-specific config to the global-level
         cfg[k] = cfg[cfg.env][k]
+
     cfg.pop("nusc")
     cfg.pop("l5kit")
 
@@ -322,29 +336,10 @@ if __name__ == "__main__":
             ckpt_info = yaml.safe_load(f)
             cfg.ckpt.update(**ckpt_info)
 
-    data_to_disk = False
-    skimp_rollout = False
-    compute_metrics = False
-
-    if args.mode == "record_rollout":
-        data_to_disk = True
-        skimp_rollout = True
-        compute_metrics = False
-    elif args.mode == "evaluate_replay":
-        cfg.eval_class = "ReplayAction"
-        cfg.n_step_action = 1
-        data_to_disk = False
-        skimp_rollout = False
-        compute_metrics = True
-    elif args.mode == "evaluate_rollout":
-        data_to_disk = True
-        skimp_rollout = False
-        compute_metrics = True
-
     cfg.lock()
     run_evaluation(
         cfg,
         save_cfg=True,
-        data_to_disk=data_to_disk,
+        data_to_disk=True,
         render_to_video=args.render
     )

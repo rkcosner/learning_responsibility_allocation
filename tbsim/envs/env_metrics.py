@@ -265,6 +265,7 @@ class CollisionRate(EnvMetrics):
 
 
 class CriticalFailure(EnvMetrics):
+    """Metrics that report failures caused by either collision or offroad"""
     def __init__(self, num_collision_frames=1, num_offroad_frames=3):
         super(CriticalFailure, self).__init__()
         self._num_offroad_frames = num_offroad_frames
@@ -573,9 +574,8 @@ class LearnedCVAENLL(EnvMetrics):
         assert len(self.state_buffer) >= self.traj_len+1
         all_scene_index = np.unique(self.state_buffer[-self.traj_len-1]["scene_index"])
         ep_metrics = self.compute_metric(self.state_buffer[-self.traj_len-1:], all_scene_index)
-
-
         return ep_metrics
+
 
 class LearnedCVAENLLRolling(LearnedCVAENLL):
     def __init__(self, metric_algo, rolling_horizon=None, perturbations=None):

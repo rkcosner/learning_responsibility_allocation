@@ -25,6 +25,7 @@ def batch_utils():
 
 
 class BatchUtils(object):
+    """A base class for processing environment-independent batches"""
     @staticmethod
     def get_last_available_index(avails):
         """
@@ -95,7 +96,7 @@ class BatchUtils(object):
         raise NotImplementedError
 
     @staticmethod
-    def gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types):
+    def gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types, mask=None):
         raise NotImplementedError
 
     @staticmethod
@@ -108,6 +109,7 @@ class BatchUtils(object):
 
 
 class L5BatchUtils(BatchUtils):
+    """Batch utils for L5Kit"""
     @staticmethod
     def parse_batch(data_batch):
         return data_batch
@@ -133,8 +135,8 @@ class L5BatchUtils(BatchUtils):
         return l5_utils.gen_ego_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types)
 
     @staticmethod
-    def gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types):
-        return l5_utils.gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types)
+    def gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types, mask=None):
+        return l5_utils.gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types, mask)
 
     @staticmethod
     def get_drivable_region_map(rasterized_map):
@@ -146,6 +148,7 @@ class L5BatchUtils(BatchUtils):
 
 
 class AVDataBatchUtils(BatchUtils):
+    """Batch utils for AVData"""
     @staticmethod
     def parse_batch(data_batch):
         return av_utils.parse_avdata_batch(data_batch)

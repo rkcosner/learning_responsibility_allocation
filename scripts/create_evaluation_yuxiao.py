@@ -3,7 +3,7 @@ import argparse
 import os.path
 
 import yaml
-from tbsim.configs.eval_configs import EvaluationConfig
+from tbsim.configs.eval_config import EvaluationConfig
 
 from tbsim.utils.experiment_utils import ParamConfig, create_evaluation_configs, ParamSearchPlan, ParamRange, Param
 
@@ -19,9 +19,9 @@ def configs_to_search(base_cfg):
                                                 ParamRange("num_episode_repeats", alias="repeats", range=[4]),
                                                 ParamRange("cvae.rolling", alias="cr", range=[True]),
                                                 ParamRange("occupancy.rolling", alias="or", range=[True]),
-                                                ParamRange("rolling_perturb.enabled", alias="rp", range=[True]),
-                                                ParamRange("policy.pos_to_yaw", alias="p2y", range=[False]),
-                                                ParamRange("rolling_perturb.OU.sigma", alias="sigma", range=[0.0,0.1,0.2,0.5,1.0,2.0]),
+                                                ParamRange("rolling_perturb.enabled", alias="rp", range=[False]),
+                                                ParamRange("policy.pos_to_yaw", alias="p2y", range=[True]),
+                                                # ParamRange("rolling_perturb.OU.sigma", alias="sigma", range=[0.0,0.1,0.2,0.5,1.0,2.0]),
                                                 ]))
         else:
             plan.extend(plan.compose_cartesian([
@@ -32,7 +32,7 @@ def configs_to_search(base_cfg):
                                                 ParamRange("occupancy.rolling", alias="or", range=[True]),
                                                 ParamRange("rolling_perturb.enabled", alias="rp", range=[False]),
                                                 ParamRange("policy.pos_to_yaw", alias="p2y", range=[False]),
-                                                ParamRange("agent_eval_class", alias="ac", range=["HierAgentAware"]),
+                                                ParamRange("agent_eval_class", alias="ac", range=["HierAgentAware","BC","TrafficSim","TPP"]),
                                                 ]))
         
     elif base_cfg.env=="nusc":

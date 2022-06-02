@@ -20,7 +20,7 @@ from tbsim.utils.config_utils import translate_l5kit_cfg, translate_avdata_cfg
 from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.utils.vis_utils import build_visualization_rasterizer_l5kit
 from tbsim.utils.vis_utils import COLORS, draw_agent_boxes
-from tbsim.configs.eval_configs import EvaluationConfig
+from tbsim.configs.eval_config import EvaluationConfig
 import tbsim.utils.tensor_utils as TensorUtils
 from PIL import Image, ImageDraw
 
@@ -72,7 +72,7 @@ def make_segments(x, y):
 
 
 def get_l5_rasterizer(dataset_path):
-    exp_cfg = get_registered_experiment_config("l5_mixed_plan")
+    exp_cfg = get_registered_experiment_config("l5_bc")
     exp_cfg.dataset_path = dataset_path
     os.environ["L5KIT_DATA_FOLDER"] = dataset_path
 
