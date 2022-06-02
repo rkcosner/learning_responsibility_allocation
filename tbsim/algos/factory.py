@@ -2,7 +2,7 @@
 from pytorch_lightning import LightningDataModule
 from tbsim.configs.base import ExperimentConfig
 
-from tbsim.algos.l5kit_algos import (
+from tbsim.algos.algos import (
     BehaviorCloning,
     TransformerTrafficModel,
     TransformerGANTrafficModel,

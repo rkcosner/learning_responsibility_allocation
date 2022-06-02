@@ -1,5 +1,5 @@
 """A script for evaluating closed-loop simulation"""
-from tbsim.algos.l5kit_algos import (
+from tbsim.algos.algos import (
     BehaviorCloning,
     TreeVAETrafficModel,
     VAETrafficModel,
