@@ -1,4 +1,4 @@
-from tbsim.algos.l5kit_algos import (
+from tbsim.algos.algos import (
     DiscreteVAETrafficModel,
 )
 

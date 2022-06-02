@@ -14,7 +14,7 @@ from tbsim.policies.common import Action, Plan, Trajectory
 from tbsim.utils.loss_utils import discriminator_loss
 from tbsim.utils.batch_utils import batch_utils
 from tbsim.models.base_models import RasterizedMapUNet
-from tbsim.algos.l5kit_algos import SpatialPlanner
+from tbsim.algos.algos import SpatialPlanner
 from tbsim.utils.geometry_utils import calc_distance_map
 from tbsim.utils.planning_utils import ego_sample_planning
 import tbsim.algos.algo_utils as AlgoUtils
