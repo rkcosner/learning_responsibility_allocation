@@ -212,12 +212,11 @@ def draw_agent_boxes_plt(ax, pos, yaw, extent, raster_from_agent, outline_color,
         ax.add_patch(rect_border)
 
 
-def draw_scene_data(ax, scene_name, scene_data, starting_frame, rasterizer, draw_trajectory=True, ras_pos=None):
+def draw_scene_data(ax, scene_name, scene_data, starting_frame, rasterizer, draw_trajectory=True, traj_len=200, ras_pos=None, linewidth=3.0):
     t = starting_frame
     if ras_pos is None:
         ras_pos = scene_data["centroid"][0, t]
 
-    traj_len = 200
     if isinstance(rasterizer, NuscRenderer):
         state_im, raster_from_world = rasterizer.render(
             ras_pos=ras_pos,
@@ -227,7 +226,6 @@ def draw_scene_data(ax, scene_name, scene_data, starting_frame, rasterizer, draw
             scene_name=scene_name
         )
         extent_scale = 1.0
-        linewidth = 3.0
     else:
         state_im, raster_from_world = get_state_image_l5(
             rasterizer,
@@ -236,7 +234,6 @@ def draw_scene_data(ax, scene_name, scene_data, starting_frame, rasterizer, draw
             ras_yaw=np.pi
         )
         extent_scale = 1.0
-        linewidth = 3.0
     ax.imshow(state_im)
 
     if draw_trajectory:
@@ -289,7 +286,7 @@ def preprocess(scene_data):
     for k in scene_data.keys():
         data[k] = scene_data[k][:].copy()
 
-    data["yaw"] = savgol_filter(data["yaw"], 10, 3)
+    data["yaw"] = savgol_filter(data["yaw"], 11, 3)
     return data
 
 
@@ -308,7 +305,9 @@ def scene_to_video(rasterizer, h5f, scene_index, output_dir):
                 scene_data,
                 frame_i,
                 rasterizer,
-                draw_trajectory=False,
+                draw_trajectory=True,
+                traj_len=20,
+                linewidth=2.0,
                 ras_pos=scene_data["centroid"][0, 0]
             )
 
