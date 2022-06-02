@@ -5,10 +5,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributions as distributions
+import random
 
 import tbsim.models.base_models as base_models
+from tbsim.models.Transformer import SimpleTransformer
 import tbsim.models.vaes as vaes
 import tbsim.utils.tensor_utils as TensorUtils
+import tbsim.utils.geometry_utils as GeoUtils
 from tbsim.utils.batch_utils import batch_utils
 from tbsim.utils.loss_utils import (
     trajectory_loss,
@@ -1251,4 +1254,410 @@ class RasterizedTreeVAEModel(nn.Module):
         if self.dyn is not None:
             losses["yaw_reg_loss"] = torch.mean(pred_batch["x_recons"]["controls"][..., 1] ** 2)
 
+        return losses
+
+
+class RasterizedSceneTreeModel(nn.Module):
+    def __init__(self, algo_config, modality_shapes, weights_scaling):
+        super(RasterizedSceneTreeModel, self).__init__()
+        trajectory_shape = (algo_config.num_frames_per_stage, 3)
+        self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
+        self.shuffle = algo_config.shuffle
+        self.map_encoder = base_models.RasterizedMapEncoder(
+            model_arch=algo_config.model_architecture,
+            input_image_shape=modality_shapes["image"],
+            feature_dim=algo_config.map_feature_dim,
+            use_spatial_softmax=algo_config.spatial_softmax.enabled,
+            spatial_softmax_kwargs=algo_config.spatial_softmax.kwargs,
+        )
+        self.stage = algo_config.stage
+        self.num_frames_per_stage=algo_config.num_frames_per_stage
+        if algo_config.vae.recon_loss_type=="MSE":
+            algo_config.vae.decoder.Gaussian_var=False
+
+        traj_decoder = base_models.MLPTrajectoryDecoder(
+            feature_dim=algo_config.vae.condition_dim + algo_config.vae.latent_dim,
+            state_dim=trajectory_shape[-1],
+            num_steps=algo_config.num_frames_per_stage,
+            dynamics_type=algo_config.dynamics.type,
+            dynamics_kwargs=algo_config.dynamics,
+            network_kwargs=algo_config.decoder,
+            step_time=algo_config.step_time,
+            Gaussian_var=algo_config.vae.decoder.Gaussian_var
+        )
+        self.recon_loss_type = algo_config.vae.recon_loss_type
+        
+        if algo_config.goal_conditional:
+            goal_encoder = base_models.MLP(
+                input_dim=traj_decoder.state_dim,
+                output_dim=algo_config.goal_feature_dim,
+                output_activation=nn.ReLU
+            )
+        else:
+            goal_encoder = None
+        c_encoder = base_models.ECEncoder(
+            map_encoder=self.map_encoder.output_shape()[0]+self.stage, # adding the stage info, TODO: make it less hacky
+            trajectory_shape=trajectory_shape,  # [T, D]
+            EC_dim=algo_config.EC_feat_dim,
+            condition_dim=algo_config.vae.condition_dim, 
+            mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
+            goal_encoder=goal_encoder,
+            rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size)
+
+        q_encoder = base_models.ScenePosteriorEncoder(
+            condition_dim=algo_config.vae.condition_dim,
+            trajectory_shape=trajectory_shape,
+            output_shapes=OrderedDict(logq=(algo_config.vae.latent_dim,)),
+            mlp_layer_dims=algo_config.vae.encoder.mlp_layer_dims,
+            rnn_hidden_size=algo_config.vae.encoder.rnn_hidden_size
+        )
+        p_encoder = base_models.SplitMLP(
+            input_dim=algo_config.vae.condition_dim,
+            layer_dims=algo_config.vae.encoder.mlp_layer_dims,
+            output_shapes=OrderedDict(logp=(algo_config.vae.latent_dim,))
+        )
+        
+        decoder = base_models.ConditionDecoder(traj_decoder)
+        if "logpi_clamp" in algo_config.vae:
+            logpi_clamp = algo_config.vae.logpi_clamp
+        else:
+            logpi_clamp=None
+
+        transformer = SimpleTransformer(src_dim=algo_config.vae.condition_dim)    
+        self.vae = vaes.SceneDiscreteCVAE(
+            q_net=q_encoder,
+            p_net=p_encoder,
+            c_net=c_encoder,
+            decoder=decoder,
+            transformer = transformer,
+            K=algo_config.vae.latent_dim,
+            logpi_clamp=logpi_clamp
+        )
+        self.dyn = traj_decoder.dyn
+        if self.dyn is None:
+            rnn_input_dim = trajectory_shape[1]
+        else:
+            rnn_input_dim = self.dyn.udim
+        self.FeatureRoller = base_models.RNNFeatureRoller(rnn_input_dim,algo_config.map_feature_dim)
+        self.algo_config = algo_config
+    def _traj_to_preds(self, traj):
+        pred_positions = traj[..., :2]
+        pred_yaws = traj[..., 2:3]
+        return {
+            "trajectories": traj,
+            "predictions": {"positions": pred_positions, "yaws": pred_yaws}
+        }
+    def _get_goal_states(self, data_batch) -> torch.Tensor:
+        if data_batch["target_positions"].ndim==3:
+            target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=-1)
+            goal_inds = batch_utils().get_last_available_index(data_batch["target_availabilities"][...,:self.stage*self.num_frames_per_stage])  # [B]
+            goal_state = torch.gather(
+                target_traj,  # [B, T, 3]
+                dim=1,
+                index=goal_inds[..., None, None].expand(-1, 1, target_traj.shape[-1])  # [B, 1, 3]
+            ).squeeze(1)  # -> [B, 3]
+            agent_target_traj = torch.cat((data_batch["all_other_agents_future_positions"], data_batch["all_other_agents_future_yaws"]), dim=-1)
+            goal_inds = batch_utils().get_last_available_index(data_batch["all_other_agents_future_availability"][...,:self.stage*self.num_frames_per_stage])
+            agent_goal_state = torch.gather(
+                agent_target_traj,  # [B, A, T, 3]
+                dim=-2,
+                index=goal_inds[:,:, None, None].expand(-1,-1, 1, agent_target_traj.shape[-1])  # [B, A, 1, 3]
+            ).squeeze(-2)
+            goal = torch.cat((goal_state,agent_goal_state),1)
+        elif data_batch["target_positions"].ndim==4:
+            target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=-1)
+            goal_inds = batch_utils().get_last_available_index(data_batch["target_availabilities"][...,:self.stage*self.num_frames_per_stage])  # [B, A]
+            goal = torch.gather(
+                target_traj,  # [B, A, T, 3]
+                dim=-2,
+                index=goal_inds[:,:, None, None].expand(-1,-1, 1, target_traj.shape[-1])  # [B, A, 1, 3]
+            ).squeeze(-2)
+        return goal
+
+
+    def forward(self, batch_inputs: dict,predict=False,**kwargs):
+        if batch_inputs["target_positions"].ndim==3:
+            assert batch_inputs["target_positions"].shape[-2]>=self.stage*self.num_frames_per_stage
+            bs,Na, = batch_inputs["all_other_agents_future_positions"].shape[:2]
+            Na = Na+1
+            agent_avail = batch_inputs["agent_raster_availability"]
+            device = agent_avail.device
+            
+            ego_traj = torch.cat((batch_inputs["target_positions"], batch_inputs["target_yaws"]), dim=-1)
+            agent_traj = torch.cat((batch_inputs["all_other_agents_future_positions"], batch_inputs["all_other_agents_future_yaws"]), dim=-1)
+            trajectories = torch.cat((ego_traj.unsqueeze(1),agent_traj),1)
+            agent_avail = torch.cat((torch.ones([bs,1]).to(device),agent_avail),1)
+            
+            curr_yaw = torch.cat((batch_inputs["history_yaws"][:,0].unsqueeze(1),batch_inputs["all_other_agents_history_yaws"][:,:,0]),1)
+            agent_from_world = torch.cat((batch_inputs["agent_from_world"].unsqueeze(1),batch_inputs["other_agents_agent_from_world"]),1).float()
+            ego_to_agent = agent_from_world@(batch_inputs["world_from_agent"].float().unsqueeze(1))
+            agent_to_ego,_ = torch.linalg.inv_ex(ego_to_agent)
+            agent_to_ego = agent_to_ego.nan_to_num(nan=0.0, posinf=0.0, neginf=0.0)
+            num_agent = [agent_idx[i].shape[0] for i in range(bs)]
+
+        elif batch_inputs["target_positions"].ndim==4:
+            bs,Na, = batch_inputs["target_positions"].shape[:2]
+            agent_avail = batch_inputs["agent_type"]>0
+            device = agent_avail.device
+            trajectories = torch.cat((batch_inputs["target_positions"], batch_inputs["target_yaws"]), dim=-1)
+            curr_yaw = batch_inputs["history_yaws"][:,:,-1]
+            agent_from_world = batch_inputs["agents_from_center"]@(batch_inputs["agent_from_world"].unsqueeze(1))*agent_avail[...,None,None]
+            ego_to_agent = batch_inputs["agents_from_center"]*agent_avail[...,None,None]
+            agent_to_ego = batch_inputs["center_from_agents"]*agent_avail[...,None,None]
+            num_agent = batch_inputs["num_agents"].tolist()
+        
+        agent_idx = [torch.where(agent_avail[i])[0] for i in range(bs)]
+
+        H = self.num_frames_per_stage
+        if self.algo_config.goal_conditional:
+            if "goal" in kwargs and kwargs["goal"] is not None:
+                goal = kwargs["goal"]
+            else:
+                goal = self._get_goal_states(batch_inputs)
+            goal_pos = GeoUtils.batch_nd_transform_points(goal[...,:2],ego_to_agent)
+            goal_yaw = goal[...,2:]-curr_yaw
+            goal = torch.cat((goal_pos,goal_yaw),-1)
+        else:
+            goal = None
+        if batch_inputs["image"].ndim==4:
+            images = torch.cat((batch_inputs["image"].unsqueeze(1),batch_inputs["other_agents_image"]),dim=1)
+        else:
+            images = batch_inputs["image"]
+        map_feat=self.map_encoder(TensorUtils.join_dimensions(images,0,2)).reshape(bs,Na,-1)
+        curr_map_feat = map_feat
+        preds = list()
+        decoder_kwargs = dict()
+        
+        if "cond_traj" not in kwargs:
+            if self.shuffle:
+                cond_idx = [random.choice(agent_idx[i]) if num_agent[i]>1 else -1 for i in range(bs)]
+            else:
+                cond_idx = [0 if num_agent[i]>1 else -1 for i in range(bs)]
+            cond_traj_local = [trajectories[i,cond_idx[i]] if cond_idx[i]>=0 else torch.zeros_like(trajectories[i,cond_idx[i]]) for i in range(bs)]
+            cond_traj_local = torch.stack(cond_traj_local,0)[...,:self.stage*self.num_frames_per_stage,:]
+            cond_traj_local = cond_traj_local.unsqueeze(1)
+            agent_avail[torch.arange(bs).to(device),cond_idx] = 0
+        else:
+            cond_traj_local = kwargs["cond_traj"]
+            cond_idx = None
+        if cond_traj_local is not None:
+            M = cond_traj_local.shape[1]
+            cond_traj_local = TensorUtils.join_dimensions(cond_traj_local,0,2)
+            
+            curr_yaw = curr_yaw.repeat_interleave(M,0)
+            agent_avail_tiled = agent_avail.repeat_interleave(M,0)
+            curr_map_feat = curr_map_feat.repeat_interleave(M,0)
+            if goal is not None:
+                goal = goal.repeat_interleave(M,0)
+
+            cond_pos = GeoUtils.batch_nd_transform_points(cond_traj_local[...,:2].unsqueeze(1),ego_to_agent.repeat_interleave(M,0).unsqueeze(2))
+            cond_yaw = cond_traj_local[...,2:].unsqueeze(1)-curr_yaw.unsqueeze(2)
+            cond_traj = torch.cat((cond_pos,cond_yaw),-1)
+            cond_traj_total = cond_traj*agent_avail_tiled[...,None,None]
+            cond_traj_total = cond_traj_total[...,:self.stage*self.num_frames_per_stage,:]
+            cond_traj = list()
+            for t in range(self.stage):
+                cond_traj.append(TensorUtils.slice_tensor(cond_traj_total,2,t*H,(t+1)*H))
+        else:
+            agent_avail_tiled = agent_avail
+            cond_traj = None
+            M = 1
+
+        for t in range(self.stage):      
+            batch_shape = [bs,M]+[self.vae.K]*t
+            
+            if self.dyn is not None:
+                if t==0:
+                    current_states = batch_utils().get_current_states_all_agents(batch_inputs, self.algo_config.step_time,self.dyn.type())
+                    local_pos = GeoUtils.batch_nd_transform_points(current_states[...,:2],ego_to_agent)
+                    local_yaw = current_states[...,3:]-curr_yaw
+                    current_states_local = torch.cat((local_pos,current_states[...,2:3],local_yaw),-1)
+                    current_states_local = current_states_local.repeat_interleave(M,0)
+                    decoder_kwargs["current_states"] = current_states_local
+                    pos = current_states[...,:2]
+                else:
+                    current_states_local = outs["x_recons"]["terminal_state"]
+                    pos = TensorUtils.join_dimensions(outs["x_recons"]["trajectories"][...,-1,:2],0,t+2)
+                    decoder_kwargs["current_states"] = TensorUtils.join_dimensions(current_states_local,0,t+2)
+            if t==0:
+                map_feat_t = curr_map_feat
+            else:
+                if goal is not None:
+                    goal = TensorUtils.repeat_by_expand_at(goal,self.vae.K,0)
+
+                curr_map_feat = TensorUtils.unsqueeze_expand_at(curr_map_feat,self.vae.K,-2).contiguous()
+                curr_map_feat = TensorUtils.join_dimensions(curr_map_feat,0,2).contiguous()
+                input_seq = outs["controls"]
+                
+                input_seq_tran = input_seq.reshape(-1,*input_seq.shape[-2:])
+                    
+                curr_map_feat = self.FeatureRoller(curr_map_feat.reshape(-1,*curr_map_feat.shape[-1:]),input_seq_tran)
+                curr_map_feat = TensorUtils.reshape_dimensions(curr_map_feat,0,1,(-1,Na))
+                map_feat_t = curr_map_feat
+            stage_enc = torch.ones_like(map_feat_t[...,0],dtype=torch.int64)*t
+            stage_enc = TensorUtils.to_one_hot(stage_enc,num_class=self.stage)
+            
+            condition_inputs = OrderedDict(map_feature=torch.cat((map_feat_t,stage_enc),-1), goal=goal)
+            if not predict:
+                GT_traj = trajectories[...,t*H:(t+1)*H,:]
+                inputs = OrderedDict(trajectories=GT_traj.tile(self.vae.K**t*M,1,1,1))
+            else:
+                inputs=None
+            cond_traj_tiled = cond_traj[t].repeat_interleave(int(math.prod(batch_shape[2:])),0) if cond_traj is not None else None
+
+            outs = self.vae.forward(inputs=inputs, 
+                                    condition_inputs=condition_inputs, 
+                                    mask = agent_avail_tiled.repeat_interleave(self.vae.K**t,0),
+                                    pos = pos,
+                                    cond_traj=cond_traj_tiled, 
+                                    decoder_kwargs=decoder_kwargs)
+            
+            outs["x_recons"] = TensorUtils.recursive_dict_list_tuple_apply(outs["x_recons"],{torch.Tensor:lambda x:x.transpose(1,2)})
+            rep = int(outs["x_recons"]["trajectories"].shape[0]/agent_to_ego.shape[0])
+            ego_frame_pos = GeoUtils.batch_nd_transform_points(outs["x_recons"]["trajectories"][...,:2],agent_to_ego.repeat_interleave(rep,0)[:,None,:,None,:])
+            ego_frame_yaw = outs["x_recons"]["trajectories"][...,2:]+curr_yaw.repeat_interleave(rep,0)[:,None,:,None,:]
+            outs["x_recons"]["trajectories"] = torch.cat((ego_frame_pos,ego_frame_yaw),-1)
+            outs = TensorUtils.reshape_dimensions(outs,0,1,batch_shape)
+
+            if self.dyn is not None:
+                outs["controls"] = outs["x_recons"]["controls"]
+            preds.append(outs)
+        x_recons = self._batching_from_stages(preds)
+        pred_batch = OrderedDict(x_recons=x_recons)
+        pred_batch.update(self._traj_to_preds(x_recons["trajectories"])) 
+
+        p = preds[-1]["p"]
+        for t in range(self.stage-1):
+            desired_shape = [self.vae.K]*(t+1)+[1]*(self.stage-t-1)
+            p = p*TensorUtils.reshape_dimensions(preds[t]["p"],2,t+3,desired_shape)
+        p = TensorUtils.join_dimensions(p,2,self.stage+2)
+
+        pred_batch["p"] = p
+        if not predict:
+            q = preds[-1]["q"]
+            for t in range(self.stage-1):
+                desired_shape = [self.vae.K]*(t+1)+[1]*(self.stage-t-1)
+                q = q*TensorUtils.reshape_dimensions(preds[t]["q"],2,t+3,desired_shape)
+            q = TensorUtils.join_dimensions(q,2,self.stage+2)
+
+            pred_batch["q"] = q
+        pred_batch["cond_traj"] = cond_traj_local
+        pred_batch["agent_avail"] = agent_avail
+        pred_batch["target_trajectory"] = trajectories
+        pred_batch["cond_idx"] = cond_idx
+
+        return pred_batch
+
+    def _batching_from_stages(self,preds):
+        
+        bs,M = preds[0]["x_recons"]["trajectories"].shape[:2]
+        Na = preds[0]["x_recons"]["trajectories"].shape[-3]
+        outs = {k:list() for k in preds[0]["x_recons"] if k!="terminal_state"} #TODO: make it less hacky
+        
+        for t in range(self.stage):
+            desired_shape = [bs,M]+[self.vae.K]*(t+1)+[1]*(self.stage-t-1)+[Na]
+            repeats = [1]*(t+3)+[self.vae.K]*(self.stage-t-1)+[1]*3
+            for k,v in preds[t]["x_recons"].items():
+                if k!="terminal_state":       
+                    batched_v = TensorUtils.reshape_dimensions_single(v,0,t+4,desired_shape)
+                    batched_v = batched_v.repeat(repeats)
+                    outs[k].append(batched_v)
+
+        for k,v in outs.items():
+            v_cat = torch.cat(v,-2)
+            v_cat = TensorUtils.join_dimensions(v_cat,2,2+self.stage)
+            outs[k] = v_cat
+        return outs
+
+    def sample(self, batch_inputs: dict, n: int):
+        pred_batch = self(batch_inputs,predict=True)
+        dis_p = distributions.Categorical(probs=pred_batch["p"])  # [n_sample, batch] -> [batch, n_sample]
+        z = dis_p.sample((n,)).permute(1, 2, 0)
+        traj = pred_batch["x_recons"]["trajectories"]
+        Na = traj.shape[-3]
+        idx = z[:,:,:,None,None,None].repeat(1,1,1,*traj.shape[-3:])
+        traj_selected = torch.gather(traj,2,idx)
+        prob = torch.gather(pred_batch["p"],2,z)
+
+        outs = self._traj_to_preds(traj_selected)
+        outs["p"] = prob
+
+        return outs
+
+    def predict(self, batch_inputs: dict):
+        pred_batch = self(batch_inputs,predict=True,cond_traj=None)
+        z = torch.argmax(pred_batch["p"],-1)
+        traj = pred_batch["x_recons"]["trajectories"]
+        bs,M, = traj.shape[:2]
+        Na = traj.shape[-3]
+        
+        idx = z.reshape(bs,M,1,1,1,1).repeat(1,1,1,*traj.shape[-3:])
+        traj_selected = torch.gather(traj,2,idx)
+        
+        traj_selected = traj_selected[:,0].squeeze(1)
+
+        outs = self._traj_to_preds(traj_selected)
+        return outs
+    def compute_losses(self, pred_batch, data_batch):
+        if data_batch["target_positions"].ndim==3:
+            availability = torch.cat((data_batch["target_availabilities"].unsqueeze(1),data_batch["all_other_agents_future_availability"]),1)
+            agents_extent = data_batch["all_other_agents_future_extents"][...,:2].max(dim=2)[0]
+            extent = torch.cat((data_batch["extent"][:,:2].unsqueeze(1),agents_extent),1)
+            raw_type = torch.cat((data_batch["type"].unsqueeze(1),data_batch["all_other_agents_types"]),1)
+        elif data_batch["target_positions"].ndim==4:
+            availability = data_batch["target_availabilities"]
+            extent = data_batch["extent"][...,:2]
+            raw_type = data_batch["type"]
+        bs,M,numMode,Na,T = pred_batch["x_recons"]["trajectories"].shape[:5]
+        target_traj = pred_batch["target_trajectory"]
+        target_traj = target_traj.repeat_interleave(M,0)
+        target_traj = target_traj[...,:T,:]
+        
+        availability = availability[...,:T]*pred_batch["agent_avail"].unsqueeze(-1)
+        traj_pred = TensorUtils.join_dimensions(pred_batch["x_recons"]["trajectories"],0,2)
+        traj_pred_tiled = TensorUtils.join_dimensions(traj_pred,0,2)
+        prob = TensorUtils.join_dimensions(pred_batch["q"],0,2)
+        pred_loss, goal_loss = MultiModal_trajectory_loss(
+            predictions=traj_pred, 
+            targets=target_traj, 
+            availabilities=availability.repeat_interleave(M,0), 
+            prob=prob, 
+            weights_scaling=self.weights_scaling,
+            calc_goal_reach=True,
+        )
+        
+        cond_extent = extent[torch.arange(bs),pred_batch["cond_idx"]]
+        
+        
+        EC_edges,type_mask = batch_utils().gen_EC_edges(
+            traj_pred_tiled,
+            pred_batch["cond_traj"].unsqueeze(1).repeat_interleave(numMode,0).repeat_interleave(Na,1),
+            cond_extent.repeat_interleave(M*numMode,0),
+            extent.repeat_interleave(M*numMode,0),
+            raw_type.repeat_interleave(M*numMode,0),
+            pred_batch["agent_avail"].repeat_interleave(M*numMode,0)
+        )
+        EC_coll_loss = collision_loss_masked(EC_edges,type_mask)/numMode
+        if not isinstance(EC_coll_loss,torch.Tensor):
+            EC_coll_loss = torch.tensor(EC_coll_loss).to(target_traj.device)
+        # compute collision loss
+        
+        pred_edges = batch_utils().generate_edges(
+            (raw_type*pred_batch["agent_avail"]).repeat_interleave(M*numMode,0),
+            extent.repeat_interleave(M*numMode,0),
+            traj_pred_tiled[...,:2],
+            traj_pred_tiled[...,2:]
+        )
+        
+        coll_loss = collision_loss(pred_edges=pred_edges)
+        if not isinstance(coll_loss,torch.Tensor):
+            coll_loss = torch.tensor(coll_loss).to(target_traj.device)
+        losses = OrderedDict(
+            prediction_loss=pred_loss,
+            goal_loss=goal_loss,
+            collision_loss=coll_loss,
+            EC_collision_loss = EC_coll_loss,
+        )
+        if self.dyn is not None:
+            losses["yaw_reg_loss"] = torch.mean(pred_batch["x_recons"]["controls"][..., 1] ** 2 *pred_batch["agent_avail"][:,None,None,:,None])/numMode
         return losses

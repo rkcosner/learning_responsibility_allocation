@@ -56,7 +56,10 @@ class BatchUtils(object):
 
     @classmethod
     def get_current_states_all_agents(cls, batch: dict, step_time, dyn_type: dynamics.DynType) -> torch.Tensor:
-        state_all = cls.batch_to_raw_all_agents(batch, step_time)
+        if batch["history_positions"].ndim==3:
+            state_all = batch_to_raw_all_agents(batch, step_time)
+        else:
+            state_all = batch
         bs, na = state_all["curr_speed"].shape[:2]
         if dyn_type == dynamics.DynType.BICYCLE:
             current_states = torch.zeros(bs, na, 6).to(state_all["curr_speed"].device)  # [x, y, yaw, vel, dh, veh_len]
@@ -68,6 +71,7 @@ class BatchUtils(object):
             current_states = torch.zeros(bs, na, 4).to(state_all["curr_speed"].device)  # [x, y, vel, yaw]
             current_states[:, :, :2] = state_all["history_positions"][:, :, -1]
             current_states[:, :, 2] = state_all["curr_speed"]
+            current_states[:,:,3:] = state_all["history_yaws"][:,:,-1]
         return current_states
 
     @staticmethod
@@ -249,15 +253,15 @@ class AVDataBatchUtils(BatchUtils):
 
     @staticmethod
     def generate_edges(raw_type, extents, pos_pred, yaw_pred):
-        raise NotImplementedError
+        return l5_utils.generate_edges(raw_type, extents, pos_pred, yaw_pred)
 
     @staticmethod
     def gen_ego_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types):
         raise NotImplementedError
 
     @staticmethod
-    def gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types):
-        raise NotImplementedError
+    def gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types, mask=None):
+        return l5_utils.gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types, mask)
 
     @staticmethod
     def get_drivable_region_map(rasterized_map):

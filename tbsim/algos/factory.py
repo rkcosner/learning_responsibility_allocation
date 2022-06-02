@@ -3,6 +3,7 @@ from pytorch_lightning import LightningDataModule
 from tbsim.configs.base import ExperimentConfig
 
 from tbsim.algos.l5kit_algos import (
+    L5SceneTreeTrafficModel,
     L5TrafficModel,
     L5TransformerTrafficModel,
     L5TransformerGANTrafficModel,
@@ -13,6 +14,7 @@ from tbsim.algos.l5kit_algos import (
     GANTrafficModel,
     L5ECTrafficModel,
     L5TreeVAETrafficModel,
+    L5SceneTreeTrafficModel,
 )
 
 from tbsim.algos.multiagent_algos import (
@@ -61,9 +63,10 @@ def algo_factory(config: ExperimentConfig, modality_shapes: dict, data_module: L
             algo_config=algo_config, modality_shapes=modality_shapes
         )
     elif algo_name == "l5_rasterized_tree_vae":
-        algo = L5TreeVAETrafficModel(
-            algo_config=algo_config, modality_shapes=modality_shapes
-        )
+        if algo_config.scene_centric:
+            algo = L5SceneTreeTrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
+        else:
+            algo = L5TreeVAETrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "l5_rasterized_ec":
         algo = L5ECTrafficModel(
             algo_config=algo_config, modality_shapes=modality_shapes

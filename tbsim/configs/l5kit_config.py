@@ -350,7 +350,7 @@ class L5RasterizedDiscreteVAEConfig(L5RasterizedPlanningConfig):
         self.vae.logpi_clamp = -6.0
 
         self.loss_weights.kl_loss = 10
-        self.loss_weights.EC_coll_loss = 10
+        self.loss_weights.EC_collision_loss = 10
         self.loss_weights.deviation_loss = 0.5
         self.eval.mode = "mean"
 
@@ -372,6 +372,8 @@ class L5RasterizedTreeVAEConfig(L5RasterizedPlanningConfig):
         self.goal_feature_dim = 32
         self.stage = 2
         self.num_frames_per_stage = 10
+        self.scene_centric = True
+        self.shuffle = False
 
         self.vae.latent_dim = 4
         self.vae.condition_dim = 128
@@ -385,7 +387,7 @@ class L5RasterizedTreeVAEConfig(L5RasterizedPlanningConfig):
         self.vae.logpi_clamp = -6.0
         self.ego_conditioning = True
         self.EC_feat_dim = 64
-        self.loss_weights.EC_coll_loss = 10
+        self.loss_weights.EC_collision_loss = 10
         self.loss_weights.deviation_loss = 0.5
         self.loss_weights.kl_loss = 10
         self.eval.mode = "sum"

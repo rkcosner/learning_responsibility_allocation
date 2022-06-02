@@ -15,12 +15,10 @@ def configs_to_search(base_cfg):
         if base_cfg.eval_class not in ["HierAgentAwareMPC", "HAASplineSampling"]:
             plan.extend(plan.compose_cartesian([
                                                 ParamRange("l5kit.num_simulation_steps", alias="horizon", range=[200]),
-                                                ParamRange("perturb.enabled", alias="p", range=[False]),
                                                 ParamRange("num_episode_repeats", alias="repeats", range=[4]),
-                                                ParamRange("cvae.rolling", alias="cr", range=[True]),
-                                                ParamRange("occupancy.rolling", alias="or", range=[True]),
                                                 ParamRange("rolling_perturb.enabled", alias="rp", range=[False]),
                                                 ParamRange("policy.pos_to_yaw", alias="p2y", range=[True]),
+                                                ParamRange("policy.cost_weights.collision_weight", alias="coll_weight", range=[50.0,20.0,10.0,3.0]),
                                                 # ParamRange("rolling_perturb.OU.sigma", alias="sigma", range=[0.0,0.1,0.2,0.5,1.0,2.0]),
                                                 ]))
         else:

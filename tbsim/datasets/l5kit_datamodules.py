@@ -109,6 +109,7 @@ class L5RasterizedDataModule(pl.LightningDataModule, L5BaseDatasetModule):
             batch_size=self._train_config.training.batch_size,
             num_workers=self._train_config.training.num_data_workers,
             drop_last=True,
+            persistent_workers=True,
         )
 
     def val_dataloader(self):
@@ -118,6 +119,7 @@ class L5RasterizedDataModule(pl.LightningDataModule, L5BaseDatasetModule):
             batch_size=self._train_config.validation.batch_size,
             num_workers=self._train_config.validation.num_data_workers,
             drop_last=True,
+            persistent_workers=True,
         )
     def test_dataloader(self):
         pass
@@ -144,7 +146,6 @@ class L5MixedDataModule(L5RasterizedDataModule):
 
         train_zarr = ChunkedDataset(dm.require(self._train_config.dataset_train_key)).open()
         valid_zarr = ChunkedDataset(dm.require(self._train_config.dataset_valid_key)).open()
-
         if self._mode == "ego":
             self.train_dataset = EgoDatasetMixed(self._l5_config, train_zarr, self.vectorizer, self.rasterizer)
             self.valid_dataset = EgoDatasetMixed(self._l5_config, valid_zarr, self.vectorizer, self.rasterizer)

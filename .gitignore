@@ -94,3 +94,4 @@ generate_all_evaluations_l5kit.sh
 generate_all_evaluations_nusc.sh
 plot_result_l5kit.ipynb
 plot_result_nusc.ipynb
+plot_result.ipynb

@@ -22,7 +22,6 @@ class EvaluationConfig(Dict):
         self.ego_only = False
         self.agent_eval_class = None
 
-
         self.ckpt_root_dir = "checkpoints/"
         self.experience_hdf5_path = None
         self.results_dir = "results/"
@@ -48,6 +47,7 @@ class EvaluationConfig(Dict):
         self.policy.diversification_clearance = None
         self.policy.sample = True
 
+
         self.policy.cost_weights.collision_weight = 10.0
         self.policy.cost_weights.lane_weight = 1.0
         self.policy.cost_weights.likelihood_weight = 0.0  # 0.1
@@ -58,7 +58,7 @@ class EvaluationConfig(Dict):
 
         self.perturb.enabled = True
         self.perturb.OU.theta = 0.8
-        self.perturb.OU.sigma = [0.1,0.2,0.5,1.0,2.0,4.0]
+        self.perturb.OU.sigma = [0.0, 0.1,0.2,0.5,1.0,2.0,4.0]
         self.perturb.OU.scale = [1.0,1.0,0.2]
 
         self.rolling_perturb.enabled=True

@@ -171,6 +171,13 @@ EXP_CONFIG_REGISTRY["nusc_discrete_vae_plan"] = ExperimentConfig(
     registered_name="nusc_discrete_vae_plan"
 )
 
+EXP_CONFIG_REGISTRY["nusc_tree_vae_plan"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=L5RasterizedTreeVAEConfig(),
+    registered_name="nusc_tree_vae_plan"
+)
+
 EXP_CONFIG_REGISTRY["nusc_ma_rasterized_plan"] = ExperimentConfig(
     train_config=NuscTrainConfig(),
     env_config=NuscEnvConfig(),
