@@ -158,11 +158,11 @@ EXP_CONFIG_REGISTRY["nusc_discrete_vae"] = ExperimentConfig(
     registered_name="nusc_discrete_vae"
 )
 
-EXP_CONFIG_REGISTRY["nusc_tree_vae_plan"] = ExperimentConfig(
+EXP_CONFIG_REGISTRY["nusc_tree_vae"] = ExperimentConfig(
     train_config=NuscTrainConfig(),
     env_config=NuscEnvConfig(),
     algo_config=TreeVAEConfig(),
-    registered_name="nusc_tree_vae_plan"
+    registered_name="nusc_tree_vae"
 )
 
 
