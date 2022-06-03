@@ -269,7 +269,6 @@ class ContingencyPlanner(Policy):
         self.num_frames_per_stage = config.num_frames_per_stage
         self.step_time = config.step_time
         self.tf = self.stage*self.num_frames_per_stage*self.step_time
-
         self.timer = Timers()
     
     def eval(self):
@@ -482,8 +481,6 @@ class HierSplineSamplingPolicy(Policy):
         dis_map = calc_distance_map(drivable_map)
         plan = list()
         for i in range(bs):
-            # import pdb
-            # pdb.set_trace()
             
             agent_idx = torch.where(obs_dict["all_other_agents_types"][i]>0)[0]
             agent_extent = torch.max(obs_dict["all_other_agents_history_extents"][i,agent_idx,:,:2],axis=-2)[0]
