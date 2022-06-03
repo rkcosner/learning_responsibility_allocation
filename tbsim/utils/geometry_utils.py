@@ -1,9 +1,8 @@
-import collections
-from logging import exception, raiseExceptions
 import numpy as np
 import torch
 from tbsim.utils.tensor_utils import round_2pi
 from enum import IntEnum
+
 
 def get_box_agent_coords(pos, yaw, extent):
     corners = (torch.tensor([[-1, -1], [-1, 1], [1, 1], [1, -1]]) * 0.5).to(pos.device) * (

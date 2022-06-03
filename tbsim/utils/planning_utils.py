@@ -2,33 +2,30 @@ from collections import defaultdict
 import numpy as np
 from scipy.interpolate import interp1d
 import torch
-import torch.nn as nn
+
 from tbsim.models.cnn_roi_encoder import obtain_lane_flag
-from tbsim.utils.loss_utils import collision_loss
-from tbsim.utils.l5_utils import gen_ego_edges, gen_EC_edges
+from tbsim.utils.l5_utils import gen_ego_edges
 from tbsim.utils.geometry_utils import (
     VEH_VEH_collision,
     VEH_PED_collision,
-    PED_VEH_collision,
-    PED_PED_collision,
 )
-import tbsim.utils.tensor_utils as TensorUtils
-try:
-    from Pplan.Sampling.tree import Tree
-    class agent_traj_tree(Tree):
-        def __init__(self, traj, parent, depth, prob=None):
-            self.traj = traj
-            self.children = list()
-            self.parent = parent
-            if parent is not None:
-                parent.expand(self)
-            self.depth = depth
-            self.prob = prob
-            self.attribute = dict()
-except:
-    print("cannot find Pplan")
+from Pplan.Sampling.tree import Tree
+class AgentTrajTree(Tree):
+    def __init__(self, traj, parent, depth, prob=None):
+        self.traj = traj
+        self.children = list()
+        self.parent = parent
+        if parent is not None:
+            parent.expand(self)
+        self.depth = depth
+        self.prob = prob
+        self.attribute = dict()
 
-TRAJ_INDEX = [0, 1, 4]
+# The state in Pplan contains more higher order derivatives, TRAJ_INDEX selects x,y, and heading 
+# out of the longer state vector
+TRAJ_INDEX = [0, 1, 4]  
+
+
 def get_collision_loss(
     ego_trajectories,
     agent_trajectories,
@@ -38,6 +35,7 @@ def get_collision_loss(
     prob=None,
     col_funcs=None,
 ):
+    """Get veh-veh and veh-ped collision loss."""
     with torch.no_grad():
         ego_edges, type_mask = gen_ego_edges(
             ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types
@@ -56,7 +54,7 @@ def get_collision_loss(
                 ego_edges[..., 6:8],
                 ego_edges[..., 8:],
             ).min(dim=-1)[0]
-            if dis.nelement()>0:
+            if dis.nelement() > 0:
                 col_loss += torch.max(
                     torch.sigmoid(-dis - 4.0) * type_mask[et].unsqueeze(1), dim=2
                 )[0]
@@ -66,6 +64,7 @@ def get_collision_loss(
 def get_drivable_area_loss(
     ego_trajectories, raster_from_agent, dis_map, ego_extents
 ):
+    """Cost for road departure."""
     with torch.no_grad():
         lane_flags = obtain_lane_flag(
             dis_map,
@@ -81,6 +80,7 @@ def get_drivable_area_loss(
 
 
 def get_total_distance(ego_trajectories):
+    """Reward that incentivizes progress."""
     # Assume format [..., T, 3]
     assert ego_trajectories.shape[-1] == 3
     diff = ego_trajectories[..., 1:, :] - ego_trajectories[..., :-1, :]
@@ -101,6 +101,7 @@ def ego_sample_planning(
         log_likelihood=None,
         col_funcs=None,
 ):
+    """A basic cost function for prediction-and-planning"""
     col_loss = get_collision_loss(
         ego_trajectories,
         agent_trajectories,
@@ -125,9 +126,10 @@ def ego_sample_planning(
     return torch.argmax(total_score, dim=1)
 
 
+class TreeMotionPolicy(object):
+    """ A trajectory tree policy as the result of contingency planning
 
-    
-class tree_motion_policy(object):
+    """
     def __init__(self,stage,num_frames_per_stage,ego_root,scenario_root,cost_to_go,leaf_idx,curr_node):
         self.stage = stage
         self.num_frames_per_stage = num_frames_per_stage
@@ -137,7 +139,6 @@ class tree_motion_policy(object):
         self.leaf_idx = leaf_idx
         self.curr_node= curr_node
 
-    
     def identify_branch(self,ego_node,scene_traj):
 
         assert scene_traj.shape[-2]<self.stage*self.num_frames_per_stage
@@ -157,7 +158,7 @@ class tree_motion_policy(object):
             
             remain_traj = remain_traj[...,seg_length:,:]
             remain_num_frames = curr_scenario_node.traj.shape[-2]-seg_length
-        return curr_scenario_node,remain_num_frames
+        return curr_scenario_node, remain_num_frames
 
     def get_plan(self,scene_traj,horizon):
         if scene_traj is None:
@@ -187,8 +188,20 @@ class tree_motion_policy(object):
             
 
 def tiled_to_tree(total_traj,prob,num_stage,num_frames_per_stage,M):
+    """Turning a trajectory tree in tiled form to a tree data structure
+
+    Args:
+        total_traj (torch.tensor or np.ndarray): tiled trajectory tree
+        prob (torch.tensor or np.ndarray): probability of the modes
+        num_stage (int): number of layers of the tree
+        num_frames_per_stage (int): number of time frames per layer
+        M (int): branching factor
+
+    Returns:
+        nodes (dict[int:List(AgentTrajTree)]): all branches of the trajectory tree nodes indexed by layer
+    """
     # total_traj = TensorUtils.reshape_dimensions_single(total_traj,2,3,[M]*num_stage)
-    x0 = agent_traj_tree(None,None,0)
+    x0 = AgentTrajTree(None, None, 0)
     nodes = defaultdict(lambda:list())
     nodes[0].append(x0)
     for t in range(num_stage):
@@ -197,14 +210,13 @@ def tiled_to_tree(total_traj,prob,num_stage,num_frames_per_stage,M):
         for i in range(M**(t+1)):
             parent_idx = int(i/M)
             p = prob[:,i*interval:(i+1)*interval].sum(-1)
-            node = agent_traj_tree(tiled_traj[...,i,:,:],nodes[t][parent_idx],t+1,prob=p)
+            node = AgentTrajTree(tiled_traj[..., i, :, :], nodes[t][parent_idx], t + 1, prob=p)
 
             nodes[t+1].append(node)
     return nodes
 
 
-
-def Contingency_planning(ego_tree,
+def contingency_planning(ego_tree,
                          ego_extents,
                          agent_traj,
                          mode_prob,
@@ -216,7 +228,25 @@ def Contingency_planning(ego_tree,
                          num_frames_per_stage,
                          M,
                          col_funcs=None):
+    """A sampling-based contingency planning algorithm
 
+    Args:
+        ego_tree (_type_): _description_
+        ego_extents (_type_): _description_
+        agent_traj (_type_): _description_
+        mode_prob (_type_): _description_
+        agent_extents (_type_): _description_
+        agent_types (_type_): _description_
+        raster_from_agent (_type_): _description_
+        dis_map (_type_): _description_
+        weights (_type_): _description_
+        num_frames_per_stage (_type_): _description_
+        M (_type_): _description_
+        col_funcs (_type_, optional): _description_. Defaults to None.
+
+    Returns:
+        _type_: _description_
+    """
     num_stage = len(ego_tree)-1
     ego_root = ego_tree[0][0]
 
@@ -276,11 +306,7 @@ def Contingency_planning(ego_tree,
     cost = list()
     for ego_node in ego_root.children:
         cost_i = 0
-        try:
-            leaf_index = leaf_idx[ego_node][0]
-        except:
-            import pdb
-            pdb.set_trace()
+        leaf_index = leaf_idx[ego_node][0]
 
         for scene_node in scenario_tree[0][0].children:
             cost_i+=cost_to_go[(ego_node,scene_node)]*scene_node.prob[leaf_index]
@@ -289,17 +315,29 @@ def Contingency_planning(ego_tree,
     idx = torch.argmin(torch.tensor(cost)).item()
     optimal_node = ego_root.children[idx]
 
-    motion_policy = tree_motion_policy(stage,
-                                       num_frames_per_stage,
-                                       ego_root,
-                                       scenario_root,
-                                       cost_to_go,
-                                       leaf_idx,
-                                       optimal_node)
+    motion_policy = TreeMotionPolicy(stage,
+                                     num_frames_per_stage,
+                                     ego_root,
+                                     scenario_root,
+                                     cost_to_go,
+                                     leaf_idx,
+                                     optimal_node)
     return motion_policy
 
             
 def obtain_ref(line, x, v, N, dt):
+    """obtain desired trajectory for the MPC controller
+
+    Args:
+        line (np.ndarray): centerline of the lane [n, 3]
+        x (np.ndarray): position of the vehicle
+        v (np.ndarray): desired velocity
+        N (int): number of time steps
+        dt (float): time step
+
+    Returns:
+        refx (np.ndarray): desired trajectory [N,3]
+    """
     line_length = line.shape[0]
     delta_x = line[..., 0:2] - np.repeat(x[..., np.newaxis, 0:2], line_length, axis=-2)
     dis = np.linalg.norm(delta_x, axis=-1)

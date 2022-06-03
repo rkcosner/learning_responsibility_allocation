@@ -413,6 +413,7 @@ def batch_pairwise_collision_rate(agent_edges, collision_funcs=None):
             coll_rates[et] = torch.sum(dis <= 0) / float(dis.shape[0])
     return coll_rates
 
+
 def batch_pairwise_collision_rate_masked(agent_edges, type_mask,collision_funcs=None):
     """
     Count number of collisions among edge pairs in a batch
@@ -526,26 +527,42 @@ def GMM_loglikelihood(x, m, v, pi, avails=None, mode="mean"):
     return loglikelihood
 
 
-class distance_buffer():
+class DistanceBuffer(object):
+    """ class that stores the distance given x,y location
+    """
     def __init__(self):
         self._buffer = dict()
+
     def __getitem__(self,key):
         if key in self._buffer:
             return self._buffer[key]
         else:
             return self.update(key)
+
     def update(self,key):
         dis = np.linalg.norm(key)
         self._buffer[key] = dis
         self._buffer[-key] = dis
         return dis
 
+
 class RandomPerturbation(object):
+    """
+    Add Gaussian noise to the trajectory
+    """
     def __init__(self, std: np.ndarray):
         assert std.shape == (3,) and np.all(std >= 0)
         self.std = std
 
     def perturb(self, obs):
+        """Given the observation object, add Gaussian noise to positions and yaws
+
+        Args:
+            obs(Dict[torch.tensor]): observation dict
+
+        Returns:
+            obs(Dict[torch.tensor]): perturbed observation
+        """
         obs = dict(obs)
         target_traj = np.concatenate((obs["target_positions"], obs["target_yaws"]), axis=-1)
         std = np.ones_like(target_traj) * self.std[None, :]
@@ -555,13 +572,31 @@ class RandomPerturbation(object):
         obs["target_yaws"] = target_traj[..., :1]
         return obs
 
+
 class OrnsteinUhlenbeckPerturbation(object):
+    """
+    Add Ornstein-Uhlenbeck noise to the trajectory
+    """
     def __init__(self,theta,sigma):
+        """
+        Args:
+            theta (np.ndarray): converging factor of the OU process
+            sigma (np.ndarray): magnitude of the Gaussian noise added at each step
+        """
         assert theta.shape == (3,) and sigma.shape == (3,)
         self.theta = theta
         self.sigma = sigma
-        self.buffers=dict()
+        self.buffers = dict()
+
     def perturb(self,obs):
+        """Given the observation object, add Gaussian noise to positions and yaws
+
+        Args:
+            obs(Dict[torch.tensor]): observation dict
+
+        Returns:
+            obs(Dict[torch.tensor]): perturbed observation
+        """
         target_traj = np.concatenate((obs["target_positions"], obs["target_yaws"]), axis=-1)
         bs = target_traj.shape[0]
         T = target_traj.shape[-2]

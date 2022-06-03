@@ -454,7 +454,6 @@ class EnvL5KitSimulation(BaseEnv, BatchedEnv):
         obs = self.get_observation()
         self._add_per_step_metrics(obs)
         
-
         actions_world = actions.transform(
             ego_trans_mats=obs["ego"]["world_from_agent"],
             ego_rot_rads=obs["ego"]["yaw"][..., None, None],

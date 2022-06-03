@@ -2,7 +2,7 @@
 This file contains a collection of useful loss functions for use with torch tensors.
 Partially borrowed from https://github.com/ARISE-Initiative/robomimic/blob/master/robomimic/utils/loss_utils.py
 """
-from typing import Dict, List, Union
+from typing import Dict
 
 import numpy as np
 import torch

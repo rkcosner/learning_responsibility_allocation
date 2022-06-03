@@ -7,7 +7,7 @@ from tbsim.utils.experiment_utils import (
     upload_codebase_to_ngc_workspace,
     read_evaluation_configs
 )
-from tbsim.configs.eval_configs import EvaluationConfig
+from tbsim.configs.eval_config import EvaluationConfig
 
 
 if __name__ == "__main__":
@@ -104,8 +104,5 @@ if __name__ == "__main__":
     if args.render:
         script_command.append("--render")
 
-    res = input("upload codebase to ngc workspace? (y/n)")
-    if res == "y":
-        print("uploading codebase ... (this may take a while)")
-        upload_codebase_to_ngc_workspace(ngc_cfg)
+    res = input("make sure you have synced your code to ngc workspace! (enter to continue)")
     launch_experiments_ngc(script_command, cfgs, cfg_fns, ngc_config=ngc_cfg, dry_run=args.dry_run)

@@ -2,9 +2,8 @@ import numpy as np
 import math
 import textwrap
 from collections import OrderedDict
-from typing import Dict, Union, List, Tuple
+from typing import Dict, Union, List
 from copy import deepcopy
-
 
 import torch
 import torch.nn as nn
@@ -840,6 +839,7 @@ class RNNTrajectoryEncoder(nn.Module):
         traj_feat = self.mlp(traj_feat)
         return traj_feat
 
+
 class RNNFeatureRoller(nn.Module):
     def __init__(self, trajectory_dim, feature_dim):
         super(RNNFeatureRoller, self).__init__()
@@ -847,13 +847,13 @@ class RNNFeatureRoller(nn.Module):
             trajectory_dim, hidden_size=feature_dim, batch_first=True)
         self._feature_dim = feature_dim
 
-
     def output_shape(self, input_shape=None):
         return [self._feature_dim]
 
     def forward(self, feature,input_trajectory):
         _,hn = self.gru(input_trajectory,feature.unsqueeze(0))
         return hn[0]+feature
+
 
 class PosteriorEncoder(nn.Module):
     """Posterior Encoder (x, x_c -> q) for CVAE"""
@@ -928,7 +928,6 @@ class ScenePosteriorEncoder(nn.Module):
             feat = feat.mean(1)
 
         return self.mlp(feat)
-
 
 
 
@@ -1035,6 +1034,7 @@ class ECEncoder(nn.Module):
         
         return c_feat
 
+
 class AgentTrajEncoder(nn.Module):
     """Condition Encoder (x -> c) for CVAE"""
 
@@ -1065,8 +1065,6 @@ class AgentTrajEncoder(nn.Module):
             feat = self.transformer(feat,avails,agent_pos)
         
         return torch.max(feat,1)[0]
-
-
 
 
 class PosteriorNet(nn.Module):
@@ -1210,8 +1208,8 @@ class TrajectoryDecoder(nn.Module):
             preds["terminal_state"] = x[...,-1,:]
         return preds
 
+
 class MLPTrajectoryDecoder(TrajectoryDecoder):
-    
     def _create_networks(self):
         net_kwargs = dict() if self._network_kwargs is None else dict(self._network_kwargs)
         if self._network_kwargs is None:
@@ -1247,7 +1245,6 @@ class MLPTrajectoryDecoder(TrajectoryDecoder):
         if self._network_kwargs["state_as_input"] and self.dyn is not None:
             inputs = torch.cat((inputs, current_states), dim=-1)
 
-
         if inputs.ndim == 2:
             # [B, D]
             preds = self.mlp(inputs)
@@ -1258,7 +1255,6 @@ class MLPTrajectoryDecoder(TrajectoryDecoder):
             raise ValueError(
                 "Expecting inputs to have ndim == 2 or 3, got {}".format(inputs.ndim))
         return preds
-
 
 
 class MLPECTrajectoryDecoder(TrajectoryDecoder):
@@ -1300,6 +1296,7 @@ class MLPECTrajectoryDecoder(TrajectoryDecoder):
         self.Gaussian_var = Gaussian_var
         self._create_dynamics()
         self._create_networks()
+
     def _create_networks(self):
         net_kwargs = dict() if self._network_kwargs is None else dict(self._network_kwargs)
         if self._network_kwargs is None:
@@ -1412,7 +1409,6 @@ class MLPECTrajectoryDecoder(TrajectoryDecoder):
             preds["EC_trajectories"] = EC_preds["trajectories"]
                 
         return preds
-
 
 
 if __name__ == "__main__":

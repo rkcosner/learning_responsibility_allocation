@@ -8,6 +8,7 @@ from tbsim.configs.base import ExperimentConfig
 
 
 def avdata2posyawspeed(state, nan_to_zero=True):
+    """Converts avdata's state format to pos, yaw, and speed. Set Nans to 0s"""
     assert state.shape[-1] == 8  # x, y, vx, vy, ax, ay, sin(heading), cos(heading)
     pos = state[..., :2]
     yaw = torch.atan2(state[..., [-2]], state[..., [-1]])
@@ -105,6 +106,7 @@ def get_drivable_region_map(maps):
 
 
 def maybe_pad_neighbor(batch):
+    """Pad neighboring agent's history to the same length as that of the ego using NaNs"""
     hist_len = batch["agent_hist"].shape[1]
     fut_len = batch["agent_fut"].shape[1]
     b, a, neigh_len, _ = batch["neigh_hist"].shape
@@ -116,7 +118,6 @@ def maybe_pad_neighbor(batch):
         batch["neigh_hist_extents"] = torch.zeros(b, 1, hist_len, batch["neigh_hist_extents"].shape[-1])
         batch["neigh_fut_extents"] = torch.zeros(b, 1, fut_len, batch["neigh_hist_extents"].shape[-1])
     elif neigh_len < hist_len:
-        print(hist_len - neigh_len)
         hist_pad = torch.ones(b, a, hist_len - neigh_len, batch["neigh_hist"].shape[-1]) * torch.nan
         batch["neigh_hist"] = torch.cat((hist_pad, batch["neigh_hist"]), dim=2)
         hist_pad = torch.zeros(b, a, hist_len - neigh_len, batch["neigh_hist_extents"].shape[-1])

@@ -363,7 +363,7 @@ class ContingencyPlanner(Policy):
             agent_yaw_ego = agent_traj_local[...,2:]+agent_obs["yaw"][agent_idx].reshape(-1,1,1,1,1)-obs["yaw"][i]
             agent_traj = torch.cat((agent_pos_ego,agent_yaw_ego),-1)
 
-            motion_policy = PlanUtils.Contingency_planning(ego_nodes_by_stage[i],
+            motion_policy = PlanUtils.contingency_planning(ego_nodes_by_stage[i],
                                                            obs["extent"][i,:2],
                                                            agent_traj,
                                                            prob,

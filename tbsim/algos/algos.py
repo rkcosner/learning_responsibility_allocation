@@ -32,12 +32,12 @@ import tbsim.algos.algo_utils as AlgoUtils
 from tbsim.utils.geometry_utils import transform_points_tensor
 
 
-class L5TrafficModel(pl.LightningModule):
+class BehaviorCloning(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes, do_log=True):
         """
         Creates networks and places them into @self.nets.
         """
-        super(L5TrafficModel, self).__init__()
+        super(BehaviorCloning, self).__init__()
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
         self._do_log = do_log
@@ -187,7 +187,7 @@ class L5TrafficModel(pl.LightningModule):
         return action, {}
 
 
-class L5TrafficModelGC(L5TrafficModel):
+class BehaviorCloningGC(BehaviorCloning):
     def __init__(self, algo_config, modality_shapes):
         """
         Creates networks and places them into @self.nets.
@@ -443,9 +443,9 @@ class SpatialPlanner(pl.LightningModule):
         return plan, dict(location_map=preds["location_map"], plan_samples=plan_samples, log_likelihood=preds["log_likelihood"])
 
 
-class L5VAETrafficModel(pl.LightningModule):
+class VAETrafficModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):
-        super(L5VAETrafficModel, self).__init__()
+        super(VAETrafficModel, self).__init__()
 
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
@@ -583,9 +583,9 @@ class L5VAETrafficModel(pl.LightningModule):
         return action, info
 
 
-class L5DiscreteVAETrafficModel(pl.LightningModule):
+class DiscreteVAETrafficModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):
-        super(L5DiscreteVAETrafficModel, self).__init__()
+        super(DiscreteVAETrafficModel, self).__init__()
 
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
@@ -756,9 +756,9 @@ class L5DiscreteVAETrafficModel(pl.LightningModule):
         )
         return action, info
 
-class L5ECTrafficModel(L5TrafficModel):
+class BehaviorCloningEC(BehaviorCloning):
     def __init__(self, algo_config, modality_shapes):
-        super(L5ECTrafficModel, self).__init__(algo_config, modality_shapes)
+        super(BehaviorCloningEC, self).__init__(algo_config, modality_shapes)
 
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
@@ -1034,12 +1034,12 @@ class GANTrafficModel(pl.LightningModule):
         return action, info
 
 
-class L5TransformerTrafficModel(pl.LightningModule):
+class TransformerTrafficModel(pl.LightningModule):
     def __init__(self, algo_config):
         """
         Creates networks and places them into @self.nets.
         """
-        super(L5TransformerTrafficModel, self).__init__()
+        super(TransformerTrafficModel, self).__init__()
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
         self.nets["policy"] = TransformerModel(algo_config)
@@ -1138,12 +1138,12 @@ class L5TransformerTrafficModel(pl.LightningModule):
         return metrics
 
 
-class L5TransformerGANTrafficModel(pl.LightningModule):
+class TransformerGANTrafficModel(pl.LightningModule):
     def __init__(self, algo_config):
         """
         Creates networks and places them into @self.nets.
         """
-        super(L5TransformerGANTrafficModel, self).__init__()
+        super(TransformerGANTrafficModel, self).__init__()
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
         self.nets["policy"] = TransformerModel(algo_config)
@@ -1274,9 +1274,9 @@ class L5TransformerGANTrafficModel(pl.LightningModule):
         )
         return action, {}
 
-class L5TreeVAETrafficModel(pl.LightningModule):
+class TreeVAETrafficModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):
-        super(L5TreeVAETrafficModel, self).__init__()
+        super(TreeVAETrafficModel, self).__init__()
         # assert modality_shapes["image"][0] == 15
 
         self.algo_config = algo_config
@@ -1426,9 +1426,9 @@ class L5TreeVAETrafficModel(pl.LightningModule):
 
 
 
-class L5SceneTreeTrafficModel(pl.LightningModule):
+class SceneTreeTrafficModel(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes):
-        super(L5SceneTreeTrafficModel, self).__init__()
+        super(SceneTreeTrafficModel, self).__init__()
         # assert modality_shapes["image"][0] == 15
 
         self.algo_config = algo_config

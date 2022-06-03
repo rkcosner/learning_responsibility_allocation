@@ -3,6 +3,7 @@ from tbsim.dynamics.base import DynType
 import tbsim.utils.l5_utils as L5Utils
 from tbsim.models.cnn_roi_encoder import obtain_map_enc
 
+
 def pred2obs(
         dyn_list,
         step_time,
@@ -97,6 +98,7 @@ def pred2obs(
             map_emb_new.append(map_emb_new_i)
         map_emb_new = torch.stack(map_emb_new, dim=1)
     return src_new, src_mask_new, map_emb_new
+
 
 def pred2obs_static(
         dyn_list,

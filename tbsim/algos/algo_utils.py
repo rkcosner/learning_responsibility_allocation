@@ -9,11 +9,19 @@ from tbsim.utils.l5_utils import get_last_available_index
 from tbsim.utils.loss_utils import goal_reaching_loss, trajectory_loss, collision_loss
 
 
-
 def generate_proxy_mask(orig_loc, radius,mode="L1"):
+    """ mask out area near the existing samples to boost diversity
+
+    Args:
+        orig_loc (torch.tensor): original sample location, 1 for sample, 0 for background
+        radius (int): radius in pixel space
+        mode (str, optional): Defaults to "L1".
+
+    Returns:
+        torch.tensor[dtype=torch.bool]: mask for generating new samples
+    """
     dis_map = calc_distance_map(orig_loc,max_dis = radius+1,mode=mode)
     return dis_map<=radius
-
 
 
 def decode_spatial_prediction(prob_map, residual_yaw_map, num_samples=None, clearance=None):
@@ -77,6 +85,7 @@ def decode_spatial_prediction(prob_map, residual_yaw_map, num_samples=None, clea
 
 
 def get_spatial_goal_supervision(data_batch):
+    """Get supervision for training the spatial goal network."""
     b, _, h, w = data_batch["image"].shape  # [B, C, H, W]
 
     # use last available step as goal location
@@ -126,6 +135,7 @@ def get_spatial_goal_supervision(data_batch):
 
 
 def get_spatial_trajectory_supervision(data_batch):
+    """Get supervision for training the learned occupancy metric."""
     b, _, h, w = data_batch["image"].shape  # [B, C, H, W]
     t = data_batch["target_positions"].shape[-2]
     # create spatial supervisions
@@ -164,6 +174,7 @@ def optimize_trajectories(
         coll_loss_weight=0.0,
         num_optim_iterations: int = 50
 ):
+    """An optimization-based trajectory generator"""
     curr_u = init_u.detach().clone()
     curr_u.requires_grad = True
     action_optim = optim.LBFGS(

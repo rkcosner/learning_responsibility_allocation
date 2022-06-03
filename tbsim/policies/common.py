@@ -67,6 +67,7 @@ class Action(Trajectory):
 
 
 class Plan(Trajectory):
+    """Container for sequences of 2D positions, yaws, controls, availabilities."""
     def __init__(self, positions, yaws, availabilities, controls=None):
         assert positions.shape[:-1] == yaws.shape[:-1]
         assert positions.shape[-1] == 2
@@ -106,6 +107,7 @@ class Plan(Trajectory):
 
 
 class RolloutAction(object):
+    """Actions used to control agent rollouts"""
     def __init__(self, ego=None, ego_info=None, agents=None, agents_info=None):
         assert ego is None or isinstance(ego, Action)
         assert agents is None or isinstance(agents, Action)

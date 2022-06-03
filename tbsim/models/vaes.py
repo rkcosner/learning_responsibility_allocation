@@ -576,6 +576,7 @@ class DiscreteCVAE(nn.Module):
         KL_loss = self.compute_kl_loss(outputs)
         return recon_loss + gamma*KL_loss
 
+
 class ECDiscreteCVAE(DiscreteCVAE):
     def sample(self, condition_inputs, n: int,cond_traj = None, decoder_kwargs=None):
         """
@@ -1053,6 +1054,7 @@ def main():
     losses = lean_model.compute_losses(outputs=outputs, targets=inputs)
     samples = lean_model.sample(condition_inputs=condition_feats, n=10)
     print()
+
 
 def main_discrete():
     import tbsim.models.base_models as l5m

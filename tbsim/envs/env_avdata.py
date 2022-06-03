@@ -1,13 +1,8 @@
 import numpy as np
 from copy import deepcopy
-from typing import List, Dict
-from torch.utils.data.dataloader import default_collate
-from collections import OrderedDict
-from l5kit.geometry import transform_points, transform_point
-
-from avdata import AgentBatch, AgentType, UnifiedDataset
+from typing import List
+from avdata import UnifiedDataset
 from avdata.simulation import SimulationScene
-from avdata.visualization.vis import plot_agent_batch
 from avdata.simulation import sim_metrics
 
 import tbsim.utils.tensor_utils as TensorUtils
@@ -15,7 +10,6 @@ from tbsim.utils.vis_utils import render_state_avdata
 from tbsim.envs.base import BaseEnv, BatchedEnv, SimulationException
 from tbsim.policies.common import RolloutAction, Action
 from tbsim.utils.geometry_utils import transform_points_tensor
-import tbsim.envs.env_metrics as EnvMetrics
 from tbsim.utils.timer import Timers
 from tbsim.utils.avdata_utils import parse_avdata_batch, get_drivable_region_map
 from tbsim.utils.rollout_logger import RolloutLogger
@@ -311,8 +305,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
         obs = self.get_observation()["agents"]
         # record metrics
-        # with self.timers.timed("metrics"):
-        #     self._add_per_step_metrics(obs)
+        self._add_per_step_metrics(obs)
 
         action = step_actions.agents.to_dict()
         assert action["positions"].shape[0] == obs["centroid"].shape[0]
@@ -324,14 +317,13 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 return
             # # log state and action
             obs_skimp = self.get_observation()
-            self._add_per_step_metrics(obs_skimp["agents"])
+            # self._add_per_step_metrics(obs_skimp["agents"])
             if self._log_data:
                 action_to_log = RolloutAction(
                     agents=Action.from_dict(TensorUtils.map_ndarray(action, lambda x: x[:, action_index:])),
                     agents_info=step_actions.agents_info
                 )
                 self.logger.log_step(obs_skimp, action_to_log)
-
 
             idx = 0
             for scene in self._current_scenes:
