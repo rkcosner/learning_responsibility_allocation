@@ -930,7 +930,6 @@ class ScenePosteriorEncoder(nn.Module):
         return self.mlp(feat)
 
 
-
 class ConditionEncoder(nn.Module):
     """Condition Encoder (x -> c) for CVAE"""
 
