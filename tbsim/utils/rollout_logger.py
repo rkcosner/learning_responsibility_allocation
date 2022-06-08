@@ -23,7 +23,11 @@ class RolloutLogger(object):
         if "agents" in obs and obs["agents"] is not None:
             for k in obs["agents"].keys():
                 if k in combined:
-                    combined[k] = np.concatenate((combined[k], obs["agents"][k]), axis=0)
+                    if obs["agents"][k] is not None:
+                        if combined[k] is not None:
+                            combined[k] = np.concatenate((combined[k], obs["agents"][k]), axis=0)
+                        else:
+                            combined[k] = obs["agents"][k]
                 else:
                     combined[k] = obs["agents"][k]
         return combined
@@ -152,6 +156,10 @@ class RolloutLogger(object):
     def log_step(self, obs, action: RolloutAction):
         combined_obs = self._combine_obs(obs)
         combined_action = self._combine_action(action)
-        assert combined_obs["scene_index"].shape[0] == combined_action["action"]["positions"].shape[0]
+        try:
+            assert combined_obs["scene_index"].shape[0] == combined_action["action"]["positions"].shape[0]
+        except:
+            import pdb
+            pdb.set_trace()
         self._maybe_initialize(combined_obs)
         self._append_buffer(combined_obs, combined_action)

@@ -1,3 +1,4 @@
+from posixpath import split
 import numpy as np
 from copy import deepcopy
 from typing import List
@@ -25,6 +26,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
             prediction_only=False,
             metrics=None,
             log_data=True,
+            split_ego = False,
             renderer=None
     ):
         """
@@ -35,6 +37,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
             num_scenes (int): number of scenes to run in parallel
             dataset (UnifiedDataset): a UnifiedDataset instance that contains scene data for simulation
             prediction_only (bool): if set to True, ignore the input action command and only record the predictions
+            split_ego (bool): if set to True, split ego out as the ego observation
         """
         print(env_config)
         self._npr = np.random.RandomState(seed=seed)
@@ -43,6 +46,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
         self._num_total_scenes = dataset.num_scenes()
         self._num_scenes = num_scenes
+        self.split_ego = split_ego
 
         # indices of the scenes (in dataset) that are being used for simulation
         self._current_scenes: List[SimulationScene] = None # corresponding dataset of the scenes
@@ -84,8 +88,11 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
     @property
     def current_agent_track_id(self):
-        return np.arange(self.current_num_agents)
-
+        ids = np.empty(0)
+        for idx in self.current_scene_index:
+            num_i = np.sum(self.current_agent_scene_index==idx)
+            ids = np.append(ids,np.arange(num_i))
+        return ids
     @property
     def current_scene_index(self):
         return self._current_scene_indices.copy()
@@ -162,7 +169,8 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 dataset=self.dataset,
                 init_timestep=start_frame_index,
                 freeze_agents=True,
-                return_dict=True
+                return_dict=True,
+                vectorize_lane=self._env_config.simulation.vectorize_lane,
             )
             sim_scene.reset()
             self._disable_offroad_agents(sim_scene)
@@ -190,7 +198,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         ego_inds = [i for i, name in enumerate(self.current_agent_names) if name == "ego"]
         for i in ego_inds:
             im = render_state_avdata(
-                batch=self.get_observation()["agents"],
+                batch=self.get_observation(split=False)["agents"],
                 batch_idx=i,
                 action=actions_to_take
             )
@@ -254,14 +262,16 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         return metrics
 
     def get_observation_by_scene(self):
-        obs = self.get_observation()["agents"]
+        obs = self.get_observation(split=False)["agents"]
         obs_by_scene = []
         obs_scene_index = self.current_agent_scene_index
         for i in range(self.num_instances):
             obs_by_scene.append(TensorUtils.map_ndarray(obs, lambda x: x[obs_scene_index == i]))
         return obs_by_scene
 
-    def get_observation(self):
+    def get_observation(self,split=None):
+        if split is None:
+            split = self.split_ego
         if self._cached_observation is not None:
             return self._cached_observation
 
@@ -275,9 +285,23 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         agent_obs = TensorUtils.to_numpy(agent_obs)
         agent_obs["scene_index"] = self.current_agent_scene_index
         agent_obs["track_id"] = self.current_agent_track_id
-
+        
         # cache observations
-        self._cached_observation = dict(agents=agent_obs)
+        if split:
+            ego_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name=="ego"])
+            agent_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name!="ego"])
+            ego_obs = dict()
+            other_agent_obs = dict()
+            for k,v in agent_obs.items():
+                if v is not None:
+                    ego_obs[k] = v[ego_idx]
+                    other_agent_obs[k] = v[agent_idx]
+                else:
+                    ego_obs[k]=None
+                    other_agent_obs[k]=None
+            self._cached_observation = dict(ego=ego_obs,agents=other_agent_obs)
+        else:
+            self._cached_observation = dict(agents=agent_obs)
         self.timers.toc("get_obs")
 
         return self._cached_observation
@@ -298,16 +322,50 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
     def _add_per_step_metrics(self, obs):
         for k, v in self._metrics.items():
             v.add_step(obs, self.current_scene_index)
+    
+    def combine_action(self,step_actions):
+        ego_action = step_actions.ego.to_dict()
+        agent_action = step_actions.agents.to_dict()
+        ego_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name=="ego"])
+        agent_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name!="ego"])
+        combined_positions = np.zeros([len(self.current_agent_names),*ego_action["positions"].shape[1:]])
+        combined_yaws = np.zeros([len(self.current_agent_names),*ego_action["yaws"].shape[1:]])
+        combined_positions[ego_idx] = ego_action["positions"]
+        combined_positions[agent_idx] = agent_action["positions"]
+        combined_yaws[ego_idx] = ego_action["yaws"]
+        combined_yaws[agent_idx] = agent_action["yaws"]
+        return RolloutAction(agents=Action(positions=combined_positions,yaws=combined_yaws),agents_info=step_actions.agents_info)
+
+    def combine_obs(self,ego_obs,agent_obs):
+        ego_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name=="ego"])
+        agent_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name!="ego"])
+        bs = len(self.current_agent_names)
+        combined_obs = dict()
+        for k,v in ego_obs.items():
+            if k in agent_obs and v is not None:
+                combined_v = np.zeros([bs,*v.shape[1:]])
+                combined_v[ego_idx]=ego_obs[k]
+                combined_v[agent_idx]=agent_obs[k]
+                combined_obs[k]=combined_v
+        return combined_obs
+
 
     def _step(self, step_actions: RolloutAction, num_steps_to_take):
         if self.is_done():
             raise SimulationException("Cannot step in a finished episode")
+        self.timers.tic("_step")
+        obs = self.get_observation(split=False)
+        if "ego" in obs:
+            obs = self.combine_obs(obs["ego"],obs["agents"])
+        else:
+            obs = obs["agents"]
 
-        obs = self.get_observation()["agents"]
         # record metrics
         self._add_per_step_metrics(obs)
-
+        if step_actions.has_ego:
+            step_actions = self.combine_action(step_actions)
         action = step_actions.agents.to_dict()
+        
         assert action["positions"].shape[0] == obs["centroid"].shape[0]
         for action_index in range(num_steps_to_take):
             if action_index >= action["positions"].shape[1]:  # GT actions may be shorter
@@ -316,7 +374,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 self._cached_observation = None
                 return
             # # log state and action
-            obs_skimp = self.get_observation()
+            obs_skimp = self.get_observation_skimp()
             # self._add_per_step_metrics(obs_skimp["agents"])
             if self._log_data:
                 action_to_log = RolloutAction(
@@ -348,11 +406,13 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 scene.step(scene_action, return_obs=False)
 
         self._cached_observation = None
-
+        self.timers.toc("_step")
         if self._frame_index + num_steps_to_take >= self.horizon:
             self._done = True
         else:
             self._frame_index += num_steps_to_take
+        print(self.timers)
+        
 
     def step(self, actions: RolloutAction, num_steps_to_take: int = 1, render=False):
         """

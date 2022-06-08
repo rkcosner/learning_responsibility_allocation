@@ -1396,6 +1396,7 @@ class RasterizedSceneTreeModel(nn.Module):
             num_agent = [agent_idx[i].shape[0] for i in range(bs)]
 
         elif batch_inputs["target_positions"].ndim==4:
+
             bs,Na, = batch_inputs["target_positions"].shape[:2]
             agent_avail = batch_inputs["agent_type"]>0
             device = agent_avail.device
@@ -1407,16 +1408,16 @@ class RasterizedSceneTreeModel(nn.Module):
             num_agent = batch_inputs["num_agents"].tolist()
         
         agent_idx = [torch.where(agent_avail[i])[0] for i in range(bs)]
-
+        
         H = self.num_frames_per_stage
         if self.algo_config.goal_conditional:
             if "goal" in kwargs and kwargs["goal"] is not None:
                 goal = kwargs["goal"]
             else:
                 goal = self._get_goal_states(batch_inputs)
-            goal_pos = GeoUtils.batch_nd_transform_points(goal[...,:2],ego_to_agent)
-            goal_yaw = goal[...,2:]-curr_yaw
-            goal = torch.cat((goal_pos,goal_yaw),-1)
+                goal_pos = GeoUtils.batch_nd_transform_points(goal[...,:2],ego_to_agent)
+                goal_yaw = goal[...,2:]-curr_yaw
+                goal = torch.cat((goal_pos,goal_yaw),-1)
         else:
             goal = None
         if batch_inputs["image"].ndim==4:
@@ -1439,19 +1440,21 @@ class RasterizedSceneTreeModel(nn.Module):
             agent_avail[torch.arange(bs).to(device),cond_idx] = 0
         else:
             cond_traj_local = kwargs["cond_traj"]
-            cond_idx = None
+            if "cond_idx" in kwargs:
+                cond_idx = kwargs["cond_idx"]
+                agent_avail[torch.arange(bs).to(device),cond_idx] = 0
+            else:
+                cond_idx = None
         if cond_traj_local is not None:
             M = cond_traj_local.shape[1]
             cond_traj_local = TensorUtils.join_dimensions(cond_traj_local,0,2)
             
-            curr_yaw = curr_yaw.repeat_interleave(M,0)
             agent_avail_tiled = agent_avail.repeat_interleave(M,0)
             curr_map_feat = curr_map_feat.repeat_interleave(M,0)
             if goal is not None:
                 goal = goal.repeat_interleave(M,0)
-
             cond_pos = GeoUtils.batch_nd_transform_points(cond_traj_local[...,:2].unsqueeze(1),ego_to_agent.repeat_interleave(M,0).unsqueeze(2))
-            cond_yaw = cond_traj_local[...,2:].unsqueeze(1)-curr_yaw.unsqueeze(2)
+            cond_yaw = cond_traj_local[...,2:].unsqueeze(1)-curr_yaw.repeat_interleave(M,0).unsqueeze(2)
             cond_traj = torch.cat((cond_pos,cond_yaw),-1)
             cond_traj_total = cond_traj*agent_avail_tiled[...,None,None]
             cond_traj_total = cond_traj_total[...,:self.stage*self.num_frames_per_stage,:]
@@ -1474,7 +1477,7 @@ class RasterizedSceneTreeModel(nn.Module):
                     current_states_local = torch.cat((local_pos,current_states[...,2:3],local_yaw),-1)
                     current_states_local = current_states_local.repeat_interleave(M,0)
                     decoder_kwargs["current_states"] = current_states_local
-                    pos = current_states[...,:2]
+                    pos = current_states[...,:2].repeat_interleave(M,0)
                 else:
                     current_states_local = outs["x_recons"]["terminal_state"]
                     pos = TensorUtils.join_dimensions(outs["x_recons"]["trajectories"][...,-1,:2],0,t+2)
@@ -1504,14 +1507,12 @@ class RasterizedSceneTreeModel(nn.Module):
             else:
                 inputs=None
             cond_traj_tiled = cond_traj[t].repeat_interleave(int(math.prod(batch_shape[2:])),0) if cond_traj is not None else None
-
             outs = self.vae.forward(inputs=inputs, 
                                     condition_inputs=condition_inputs, 
                                     mask = agent_avail_tiled.repeat_interleave(self.vae.K**t,0),
                                     pos = pos,
                                     cond_traj=cond_traj_tiled, 
                                     decoder_kwargs=decoder_kwargs)
-            
             outs["x_recons"] = TensorUtils.recursive_dict_list_tuple_apply(outs["x_recons"],{torch.Tensor:lambda x:x.transpose(1,2)})
             rep = int(outs["x_recons"]["trajectories"].shape[0]/agent_to_ego.shape[0])
             ego_frame_pos = GeoUtils.batch_nd_transform_points(outs["x_recons"]["trajectories"][...,:2],agent_to_ego.repeat_interleave(rep,0)[:,None,:,None,:])

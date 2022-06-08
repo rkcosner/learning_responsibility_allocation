@@ -55,5 +55,6 @@ def translate_avdata_cfg(cfg: ExperimentConfig):
     rcfg.yaw_correction_speed = cfg.env.data_generation_params.yaw_correction_speed
     rcfg.incl_neighbor_map = cfg.env.incl_neighbor_map
     rcfg.other_agents_num = cfg.env.data_generation_params.other_agents_num
+    rcfg.vectorize_lane = cfg.algo.vectorize_lane
     rcfg.lock()
     return rcfg

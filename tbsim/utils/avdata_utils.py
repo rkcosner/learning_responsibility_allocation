@@ -226,6 +226,7 @@ def parse_avdata_batch(batch: dict):
         maybe_pad_neighbor(batch)
         fut_pos, fut_yaw, _, fut_mask = avdata2posyawspeed(batch["agent_fut"])
         hist_pos, hist_yaw, hist_speed, hist_mask = avdata2posyawspeed(batch["agent_hist"])
+
         curr_speed = hist_speed[..., -1]
         curr_state = batch["curr_agent_state"]
         curr_yaw = curr_state[:, -1]
@@ -287,7 +288,6 @@ def parse_avdata_batch(batch: dict):
             raster_from_world = None
 
         extent_scale = 1.0
-
         d = dict(
             image=maps,
             drivable_map=drivable_map,
@@ -318,13 +318,15 @@ def parse_avdata_batch(batch: dict):
             all_other_agents_types=neigh_types,
             all_other_agents_extents=neigh_hist_extents.max(dim=-2)[0] * extent_scale,
             all_other_agents_history_extents=neigh_hist_extents * extent_scale,
+            ego_lanes = batch["agent_lanes"]
 
         )
 
     batch = dict(batch)
     batch.update(d)
     for k,v in batch.items():
-        v[torch.isnan(v)]=0
+        if isinstance(v,torch.Tensor):
+            batch[k]=v.nan_to_num(0)
     batch.pop("agent_name", None)
     batch.pop("robot_fut", None)
     return batch

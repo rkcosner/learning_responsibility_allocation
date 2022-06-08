@@ -125,7 +125,7 @@ class EnvL5Builder(EnvironmentBuilder):
 
 
 class EnvNuscBuilder(EnvironmentBuilder):
-    def get_env(self):
+    def get_env(self,split_ego=False):
         exp_cfg = self.exp_cfg.clone()
         exp_cfg.unlock()
         exp_cfg.train.dataset_path = self.eval_cfg.dataset_path
@@ -138,7 +138,6 @@ class EnvNuscBuilder(EnvironmentBuilder):
         future_sec = data_cfg.future_num_frames * data_cfg.step_time
         history_sec = data_cfg.history_num_frames * data_cfg.step_time
         neighbor_distance = data_cfg.max_agents_distance
-
         kwargs = dict(
             desired_data=["nusc-val"],
             future_sec=(future_sec, future_sec),
@@ -157,7 +156,7 @@ class EnvNuscBuilder(EnvironmentBuilder):
                 "offset_frac_xy": data_cfg.raster_center
             },
             num_workers=os.cpu_count(),
-            desired_dt=data_cfg.step_time
+            desired_dt=data_cfg.step_time,
         )
 
         env_dataset = UnifiedDataset(**kwargs)
@@ -165,15 +164,16 @@ class EnvNuscBuilder(EnvironmentBuilder):
         metrics = dict()
         if self.eval_cfg.metrics.compute_analytical_metrics:
             metrics.update(self._get_analytical_metrics())
-        if self.eval_cfg.metrics.compute_learned_metrics:
-            metrics.update(self._get_learned_metrics())
+        # if self.eval_cfg.metrics.compute_learned_metrics:
+        #     metrics.update(self._get_learned_metrics())
         env = EnvUnifiedSimulation(
             exp_cfg.env,
             dataset=env_dataset,
             seed=self.eval_cfg.seed,
             num_scenes=self.eval_cfg.num_scenes_per_batch,
             prediction_only=False,
-            metrics=metrics
+            metrics=metrics,
+            split_ego=split_ego
         )
 
         return env

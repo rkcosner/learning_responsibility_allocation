@@ -211,6 +211,7 @@ class TreeVAEConfig(BehaviorCloningConfig):
         self.eval.mode = "sum"
         self.scene_centric = True
         self.shuffle = True
+        self.vectorize_lane = False
 
         self.min_std = 0.1
 

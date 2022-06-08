@@ -1445,6 +1445,9 @@ class SceneTreeTrafficModel(pl.LightningModule):
     def forward(self, obs_dict):
         return self.nets["policy"](obs_dict)["predictions"]
 
+    def predict(self,obs,**kwargs):
+        return self.nets["policy"](obs,predict=True,**kwargs)
+
 
     def training_step(self, batch, batch_idx):
         """

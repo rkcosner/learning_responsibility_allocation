@@ -183,7 +183,7 @@ def rollout_episodes(
                     frames.extend(ims)
                 counter += n_step_action
             timers.toc("step")
-            print(timers)
+            # print(timers)
 
             done = env.is_done()
             

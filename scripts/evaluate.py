@@ -74,9 +74,20 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
         composer_class = getattr(policy_composers, eval_cfg.agent_eval_class)
         composer = composer_class(eval_cfg, device, ckpt_root_dir=eval_cfg.ckpt_root_dir)
         agent_policy, _ = composer.get_policy()
+        if eval_cfg.policy.pos_to_yaw:
+            agent_policy = Pos2YawWrapper(
+                agent_policy,
+                dt=exp_config.algo.step_time,
+                yaw_correction_speed=eval_cfg.policy.yaw_correction_speed
+            )
+    else:
+        agent_policy = None
 
     if eval_cfg.env == "nusc":
-        rollout_policy = RolloutWrapper(agents_policy=policy)
+        if eval_cfg.agent_eval_class is not None:
+            rollout_policy = RolloutWrapper(ego_policy=policy, agents_policy=agent_policy)
+        else:
+            rollout_policy = RolloutWrapper(agents_policy=policy)
     elif eval_cfg.ego_only:
         rollout_policy = RolloutWrapper(ego_policy=policy)
     else:
@@ -89,13 +100,19 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
 
     # create env
     if eval_cfg.env == "nusc":
+        if agent_policy is not None:
+            split_ego = True
+        else:
+            split_ego = False
         env_builder = EnvNuscBuilder(eval_config=eval_cfg, exp_config=exp_config, device=device)
+        env = env_builder.get_env(split_ego=split_ego)
     elif eval_cfg.env == 'l5kit':
         env_builder = EnvL5Builder(eval_config=eval_cfg, exp_config=exp_config, device=device)
+        env = env_builder.get_env()
     else:
         raise NotImplementedError("{} is not a valid env".format(eval_cfg.env))
 
-    env = env_builder.get_env()
+    
 
     # eval loop
     obs_to_torch = eval_cfg.eval_class not in ["GroundTruth", "ReplayAction"]

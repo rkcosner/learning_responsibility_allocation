@@ -4,7 +4,7 @@ from scipy.interpolate import interp1d
 import torch
 
 from tbsim.models.cnn_roi_encoder import obtain_lane_flag
-from tbsim.utils.l5_utils import gen_ego_edges
+from tbsim.utils.batch_utils import batch_utils
 from tbsim.utils.geometry_utils import (
     VEH_VEH_collision,
     VEH_PED_collision,
@@ -37,7 +37,7 @@ def get_collision_loss(
 ):
     """Get veh-veh and veh-ped collision loss."""
     with torch.no_grad():
-        ego_edges, type_mask = gen_ego_edges(
+        ego_edges, type_mask = batch_utils().gen_ego_edges(
             ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types
         )
         if col_funcs is None:
@@ -200,18 +200,18 @@ def tiled_to_tree(total_traj,prob,num_stage,num_frames_per_stage,M):
     Returns:
         nodes (dict[int:List(AgentTrajTree)]): all branches of the trajectory tree nodes indexed by layer
     """
+
     # total_traj = TensorUtils.reshape_dimensions_single(total_traj,2,3,[M]*num_stage)
     x0 = AgentTrajTree(None, None, 0)
     nodes = defaultdict(lambda:list())
     nodes[0].append(x0)
     for t in range(num_stage):
         interval = M**(num_stage-t-1)
-        tiled_traj = total_traj[...,::interval,t*num_frames_per_stage:(t+1)*num_frames_per_stage,:]
+        tiled_traj = total_traj[...,::interval,:,t*num_frames_per_stage:(t+1)*num_frames_per_stage,:]
         for i in range(M**(t+1)):
             parent_idx = int(i/M)
             p = prob[:,i*interval:(i+1)*interval].sum(-1)
-            node = AgentTrajTree(tiled_traj[..., i, :, :], nodes[t][parent_idx], t + 1, prob=p)
-
+            node = AgentTrajTree(tiled_traj[:,i], nodes[t][parent_idx], t + 1, prob=p)
             nodes[t+1].append(node)
     return nodes
 
@@ -247,6 +247,7 @@ def contingency_planning(ego_tree,
     Returns:
         _type_: _description_
     """
+    
     num_stage = len(ego_tree)-1
     ego_root = ego_tree[0][0]
 
@@ -263,7 +264,7 @@ def contingency_planning(ego_tree,
 
     cost_to_go = dict()
     stage_cost = dict()
-    scenario_tree = tiled_to_tree(agent_traj,mode_prob[0],num_stage,num_frames_per_stage,M)
+    scenario_tree = tiled_to_tree(agent_traj,mode_prob,num_stage,num_frames_per_stage,M)
     scenario_root = scenario_tree[0][0]
     for stage in range(num_stage,0,-1):
         ego_nodes = ego_tree[stage]
@@ -271,11 +272,11 @@ def contingency_planning(ego_tree,
         ego_traj = [node.traj[:,TRAJ_INDEX] for node in ego_nodes]
         ego_traj = torch.stack(ego_traj,0)
         agent_nodes = scenario_tree[stage]
-        agent_traj = [node.traj[:,indices] for node in agent_nodes]
+        agent_traj = [node.traj[indices] for node in agent_nodes]
         agent_traj = torch.stack(agent_traj,0)
         ego_traj_tiled = ego_traj.unsqueeze(0).repeat(len(agent_nodes),1,1,1)
         col_loss = get_collision_loss(ego_traj_tiled,
-                                      agent_traj.transpose(1,2),
+                                      agent_traj,
                                       ego_extents.tile(len(agent_nodes),1),
                                       agent_extents.tile(len(agent_nodes),1,1),
                                       agent_types.tile(len(agent_nodes),1),

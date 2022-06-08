@@ -6,7 +6,8 @@ from tbsim.algos.algos import (
     SpatialPlanner,
     GANTrafficModel,
     DiscreteVAETrafficModel,
-    BehaviorCloningEC
+    BehaviorCloningEC,
+    SceneTreeTrafficModel
 )
 from tbsim.utils.batch_utils import batch_utils
 from tbsim.algos.multiagent_algos import MATrafficModel, HierarchicalAgentAwareModel
@@ -583,23 +584,23 @@ class TreeContingency(Hierarchical):
         #     ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
         #     ckpt_root_dir=self.ckpt_root_dir
         # )
-        # tree_ckpt_path, tree_config_path = get_checkpoint(
-        #     ngc_job_id="2000000",
-        #     ckpt_key="iter90000",
-        #     ckpt_root_dir=self.ckpt_root_dir
-        # )
-        # predictor_cfg = get_experiment_config_from_file(tree_config_path)
+        tree_ckpt_path, tree_config_path = get_checkpoint(
+            ngc_job_id="0100000",
+            ckpt_key="iter14000",
+            ckpt_root_dir="/home/yuxiaoc/repos/behavior-generation/checkpoints"
+        )
+        predictor_cfg = get_experiment_config_from_file(tree_config_path)
 
-        # predictor = L5TreeVAETrafficModel.load_from_checkpoint(
-        #     tree_ckpt_path,
-        #     algo_config=predictor_cfg.algo,
-        #     modality_shapes=self.get_modality_shapes(predictor_cfg),
-        # ).to(self.device).eval()
-        predictor_cfg = get_experiment_config_from_file("experiments/templates/l5_mixed_tree_vae_plan.json")
-        predictor = TreeVAETrafficModel(
+        predictor = SceneTreeTrafficModel.load_from_checkpoint(
+            tree_ckpt_path,
             algo_config=predictor_cfg.algo,
             modality_shapes=self.get_modality_shapes(predictor_cfg),
         ).to(self.device).eval()
+        # predictor_cfg = get_experiment_config_from_file("experiments/templates/l5_mixed_tree_vae_plan.json")
+        # predictor = SceneTreeTrafficModel(
+        #     algo_config=predictor_cfg.algo,
+        #     modality_shapes=self.get_modality_shapes(predictor_cfg),
+        # ).to(self.device).eval()
         return predictor, predictor_cfg.clone()
 
     def get_policy(self, planner=None, predictor=None, controller=None):

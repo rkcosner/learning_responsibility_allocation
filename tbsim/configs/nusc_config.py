@@ -68,5 +68,8 @@ class NuscEnvConfig(EnvConfig):
         # which frame to start an simulation episode with
         self.simulation.start_frame_index = 0
 
+        # whether to get lane information
+        self.simulation.vectorize_lane = False
+
         # whether include neighbor map patches
         self.incl_neighbor_map = False

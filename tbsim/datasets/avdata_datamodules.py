@@ -53,6 +53,7 @@ class UnifiedDataModule(pl.LightningDataModule):
             },
             verbose=False,
             max_agent_num = 1+data_cfg.other_agents_num,
+            vectorize_lane = data_cfg.vectorize_lane,
             num_workers=os.cpu_count(),
         )
         print(kwargs)

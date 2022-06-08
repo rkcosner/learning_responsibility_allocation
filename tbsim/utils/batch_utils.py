@@ -260,7 +260,7 @@ class AVDataBatchUtils(BatchUtils):
 
     @staticmethod
     def gen_ego_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types):
-        raise NotImplementedError
+        return l5_utils.gen_ego_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types)
 
     @staticmethod
     def gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types, mask=None):
