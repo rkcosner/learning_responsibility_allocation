@@ -2,7 +2,6 @@ wandb/
 videos/
 figures/
 checkpoints
-experiments/
 results/
 ## config files
 #*.yaml
