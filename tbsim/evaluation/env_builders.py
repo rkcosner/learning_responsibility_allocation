@@ -125,7 +125,7 @@ class EnvL5Builder(EnvironmentBuilder):
 
 
 class EnvNuscBuilder(EnvironmentBuilder):
-    def get_env(self,split_ego=False):
+    def get_env(self,split_ego=False,parse_obs=True):
         exp_cfg = self.exp_cfg.clone()
         exp_cfg.unlock()
         exp_cfg.train.dataset_path = self.eval_cfg.dataset_path
@@ -138,8 +138,9 @@ class EnvNuscBuilder(EnvironmentBuilder):
         future_sec = data_cfg.future_num_frames * data_cfg.step_time
         history_sec = data_cfg.history_num_frames * data_cfg.step_time
         neighbor_distance = data_cfg.max_agents_distance
+
         kwargs = dict(
-            desired_data=["nusc-val"],
+            desired_data=["nusc_mini-mini_val"],
             future_sec=(future_sec, future_sec),
             history_sec=(history_sec, history_sec),
             data_dirs={
@@ -157,8 +158,9 @@ class EnvNuscBuilder(EnvironmentBuilder):
             },
             num_workers=os.cpu_count(),
             desired_dt=data_cfg.step_time,
+            standardize_data=data_cfg.standardize_data,
         )
-
+        
         env_dataset = UnifiedDataset(**kwargs)
 
         metrics = dict()
@@ -173,7 +175,8 @@ class EnvNuscBuilder(EnvironmentBuilder):
             num_scenes=self.eval_cfg.num_scenes_per_batch,
             prediction_only=False,
             metrics=metrics,
-            split_ego=split_ego
+            split_ego=split_ego,
+            parse_obs = parse_obs,
         )
 
         return env

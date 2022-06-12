@@ -165,6 +165,13 @@ EXP_CONFIG_REGISTRY["nusc_tree_vae"] = ExperimentConfig(
     registered_name="nusc_tree_vae"
 )
 
+EXP_CONFIG_REGISTRY["nusc_diff_stack"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=BehaviorCloningConfig(),
+    registered_name="nusc_diff_stack"
+)
+
 
 EXP_CONFIG_REGISTRY["nusc_agent_predictor"] = ExperimentConfig(
     train_config=NuscTrainConfig(),

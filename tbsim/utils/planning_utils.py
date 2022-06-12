@@ -78,6 +78,10 @@ def get_drivable_area_loss(
         ).squeeze(-1)
     return lane_flags.max(dim=-1)[0]
 
+def get_progress_reward(ego_trajectories,d_sat = 10):
+    dis = torch.linalg.norm(ego_trajectories[...,-1,:2]-ego_trajectories[...,0,:2],dim=-1)
+    return 2/np.pi*torch.atan(dis/d_sat)
+
 
 def get_total_distance(ego_trajectories):
     """Reward that incentivizes progress."""
@@ -227,6 +231,7 @@ def contingency_planning(ego_tree,
                          weights,
                          num_frames_per_stage,
                          M,
+                         dt,
                          col_funcs=None):
     """A sampling-based contingency planning algorithm
 
@@ -266,6 +271,8 @@ def contingency_planning(ego_tree,
     stage_cost = dict()
     scenario_tree = tiled_to_tree(agent_traj,mode_prob,num_stage,num_frames_per_stage,M)
     scenario_root = scenario_tree[0][0]
+    v0 = ego_root.traj[0,2]
+    d_sat = v0.clip(min=2.0)*num_frames_per_stage*dt
     for stage in range(num_stage,0,-1):
         ego_nodes = ego_tree[stage]
         indices = [leaf_idx[node][0] for node in ego_nodes]
@@ -284,7 +291,10 @@ def contingency_planning(ego_tree,
                                       )
 
         lane_loss = get_drivable_area_loss(ego_traj.unsqueeze(0), raster_from_agent.unsqueeze(0), dis_map.unsqueeze(0), ego_extents.unsqueeze(0))
-        total_loss = weights["coll"]*col_loss+weights["lane"]*lane_loss
+        
+        progress_reward = get_progress_reward(ego_traj,d_sat=d_sat)
+        
+        total_loss = weights["collision_weight"]*col_loss+weights["lane_weight"]*lane_loss-weights["progress_weight"]*progress_reward.unsqueeze(0)
         for i in range(len(ego_nodes)):
             for j in range(len(agent_nodes)):
                 stage_cost[(ego_nodes[i],agent_nodes[j])] = total_loss[j,i]

@@ -69,7 +69,7 @@ class NuscEnvConfig(EnvConfig):
         self.simulation.start_frame_index = 0
 
         # whether to get lane information
-        self.simulation.vectorize_lane = False
+        self.simulation.vectorize_lane = "ego"
 
         # whether include neighbor map patches
         self.incl_neighbor_map = False

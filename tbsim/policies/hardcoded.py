@@ -295,6 +295,7 @@ class ContingencyPlanner(Policy):
         center_from_agent_b = list()
         raster_from_center_b = list()
         center_from_raster_b = list()
+        raster_from_world_b = list()
         maps_b = list()
         curr_speed_b = list()
         type_b = list()
@@ -333,15 +334,17 @@ class ContingencyPlanner(Policy):
             curr_pos = agents_hist_pos[:,-1]
             agents_from_center = GeoUtils.transform_matrices(-curr_yaw.flatten(),torch.zeros_like(curr_pos))@GeoUtils.transform_matrices(torch.zeros_like(curr_yaw).flatten(),-curr_pos)
                                  
-            raster_from_center = centered_raster_from_agent @ agents_from_center
+            # raster_from_center = centered_raster_from_agent @ agents_from_center
             center_from_raster = center_from_agents @ centered_agent_from_raster
 
-            raster_from_world = torch.cat((ego_obs["raster_from_world"][i:i+1],agent_obs["raster_from_world"][agent_idx]),0)
+            # raster_from_world = torch.cat((ego_obs["raster_from_world"][i:i+1],agent_obs["raster_from_world"][agent_idx]),0)
+
 
             agent_from_center_b.append(agents_from_center)
             center_from_agent_b.append(center_from_agents)
-            raster_from_center_b.append(raster_from_center)
+            # raster_from_center_b.append(raster_from_center)
             center_from_raster_b.append(center_from_raster)
+            # raster_from_world_b.append(raster_from_world)
 
             maps = torch.cat((ego_obs["image"][i:i+1],agent_obs["image"][agent_idx]),0)
             curr_speed = torch.cat((ego_obs["curr_speed"][i:i+1],agent_obs["curr_speed"][agent_idx]),0)
@@ -351,11 +354,11 @@ class ContingencyPlanner(Policy):
             curr_speed_b.append(curr_speed)
             type_b.append(agents_type)
             extents_b.append(agents_extent)
-
         if goal is not None:
             scene_goal = pad_sequence(scene_goal_b,batch_first=True,padding_value=0)
         else:
             scene_goal = None
+        
         scene_obs = dict(
         num_agents=num_agents,
         image=pad_sequence(maps_b,batch_first=True,padding_value=0),
@@ -372,11 +375,11 @@ class ContingencyPlanner(Policy):
         extent=pad_sequence(extents_b,batch_first=True,padding_value=0),
         raster_from_agent=ego_obs["raster_from_agent"],
         agent_from_raster=centered_agent_from_raster,
-        raster_from_center=raster_from_center,
-        center_from_raster=center_from_raster,
-        agents_from_center = agents_from_center,
-        center_from_agents = center_from_agents,
-        raster_from_world=raster_from_world,
+        # raster_from_center=pad_sequence(raster_from_center_b,batch_first=True,padding_value=0),
+        # center_from_raster=pad_sequence(center_from_raster_b,batch_first=True,padding_value=0),
+        agents_from_center=pad_sequence(agent_from_center_b,batch_first=True,padding_value=0),
+        center_from_agents=pad_sequence(center_from_agent_b,batch_first=True,padding_value=0),
+        # raster_from_world=pad_sequence(raster_from_world_b,batch_first=True,padding_value=0),
         agent_from_world=ego_obs["agent_from_world"],
         world_from_agent=ego_obs["world_from_agent"],
         )
@@ -424,7 +427,10 @@ class ContingencyPlanner(Policy):
             
             ego_trees.append(x0)
             nodes,_ = TrajTree.get_nodes_by_level(x0,depth=self.stage)
-            ego_nodes_by_stage.append(nodes)
+            if len(nodes[0])==0:
+                ego_nodes_by_stage.append(None)
+            else:
+                ego_nodes_by_stage.append(nodes)
 
             if len(nodes[self.stage]) > 0:
                 ego_trajs_i = torch.stack([leaf.total_traj for leaf in nodes[self.stage]], 0).float()
@@ -457,18 +463,23 @@ class ContingencyPlanner(Policy):
             Na_i = scene_obs["num_agents"][i]
             agent_traj_local = EC_pred["trajectories"][i,:N_i,:,1:Na_i].float()
             prob = EC_pred["p"][i,:N_i]
-            motion_policy = PlanUtils.contingency_planning(ego_nodes_by_stage[i],
-                                                           obs["extent"][i,:2],
-                                                           agent_traj_local,
-                                                           prob,
-                                                           scene_obs["extent"][i,1:Na_i,:2],
-                                                           scene_obs["agent_type"][i,1:Na_i],
-                                                           obs["raster_from_agent"][i],
-                                                           dis_map[i],
-                                                           {"coll": 1.0, "lane": 1.0},
-                                                           self.num_frames_per_stage,
-                                                           self.predictor.algo_config.vae.latent_dim,
-                                                           )
+            if ego_nodes_by_stage[i] is not None:
+                motion_policy = PlanUtils.contingency_planning(ego_nodes_by_stage[i],
+                                                            obs["extent"][i,:2],
+                                                            agent_traj_local,
+                                                            prob,
+                                                            scene_obs["extent"][i,1:Na_i,:2],
+                                                            scene_obs["agent_type"][i,1:Na_i],
+                                                            obs["raster_from_agent"][i],
+                                                            dis_map[i],
+                                                            {"collision_weight": 3.0, "lane_weight": 1.0, "progress_weight": 0.5},
+                                                            self.num_frames_per_stage,
+                                                            self.predictor.algo_config.vae.latent_dim,
+                                                            self.config.step_time,
+                                                            )
+            else:
+                import pdb
+                pdb.set_trace()
                                 
             opt_traj.append(motion_policy.get_plan(None,self.stage*self.num_frames_per_stage))
         self.timer.toc("planning")
@@ -593,3 +604,5 @@ class HierSplineSamplingPolicy(Policy):
         plan = torch.stack(plan,0)
         action = Action(positions=plan[...,:2],yaws=plan[...,2:])
         return action, {}
+
+

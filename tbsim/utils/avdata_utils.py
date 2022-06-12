@@ -9,7 +9,11 @@ from tbsim.configs.base import ExperimentConfig
 
 def avdata2posyawspeed(state, nan_to_zero=True):
     """Converts avdata's state format to pos, yaw, and speed. Set Nans to 0s"""
-    assert state.shape[-1] == 8  # x, y, vx, vy, ax, ay, sin(heading), cos(heading)
+    
+    if state.shape[-1] == 7:  # x, y, vx, vy, ax, ay, sin(heading), cos(heading)
+        state = torch.cat((state[...,:6],torch.sin(state[...,6:7]),torch.cos(state[...,6:7])),-1)
+    else:
+        state.shape[-1] == 8
     pos = state[..., :2]
     yaw = torch.atan2(state[..., [-2]], state[..., [-1]])
     speed = torch.norm(state[..., 2:4], dim=-1)
@@ -167,6 +171,7 @@ def parse_avdata_batch(batch: dict):
             ]).to(centered_state.device)
             b,a = curr_yaw.shape[:2]
             centered_agent_from_raster,_ = torch.linalg.inv_ex(centered_raster_from_agent)
+            
             agents_from_center = (GeoUtils.transform_matrices(-curr_yaw.flatten(),torch.zeros(b*a,2,device=curr_yaw.device))
                                  @GeoUtils.transform_matrices(torch.zeros(b*a,device=curr_yaw.device),-curr_pos.reshape(-1,2))).reshape(*curr_yaw.shape[:2],3,3)
             center_from_agents = GeoUtils.transform_matrices(curr_yaw.flatten(),curr_pos.reshape(-1,2)).reshape(*curr_yaw.shape[:2],3,3)
@@ -226,7 +231,6 @@ def parse_avdata_batch(batch: dict):
         maybe_pad_neighbor(batch)
         fut_pos, fut_yaw, _, fut_mask = avdata2posyawspeed(batch["agent_fut"])
         hist_pos, hist_yaw, hist_speed, hist_mask = avdata2posyawspeed(batch["agent_hist"])
-
         curr_speed = hist_speed[..., -1]
         curr_state = batch["curr_agent_state"]
         curr_yaw = curr_state[:, -1]

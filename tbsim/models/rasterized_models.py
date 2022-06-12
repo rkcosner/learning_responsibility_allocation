@@ -1402,6 +1402,7 @@ class RasterizedSceneTreeModel(nn.Module):
             device = agent_avail.device
             trajectories = torch.cat((batch_inputs["target_positions"], batch_inputs["target_yaws"]), dim=-1)
             curr_yaw = batch_inputs["history_yaws"][:,:,-1]
+
             agent_from_world = batch_inputs["agents_from_center"]@(batch_inputs["agent_from_world"].unsqueeze(1))*agent_avail[...,None,None]
             ego_to_agent = batch_inputs["agents_from_center"]*agent_avail[...,None,None]
             agent_to_ego = batch_inputs["center_from_agents"]*agent_avail[...,None,None]
@@ -1545,7 +1546,8 @@ class RasterizedSceneTreeModel(nn.Module):
         pred_batch["cond_traj"] = cond_traj_local
         pred_batch["agent_avail"] = agent_avail
         pred_batch["target_trajectory"] = trajectories
-        pred_batch["cond_idx"] = cond_idx
+        if cond_idx is not None:
+            pred_batch["cond_idx"] = torch.tensor(cond_idx).to(device)
 
         return pred_batch
 
