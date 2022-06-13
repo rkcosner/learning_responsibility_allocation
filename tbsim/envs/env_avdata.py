@@ -206,7 +206,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         ego_inds = [i for i, name in enumerate(self.current_agent_names) if name == "ego"]
         for i in ego_inds:
             im = render_state_avdata(
-                batch=self.get_observation(split=False)["agents"],
+                batch=self.get_observation(split_ego=False)["agents"],
                 batch_idx=i,
                 action=actions_to_take
             )
@@ -270,22 +270,28 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         return metrics
 
     def get_observation_by_scene(self):
-        obs = self.get_observation(split=False)["agents"]
+        obs = self.get_observation(split_ego=False)["agents"]
         obs_by_scene = []
         obs_scene_index = self.current_agent_scene_index
         for i in range(self.num_instances):
             obs_by_scene.append(TensorUtils.map_ndarray(obs, lambda x: x[obs_scene_index == i]))
         return obs_by_scene
 
-    def get_observation(self,split=None,return_raw = False):
-        if split is None:
-            split = self.split_ego
+    def get_observation(self,split_ego=None,return_raw=False):
+        if split_ego is None:
+            split_ego = self.split_ego
         if return_raw:
             if self._cached_raw_observation is not None:
                 return self._cached_raw_observation
         else:
             if self._cached_observation is not None:
-                return self._cached_observation
+                if split_ego and "ego" in self._cached_observation:
+                    return self._cached_observation
+                elif not split_ego and "ego" not in self._cached_observation:
+                    return self._cached_observation
+                else:
+                    self._cached_observation = None
+                    self._cached_raw_observation = None
 
         self.timers.tic("get_obs")
 
@@ -295,7 +301,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         self._cached_raw_observation = raw_obs
         if return_raw:
             return raw_obs
-        if split:
+        if split_ego:
                 
             ego_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name=="ego"])
             agent_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name!="ego"])
@@ -341,6 +347,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
         return self._cached_observation
 
+
     def get_observation_skimp(self):
         self.timers.tic("obs_skimp")
         
@@ -379,6 +386,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         combined_yaws[agent_idx] = agent_action["yaws"][:,:min_length]
         return RolloutAction(agents=Action(positions=combined_positions,yaws=combined_yaws),agents_info=step_actions.agents_info)
 
+
     def combine_obs(self,ego_obs,agent_obs):
         ego_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name=="ego"])
         agent_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name!="ego"])
@@ -397,14 +405,13 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         if self.is_done():
             raise SimulationException("Cannot step in a finished episode")
         self.timers.tic("_step")
-        raw_obs = self.get_observation(split=False,return_raw=True)
+        raw_obs = self.get_observation(split_ego=False,return_raw=True)
         obs = self.dataset.get_collate_fn(return_dict=True)(raw_obs)
         obs = parse_avdata_batch(obs)
         obs = TensorUtils.to_numpy(obs)
         obs["scene_index"] = self.current_agent_scene_index
         obs["track_id"] = self.current_agent_track_id
         obs = {k:v for k,v in obs.items() if not isinstance(v,list)}
-        
 
         # record metrics
         #TODO: fix the bugs in metrics
@@ -419,7 +426,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 self._done = True
                 self._frame_index += action_index
                 self._cached_observation = None
-
+                self._cached_raw_observation = None
                 return
             # # log state and action
             obs_skimp = self.get_observation_skimp()
@@ -454,6 +461,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 scene.step(scene_action, return_obs=False)
 
         self._cached_observation = None
+        self._cached_raw_observation = None
         self.timers.toc("_step")
         if self._frame_index + num_steps_to_take >= self.horizon:
             self._done = True

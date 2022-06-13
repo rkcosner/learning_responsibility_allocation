@@ -13,7 +13,7 @@ def avdata2posyawspeed(state, nan_to_zero=True):
     if state.shape[-1] == 7:  # x, y, vx, vy, ax, ay, sin(heading), cos(heading)
         state = torch.cat((state[...,:6],torch.sin(state[...,6:7]),torch.cos(state[...,6:7])),-1)
     else:
-        state.shape[-1] == 8
+        assert state.shape[-1] == 8
     pos = state[..., :2]
     yaw = torch.atan2(state[..., [-2]], state[..., [-1]])
     speed = torch.norm(state[..., 2:4], dim=-1)
@@ -127,204 +127,211 @@ def maybe_pad_neighbor(batch):
         hist_pad = torch.zeros(b, a, hist_len - neigh_len, batch["neigh_hist_extents"].shape[-1])
         batch["neigh_hist_extents"] = torch.cat((hist_pad, batch["neigh_hist_extents"]), dim=2)
 
+def parse_scene_centric(batch: dict):
+    num_agents = batch["num_agents"]
+    fut_pos, fut_yaw, _, fut_mask = avdata2posyawspeed(batch["agent_fut"])
+    hist_pos, hist_yaw, hist_speed, hist_mask = avdata2posyawspeed(batch["agent_hist"])
+
+    curr_pos = hist_pos[:,:,-1]
+    curr_yaw = hist_yaw[:,:,-1]
+    curr_speed = hist_speed[..., -1]
+    centered_state = batch["centered_agent_state"]
+    centered_yaw = centered_state[:, -1]
+    centered_pos = centered_state[:, :2]
+
+    # convert nuscenes types to l5kit types
+    agent_type = batch["agent_type"]
+    agent_type[agent_type < 0] = 0
+    agent_type[agent_type == 1] = 3
+    # mask out invalid extents
+    agent_hist_extent = batch["agent_hist_extent"]
+    agent_hist_extent[torch.isnan(agent_hist_extent)] = 0.
+
+
+    centered_world_from_agent = torch.inverse(batch["centered_agent_from_world_tf"])
+
+
+
+    # map-related
+    if batch["maps"] is not None:
+        map_res = batch["maps_resolution"][0,0]
+        h, w = batch["maps"].shape[-2:]
+        # TODO: pass env configs to here
+        
+        centered_raster_from_agent = torch.Tensor([
+            [map_res, 0, 0.25 * w],
+            [0, map_res, 0.5 * h],
+            [0, 0, 1]
+        ]).to(centered_state.device)
+        b,a = curr_yaw.shape[:2]
+        centered_agent_from_raster,_ = torch.linalg.inv_ex(centered_raster_from_agent)
+        
+        agents_from_center = (GeoUtils.transform_matrices(-curr_yaw.flatten(),torch.zeros(b*a,2,device=curr_yaw.device))
+                                @GeoUtils.transform_matrices(torch.zeros(b*a,device=curr_yaw.device),-curr_pos.reshape(-1,2))).reshape(*curr_yaw.shape[:2],3,3)
+        center_from_agents = GeoUtils.transform_matrices(curr_yaw.flatten(),curr_pos.reshape(-1,2)).reshape(*curr_yaw.shape[:2],3,3)
+        raster_from_center = centered_raster_from_agent @ agents_from_center
+        center_from_raster = center_from_agents @ centered_agent_from_raster
+
+        raster_from_world = batch["rasters_from_world_tf"]
+        world_from_raster,_ = torch.linalg.inv_ex(raster_from_world)
+        raster_from_world[torch.isnan(raster_from_world)] = 0.
+        world_from_raster[torch.isnan(world_from_raster)] = 0.
+
+        maps = rasterize_agents_scene(
+            batch["maps"],
+            hist_pos,
+            hist_yaw,
+            hist_mask,
+            raster_from_center,
+            map_res
+        )
+        drivable_map = get_drivable_region_map(batch["maps"])
+    else:
+        maps = None
+        drivable_map = None
+        raster_from_agent = None
+        agent_from_raster = None
+        raster_from_world = None
+
+    extent_scale = 1.0
+
+
+    d = dict(
+        image=maps,
+        drivable_map=drivable_map,
+        target_positions=fut_pos,
+        target_yaws=fut_yaw,
+        target_availabilities=fut_mask,
+        history_positions=hist_pos,
+        history_yaws=hist_yaw,
+        history_availabilities=hist_mask,
+        curr_speed=curr_speed,
+        centroid=curr_pos,
+        yaw=curr_yaw,
+        type=agent_type,
+        extent=agent_hist_extent.max(dim=-2)[0] * extent_scale,
+        raster_from_agent=centered_raster_from_agent,
+        agent_from_raster=centered_agent_from_raster,
+        raster_from_center=raster_from_center,
+        center_from_raster=center_from_raster,
+        agents_from_center = agents_from_center,
+        center_from_agents = center_from_agents,
+        raster_from_world=raster_from_world,
+        agent_from_world=batch["centered_agent_from_world_tf"],
+        world_from_agent=centered_world_from_agent,
+    )
+    return d 
+
+def parse_node_centric(batch: dict):
+    maybe_pad_neighbor(batch)
+    fut_pos, fut_yaw, _, fut_mask = avdata2posyawspeed(batch["agent_fut"])
+    hist_pos, hist_yaw, hist_speed, hist_mask = avdata2posyawspeed(batch["agent_hist"])
+    curr_speed = hist_speed[..., -1]
+    curr_state = batch["curr_agent_state"]
+    curr_yaw = curr_state[:, -1]
+    curr_pos = curr_state[:, :2]
+
+    # convert nuscenes types to l5kit types
+    agent_type = batch["agent_type"]
+    agent_type[agent_type < 0] = 0
+    agent_type[agent_type == 1] = 3
+    # mask out invalid extents
+    agent_hist_extent = batch["agent_hist_extent"]
+    agent_hist_extent[torch.isnan(agent_hist_extent)] = 0.
+
+    neigh_hist_pos, neigh_hist_yaw, neigh_hist_speed, neigh_hist_mask = avdata2posyawspeed(batch["neigh_hist"])
+    neigh_fut_pos, neigh_fut_yaw, _, neigh_fut_mask = avdata2posyawspeed(batch["neigh_fut"])
+    neigh_curr_speed = neigh_hist_speed[..., -1]
+    neigh_types = batch["neigh_types"]
+    # convert nuscenes types to l5kit types
+    neigh_types[neigh_types < 0] = 0
+    neigh_types[neigh_types == 1] = 3
+    # mask out invalid extents
+    neigh_hist_extents = batch["neigh_hist_extents"]
+    neigh_hist_extents[torch.isnan(neigh_hist_extents)] = 0.
+
+    world_from_agents = torch.inverse(batch["agents_from_world_tf"])
+
+    # map-related
+    if batch["maps"] is not None:
+        map_res = batch["maps_resolution"][0]
+        h, w = batch["maps"].shape[-2:]
+        # TODO: pass env configs to here
+        raster_from_agent = torch.Tensor([
+            [map_res, 0, 0.25 * w],
+            [0, map_res, 0.5 * h],
+            [0, 0, 1]
+        ]).to(curr_state.device)
+        agent_from_raster = torch.inverse(raster_from_agent)
+        raster_from_agent = TensorUtils.unsqueeze_expand_at(raster_from_agent, size=batch["maps"].shape[0], dim=0)
+        agent_from_raster = TensorUtils.unsqueeze_expand_at(agent_from_raster, size=batch["maps"].shape[0], dim=0)
+        raster_from_world = torch.bmm(raster_from_agent, batch["agents_from_world_tf"])
+
+        all_hist_pos = torch.cat((hist_pos[:, None], neigh_hist_pos), dim=1)
+        all_hist_yaw = torch.cat((hist_yaw[:, None], neigh_hist_yaw), dim=1)
+        all_hist_mask = torch.cat((hist_mask[:, None], neigh_hist_mask), dim=1)
+        maps = rasterize_agents(
+            batch["maps"],
+            all_hist_pos,
+            all_hist_yaw,
+            all_hist_mask,
+            raster_from_agent,
+            map_res
+        )
+        drivable_map = get_drivable_region_map(batch["maps"])
+    else:
+        maps = None
+        drivable_map = None
+        raster_from_agent = None
+        agent_from_raster = None
+        raster_from_world = None
+
+    extent_scale = 1.0
+    d = dict(
+        image=maps,
+        drivable_map=drivable_map,
+        target_positions=fut_pos,
+        target_yaws=fut_yaw,
+        target_availabilities=fut_mask,
+        history_positions=hist_pos,
+        history_yaws=hist_yaw,
+        history_availabilities=hist_mask,
+        curr_speed=curr_speed,
+        centroid=curr_pos,
+        yaw=curr_yaw,
+        type=agent_type,
+        extent=agent_hist_extent.max(dim=-2)[0] * extent_scale,
+        raster_from_agent=raster_from_agent,
+        agent_from_raster=agent_from_raster,
+        raster_from_world=raster_from_world,
+        agent_from_world=batch["agents_from_world_tf"],
+        world_from_agent=world_from_agents,
+        all_other_agents_history_positions=neigh_hist_pos,
+        all_other_agents_history_yaws=neigh_hist_yaw,
+        all_other_agents_history_availabilities=neigh_hist_mask,
+        all_other_agents_history_availability=neigh_hist_mask,  # dump hack to agree with l5kit's typo ...
+        all_other_agents_curr_speed=neigh_curr_speed,
+        all_other_agents_future_positions=neigh_fut_pos,
+        all_other_agents_future_yaws=neigh_fut_yaw,
+        all_other_agents_future_availability=neigh_fut_mask,
+        all_other_agents_types=neigh_types,
+        all_other_agents_extents=neigh_hist_extents.max(dim=-2)[0] * extent_scale,
+        all_other_agents_history_extents=neigh_hist_extents * extent_scale,
+        ego_lanes = batch["agent_lanes"]
+
+    )
+    return d
 
 @torch.no_grad()
 def parse_avdata_batch(batch: dict):
     
     if "num_agents" in batch:
         # scene centric
-
-        num_agents = batch["num_agents"]
-        fut_pos, fut_yaw, _, fut_mask = avdata2posyawspeed(batch["agent_fut"])
-        hist_pos, hist_yaw, hist_speed, hist_mask = avdata2posyawspeed(batch["agent_hist"])
-
-        curr_pos = hist_pos[:,:,-1]
-        curr_yaw = hist_yaw[:,:,-1]
-        curr_speed = hist_speed[..., -1]
-        centered_state = batch["centered_agent_state"]
-        centered_yaw = centered_state[:, -1]
-        centered_pos = centered_state[:, :2]
-
-        # convert nuscenes types to l5kit types
-        agent_type = batch["agent_type"]
-        agent_type[agent_type < 0] = 0
-        agent_type[agent_type == 1] = 3
-        # mask out invalid extents
-        agent_hist_extent = batch["agent_hist_extent"]
-        agent_hist_extent[torch.isnan(agent_hist_extent)] = 0.
-
-
-        centered_world_from_agent = torch.inverse(batch["centered_agent_from_world_tf"])
-
-
-
-        # map-related
-        if batch["maps"] is not None:
-            map_res = batch["maps_resolution"][0,0]
-            h, w = batch["maps"].shape[-2:]
-            # TODO: pass env configs to here
-            
-            centered_raster_from_agent = torch.Tensor([
-                [map_res, 0, 0.25 * w],
-                [0, map_res, 0.5 * h],
-                [0, 0, 1]
-            ]).to(centered_state.device)
-            b,a = curr_yaw.shape[:2]
-            centered_agent_from_raster,_ = torch.linalg.inv_ex(centered_raster_from_agent)
-            
-            agents_from_center = (GeoUtils.transform_matrices(-curr_yaw.flatten(),torch.zeros(b*a,2,device=curr_yaw.device))
-                                 @GeoUtils.transform_matrices(torch.zeros(b*a,device=curr_yaw.device),-curr_pos.reshape(-1,2))).reshape(*curr_yaw.shape[:2],3,3)
-            center_from_agents = GeoUtils.transform_matrices(curr_yaw.flatten(),curr_pos.reshape(-1,2)).reshape(*curr_yaw.shape[:2],3,3)
-            raster_from_center = centered_raster_from_agent @ agents_from_center
-            center_from_raster = center_from_agents @ centered_agent_from_raster
-
-            raster_from_world = batch["rasters_from_world_tf"]
-            world_from_raster,_ = torch.linalg.inv_ex(raster_from_world)
-            raster_from_world[torch.isnan(raster_from_world)] = 0.
-            world_from_raster[torch.isnan(world_from_raster)] = 0.
-
-            maps = rasterize_agents_scene(
-                batch["maps"],
-                hist_pos,
-                hist_yaw,
-                hist_mask,
-                raster_from_center,
-                map_res
-            )
-            drivable_map = get_drivable_region_map(batch["maps"])
-        else:
-            maps = None
-            drivable_map = None
-            raster_from_agent = None
-            agent_from_raster = None
-            raster_from_world = None
-
-        extent_scale = 1.0
-
-
-        d = dict(
-            image=maps,
-            drivable_map=drivable_map,
-            target_positions=fut_pos,
-            target_yaws=fut_yaw,
-            target_availabilities=fut_mask,
-            history_positions=hist_pos,
-            history_yaws=hist_yaw,
-            history_availabilities=hist_mask,
-            curr_speed=curr_speed,
-            centroid=curr_pos,
-            yaw=curr_yaw,
-            type=agent_type,
-            extent=agent_hist_extent.max(dim=-2)[0] * extent_scale,
-            raster_from_agent=centered_raster_from_agent,
-            agent_from_raster=centered_agent_from_raster,
-            raster_from_center=raster_from_center,
-            center_from_raster=center_from_raster,
-            agents_from_center = agents_from_center,
-            center_from_agents = center_from_agents,
-            raster_from_world=raster_from_world,
-            agent_from_world=batch["centered_agent_from_world_tf"],
-            world_from_agent=centered_world_from_agent,
-        )
+        d = parse_scene_centric(batch)
+        
     else:
         # agent centric
-        maybe_pad_neighbor(batch)
-        fut_pos, fut_yaw, _, fut_mask = avdata2posyawspeed(batch["agent_fut"])
-        hist_pos, hist_yaw, hist_speed, hist_mask = avdata2posyawspeed(batch["agent_hist"])
-        curr_speed = hist_speed[..., -1]
-        curr_state = batch["curr_agent_state"]
-        curr_yaw = curr_state[:, -1]
-        curr_pos = curr_state[:, :2]
-
-        # convert nuscenes types to l5kit types
-        agent_type = batch["agent_type"]
-        agent_type[agent_type < 0] = 0
-        agent_type[agent_type == 1] = 3
-        # mask out invalid extents
-        agent_hist_extent = batch["agent_hist_extent"]
-        agent_hist_extent[torch.isnan(agent_hist_extent)] = 0.
-
-        neigh_hist_pos, neigh_hist_yaw, neigh_hist_speed, neigh_hist_mask = avdata2posyawspeed(batch["neigh_hist"])
-        neigh_fut_pos, neigh_fut_yaw, _, neigh_fut_mask = avdata2posyawspeed(batch["neigh_fut"])
-        neigh_curr_speed = neigh_hist_speed[..., -1]
-        neigh_types = batch["neigh_types"]
-        # convert nuscenes types to l5kit types
-        neigh_types[neigh_types < 0] = 0
-        neigh_types[neigh_types == 1] = 3
-        # mask out invalid extents
-        neigh_hist_extents = batch["neigh_hist_extents"]
-        neigh_hist_extents[torch.isnan(neigh_hist_extents)] = 0.
-
-        world_from_agents = torch.inverse(batch["agents_from_world_tf"])
-
-        # map-related
-        if batch["maps"] is not None:
-            map_res = batch["maps_resolution"][0]
-            h, w = batch["maps"].shape[-2:]
-            # TODO: pass env configs to here
-            raster_from_agent = torch.Tensor([
-                [map_res, 0, 0.25 * w],
-                [0, map_res, 0.5 * h],
-                [0, 0, 1]
-            ]).to(curr_state.device)
-            agent_from_raster = torch.inverse(raster_from_agent)
-            raster_from_agent = TensorUtils.unsqueeze_expand_at(raster_from_agent, size=batch["maps"].shape[0], dim=0)
-            agent_from_raster = TensorUtils.unsqueeze_expand_at(agent_from_raster, size=batch["maps"].shape[0], dim=0)
-            raster_from_world = torch.bmm(raster_from_agent, batch["agents_from_world_tf"])
-
-            all_hist_pos = torch.cat((hist_pos[:, None], neigh_hist_pos), dim=1)
-            all_hist_yaw = torch.cat((hist_yaw[:, None], neigh_hist_yaw), dim=1)
-            all_hist_mask = torch.cat((hist_mask[:, None], neigh_hist_mask), dim=1)
-            maps = rasterize_agents(
-                batch["maps"],
-                all_hist_pos,
-                all_hist_yaw,
-                all_hist_mask,
-                raster_from_agent,
-                map_res
-            )
-            drivable_map = get_drivable_region_map(batch["maps"])
-        else:
-            maps = None
-            drivable_map = None
-            raster_from_agent = None
-            agent_from_raster = None
-            raster_from_world = None
-
-        extent_scale = 1.0
-        d = dict(
-            image=maps,
-            drivable_map=drivable_map,
-            target_positions=fut_pos,
-            target_yaws=fut_yaw,
-            target_availabilities=fut_mask,
-            history_positions=hist_pos,
-            history_yaws=hist_yaw,
-            history_availabilities=hist_mask,
-            curr_speed=curr_speed,
-            centroid=curr_pos,
-            yaw=curr_yaw,
-            type=agent_type,
-            extent=agent_hist_extent.max(dim=-2)[0] * extent_scale,
-            raster_from_agent=raster_from_agent,
-            agent_from_raster=agent_from_raster,
-            raster_from_world=raster_from_world,
-            agent_from_world=batch["agents_from_world_tf"],
-            world_from_agent=world_from_agents,
-            all_other_agents_history_positions=neigh_hist_pos,
-            all_other_agents_history_yaws=neigh_hist_yaw,
-            all_other_agents_history_availabilities=neigh_hist_mask,
-            all_other_agents_history_availability=neigh_hist_mask,  # dump hack to agree with l5kit's typo ...
-            all_other_agents_curr_speed=neigh_curr_speed,
-            all_other_agents_future_positions=neigh_fut_pos,
-            all_other_agents_future_yaws=neigh_fut_yaw,
-            all_other_agents_future_availability=neigh_fut_mask,
-            all_other_agents_types=neigh_types,
-            all_other_agents_extents=neigh_hist_extents.max(dim=-2)[0] * extent_scale,
-            all_other_agents_history_extents=neigh_hist_extents * extent_scale,
-            ego_lanes = batch["agent_lanes"]
-
-        )
+        d = parse_node_centric(batch)
 
     batch = dict(batch)
     batch.update(d)

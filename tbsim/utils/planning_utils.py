@@ -9,6 +9,7 @@ from tbsim.utils.geometry_utils import (
     VEH_VEH_collision,
     VEH_PED_collision,
 )
+TRAJ_INDEX = [0, 1, 4]  
 from Pplan.Sampling.tree import Tree
 class AgentTrajTree(Tree):
     def __init__(self, traj, parent, depth, prob=None):
@@ -23,7 +24,7 @@ class AgentTrajTree(Tree):
 
 # The state in Pplan contains more higher order derivatives, TRAJ_INDEX selects x,y, and heading 
 # out of the longer state vector
-TRAJ_INDEX = [0, 1, 4]  
+
 
 
 def get_collision_loss(
