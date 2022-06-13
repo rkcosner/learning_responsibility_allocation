@@ -59,6 +59,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         self._prediction_only = prediction_only
 
         self._cached_observation = None
+        self._cached_raw_observation = None
 
         self.timers = Timers()
 
@@ -182,6 +183,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
         self._frame_index = 0
         self._cached_observation = None
+        self._cached_raw_observation = None
         self._done = False
 
         obs_keys_to_log = [
@@ -202,7 +204,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         ego_inds = [i for i, name in enumerate(self.current_agent_names) if name == "ego"]
         for i in ego_inds:
             im = render_state_avdata(
-                batch=self.get_observation(split=False)["agents"],
+                batch=self.get_observation(split_ego=False)["agents"],
                 batch_idx=i,
                 action=actions_to_take
             )
@@ -266,97 +268,83 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         return metrics
 
     def get_observation_by_scene(self):
-        obs = self.get_observation(split=False)["agents"]
+        obs = self.get_observation(split_ego=False)["agents"]
         obs_by_scene = []
         obs_scene_index = self.current_agent_scene_index
         for i in range(self.num_instances):
             obs_by_scene.append(TensorUtils.map_ndarray(obs, lambda x: x[obs_scene_index == i]))
         return obs_by_scene
 
-    def get_observation(self,split=None):
-        if split is None:
-            split = self.split_ego
-        if self._cached_observation is not None:
-            return self._cached_observation
+    def get_observation(self,split_ego=None,return_raw=False):
+        if split_ego is None:
+            split_ego = self.split_ego
+        if return_raw:
+            if self._cached_raw_observation is not None:
+                return self._cached_raw_observation
+        else:
+            if self._cached_observation is not None:
+                if split_ego and "ego" in self._cached_observation:
+                    return self._cached_observation
+                elif not split_ego and "ego" not in self._cached_observation:
+                    return self._cached_observation
+                else:
+                    self._cached_observation = None
+                    self._cached_raw_observation = None
 
         self.timers.tic("get_obs")
 
         raw_obs = []
-        
-        if self.parse_obs:
-            for si, scene in enumerate(self._current_scenes):
-                raw_obs.extend(scene.get_obs(collate=False))
-            agent_obs = self.dataset.get_collate_fn(return_dict=True)(raw_obs)
-            agent_obs = parse_avdata_batch(agent_obs)
-
-            agent_obs = TensorUtils.to_numpy(agent_obs)
-            agent_obs["scene_index"] = self.current_agent_scene_index
-            agent_obs["track_id"] = self.current_agent_track_id
-        else:
-            for si, scene in enumerate(self._current_scenes):
-                raw_obs.append(scene.get_obs(collate=True))
-            agent_obs = raw_obs
-        
-        # cache observations
-        if split:
+        for si, scene in enumerate(self._current_scenes):
+            raw_obs.extend(scene.get_obs(collate=False))
+        self._cached_raw_observation = raw_obs
+        if return_raw:
+            return raw_obs
+        if split_ego:
+                
             ego_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name=="ego"])
             agent_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name!="ego"])
-            ego_obs = dict()
-            other_agent_obs = dict()
-            if self.parse_obs:
-                for k,v in agent_obs.items():
-                    if v is not None:
-                        if isinstance(v,list):
-                            ego_obs[k] = [v[idx] for idx in ego_idx]
-                            other_agent_obs[k] = [v[idx] for idx in agent_idx]
-                        else:
-                            ego_obs[k] = v[ego_idx]
-                            other_agent_obs[k] = v[agent_idx]
-                    else:
-                        ego_obs[k]=None
-                        other_agent_obs[k]=None
+            ego_obs_raw = [raw_obs[idx] for idx in ego_idx]
+            ego_obs_collated = self.dataset.get_collate_fn(return_dict=True)(ego_obs_raw)
+            agent_obs_raw = [raw_obs[idx] for idx in agent_idx]
+            agent_obs_collated = self.dataset.get_collate_fn(return_dict=True)(agent_obs_raw)
+            
+            if self.parse_obs==True:
+                parse_plan = dict(ego=True,agent=True)
+            elif self.parse_obs==False:
+                parse_plan = dict(ego=False,agent=False)
+            elif isinstance(self.parse_obs,dict):
+                parse_plan = self.parse_obs
+            if parse_plan["ego"]:
+                ego_obs = parse_avdata_batch(ego_obs_collated)
+                ego_obs = TensorUtils.to_numpy(ego_obs)
+                ego_obs["scene_index"] = self.current_agent_scene_index[ego_idx]
+                ego_obs["track_id"] = self.current_agent_track_id[ego_idx]
             else:
-                combined_obs_ego = dict()
-                combined_obs_agent = dict()
-                for k,v in agent_obs[0].items():
-                    if isinstance(v,torch.Tensor):
-                        if k in ["neigh_types","neigh_hist","neigh_hist_extents","neigh_hist_len","neigh_fut","neigh_fut_extents","neigh_fut_len","agent_lanes"]:
-                            combined_v = list()
-                            combined_v = []
-                            for batch in agent_obs:
-                                combined_v.extend([batch[k][i] for i in range(batch[k].shape[0])])
-                                # combined_v.extend(torch.split(batch[k],1,0))
-                            if v.dtype in [torch.int32,torch.int64]:
-                                combined_v = pad_sequence(combined_v,  batch_first=True,padding_value=0)
-                            else:
-                                combined_v = pad_sequence(combined_v,  batch_first=True,padding_value=np.nan)
-                        else:
-
-                            combined_v = [batch[k] for batch in agent_obs]
-                            combined_v = torch.cat(combined_v,0)
-
-                        combined_obs_ego[k] = combined_v[ego_idx]
-                        combined_obs_agent[k] = combined_v[agent_idx]
-                    elif isinstance(v,list):
-                        combined_v = list()
-                        for batch in agent_obs:
-                            combined_v.extend(batch[k])
-                        combined_obs_ego[k] = [combined_v[idx] for idx in ego_idx]
-                        combined_obs_agent[k] = [combined_v[idx] for idx in agent_idx]
-                    else:
-                        combined_obs_ego[k] = None
-                        combined_obs_agent[k] = None
-
-                ego_obs = AgentBatch(**combined_obs_ego)
-                agent_obs = AgentBatch(**combined_obs_agent)
-
-                
-            self._cached_observation = dict(ego=ego_obs,agents=other_agent_obs)
+                ego_obs = AgentBatch(**ego_obs_collated)
+            if parse_plan["agent"]:
+                agent_obs = parse_avdata_batch(agent_obs_collated)
+                agent_obs = TensorUtils.to_numpy(agent_obs)
+                agent_obs["scene_index"] = self.current_agent_scene_index[agent_idx]
+                agent_obs["track_id"] = self.current_agent_track_id[agent_idx]
+            else:
+                agent_obs = AgentBatch(**agent_obs_collated)
+            self._cached_observation = dict(ego=ego_obs,agents=agent_obs)
         else:
+            assert isinstance(self.parse_obs,bool)
+            agent_obs = self.dataset.get_collate_fn(return_dict=True)(raw_obs)
+            if self.parse_obs:
+                agent_obs = parse_avdata_batch(agent_obs)
+                agent_obs = TensorUtils.to_numpy(agent_obs)
+                agent_obs["scene_index"] = self.current_agent_scene_index
+                agent_obs["track_id"] = self.current_agent_track_id
+            else:
+                agent_obs = AgentBatch(**agent_obs)
             self._cached_observation = dict(agents=agent_obs)
+
         self.timers.toc("get_obs")
 
         return self._cached_observation
+
 
     def get_observation_skimp(self):
         self.timers.tic("obs_skimp")
@@ -387,13 +375,15 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         agent_action = step_actions.agents.to_dict()
         ego_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name=="ego"])
         agent_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name!="ego"])
-        combined_positions = np.zeros([len(self.current_agent_names),*ego_action["positions"].shape[1:]])
-        combined_yaws = np.zeros([len(self.current_agent_names),*ego_action["yaws"].shape[1:]])
-        combined_positions[ego_idx] = ego_action["positions"]
-        combined_positions[agent_idx] = agent_action["positions"]
-        combined_yaws[ego_idx] = ego_action["yaws"]
-        combined_yaws[agent_idx] = agent_action["yaws"]
+        min_length = min(ego_action["positions"].shape[1],agent_action["positions"].shape[1])
+        combined_positions = np.zeros([len(self.current_agent_names),min_length,2])
+        combined_yaws = np.zeros([len(self.current_agent_names),min_length,1])
+        combined_positions[ego_idx] = ego_action["positions"][:,:min_length]
+        combined_positions[agent_idx] = agent_action["positions"][:,:min_length]
+        combined_yaws[ego_idx] = ego_action["yaws"][:,:min_length]
+        combined_yaws[agent_idx] = agent_action["yaws"][:,:min_length]
         return RolloutAction(agents=Action(positions=combined_positions,yaws=combined_yaws),agents_info=step_actions.agents_info)
+
 
     def combine_obs(self,ego_obs,agent_obs):
         ego_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name=="ego"])
@@ -413,11 +403,14 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         if self.is_done():
             raise SimulationException("Cannot step in a finished episode")
         self.timers.tic("_step")
-        obs = self.get_observation(split=False)
-        if "ego" in obs:
-            obs = self.combine_obs(obs["ego"],obs["agents"])
-        else:
-            obs = obs["agents"]
+        raw_obs = self.get_observation(split_ego=False,return_raw=True)
+        obs = self.dataset.get_collate_fn(return_dict=True)(raw_obs)
+        obs = parse_avdata_batch(obs)
+        obs = TensorUtils.to_numpy(obs)
+        obs["scene_index"] = self.current_agent_scene_index
+        obs["track_id"] = self.current_agent_track_id
+        obs = {k:v for k,v in obs.items() if not isinstance(v,list)}
+
 
         # record metrics
         self._add_per_step_metrics(obs)
@@ -431,6 +424,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 self._done = True
                 self._frame_index += action_index
                 self._cached_observation = None
+                self._cached_raw_observation = None
                 return
             # # log state and action
             obs_skimp = self.get_observation_skimp()
@@ -465,6 +459,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 scene.step(scene_action, return_obs=False)
 
         self._cached_observation = None
+        self._cached_raw_observation = None
         self.timers.toc("_step")
         if self._frame_index + num_steps_to_take >= self.horizon:
             self._done = True
