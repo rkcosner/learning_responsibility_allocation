@@ -642,11 +642,12 @@ class DSPolicy(PolicyComposer):
             exp_cfg = get_registered_experiment_config("nusc_diff_stack")
             exp_cfg.env.data_generation_params.vectorize_lane="None"
             exp_cfg.env.data_generation_params.standardize_data = False
-            exp_cfg.env.data_generation_params.parse_obs = False
-            exp_cfg.algo.history_num_frames = 8
-            exp_cfg.algo.history_num_frames_ego = 8
-            exp_cfg.algo.history_num_frames_agents = 8
-
+            exp_cfg.env.data_generation_params.parse_obs = {"ego":False,"agent":True}
+            exp_cfg.algo.history_num_frames = 10
+            exp_cfg.algo.history_num_frames_ego = 10
+            exp_cfg.algo.history_num_frames_agents = 10
+            exp_cfg.eval.metrics.compute_analytical_metrics=False
+            exp_cfg.eval.metrics.compute_learned_metrics=False
         elif self.eval_config.env == "l5kit":
             exp_cfg = get_registered_experiment_config("l5_bc")
         else:
@@ -665,7 +666,7 @@ class DSPolicy(PolicyComposer):
                       log_dir='../experiments/logs', log_tag='', lr_step=None, map_encoding=False, 
                       no_edge_encoding=False, no_plan_train=False, no_train_pred=False, node_freq_mult_eval=False, 
                       node_freq_mult_train=False, offline_scene_graph='yes', override_attention_radius=[], 
-                      plan_cost='', plan_cost_for_gt='', plan_dt=0.0, plan_init='fitted', plan_loss='mse', 
+                      plan_cost='', plan_cost_for_gt='', plan_dt=0.0, plan_init='nopred_plan', plan_loss='mse', 
                       plan_loss_scale_end=-1, plan_loss_scale_start=-1, plan_loss_scaler=10000.0, 
                       plan_lqr_eps=0.01, planner='', pred_loss_scaler=1.0, pred_loss_temp=1.0, 
                       pred_loss_weights='none', preprocess_workers=0, profile='', runmode='train', 
@@ -678,4 +679,6 @@ class DSPolicy(PolicyComposer):
         import torch.distributed as dist
         dist.init_process_group(backend='nccl',
                             init_method='env://')
+
+
         return DiffStackPolicy(diff_args,device=self.device), exp_cfg

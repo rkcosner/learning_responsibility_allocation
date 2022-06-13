@@ -1,4 +1,5 @@
 import enum
+from glob import glob
 from os import device_encoding
 import numpy as np
 import pytorch_lightning as pl
@@ -330,19 +331,25 @@ class DiffStackPolicy(Policy):
 
 
             # local to global
+
             scene = self.find_scene(scene_id)
             x_t[batch_i,..., 0] += scene.x_min
             x_t[batch_i,..., 1] += scene.y_min
-            agent_states[batch_i][0] = x_t[batch_i]
+            if np.isnan(x_t).any():
+                x_t = pad_nan(x_t)
+            # this is due to the agent policy takes 10 steps history while the ego policy (diff stack) takes 8
+            agent_states[batch_i][0] = x_t[batch_i,-9:]
             neighbor_x_t = new_form_batch.neigh_hist[batch_i][:new_form_batch.num_neigh[batch_i]]
             neighbor_x_t = torch.cat((neighbor_x_t,torch.zeros_like(neighbor_x_t[...,0:1])),-1)
             neighbor_x_t[...,0]+=scene.x_min
             neighbor_x_t[...,1]+=scene.y_min
+            if np.isnan(neighbor_x_t).any():
+                neighbor_x_t = pad_nan(neighbor_x_t.reshape(-1,neighbor_x_t.shape[-1])).reshape(*neighbor_x_t.shape)
             for i in range(neighbor_x_t.shape[0]):
-                agent_states[batch_i][i+1] = neighbor_x_t[i]
-            # for agent_i in range(5):
-            #     agent_states[batch_i][agent_i] = x_t[batch_i+agent_i]  # randomly take from a different batch
+                agent_states[batch_i][i+1] = neighbor_x_t[i,-9:]
 
+            
+            
         return agent_states, scene_ids
     def find_scene(self,scene_id):
         for scene in self.eval_scenes:
@@ -353,7 +360,8 @@ class DiffStackPolicy(Policy):
         self.trajectron.eval()
     
     def get_action(self,obs,**kwargs)-> Tuple[Action, Dict]:
-        state_histories, scene_ids = self.reformatting(obs)
+        state_histories, _ = self.reformatting(obs)
+        scene_ids = obs.scene_ids
         max_hl = self.hyperparams['maximum_history_length']
         ph = self.hyperparams['prediction_horizon']
         past_and_future_trajlen = max_hl + ph            
@@ -364,10 +372,10 @@ class DiffStackPolicy(Policy):
         node_type = self.eval_env.NodeType.VEHICLE
         edge_types = [edge_type for edge_type in self.eval_env.get_edge_types() if edge_type[0] is node_type]   
         
-
+        batch_pos = list()
+        batch_yaw = list()
         for batch_i,scene_id in enumerate(scene_ids):
-            import pdb
-            pdb.set_trace()
+
             scene = self.find_scene(scene_id)
 
             # Create nodes
@@ -391,7 +399,7 @@ class DiffStackPolicy(Policy):
                 ay = torch.diff(vy, prepend=vy[[0]] - (vy[[1]] - vy[[0]])) / 0.5
                 
                 constvel_future = torch.stack([pred_constvel[:, 0], pred_constvel[:, 1], vx, vy, ax, ay, pred_constvel[:, -2], torch.zeros_like(vx)], dim=1)
-                # TODO: figure out the right signal
+
                 stathist_and_future = torch.cat((statehist, constvel_future), dim=0)
                 x_global, y_global, vx, vy, ax, ay, yaw, _ = stathist_and_future.transpose(1, 0)  # (t, 8) --> (8, t)
                 # print (x)
@@ -399,8 +407,6 @@ class DiffStackPolicy(Policy):
                 # print (node.data[0:1, (('position', 'x'))])
                 node_dict[agent_id] = node
 
-            import pdb
-            pdb.set_trace()
             # replace nodes in the scene
             scene.nodes = list(node_dict.values())
             # get rid of the old scene graph
@@ -421,103 +427,70 @@ class DiffStackPolicy(Policy):
 
             # Create dummy training batch
             with torch.no_grad():
-                # TODO make sure history and future are aligned, i.e.  we have the current state as history (and repeated twice as t+1, t+2)
-                
+            # TODO make sure history and future are aligned, i.e.  we have the current state as history (and repeated twice as t+1, t+2)
+            
                 sample = get_node_timestep_data(self.eval_env, scene, max_hl, pred_node, state_fields_dict,
                                 self.hyperparams['pred_state'], edge_types, 
                                 max_hl, ph, self.hyperparams, self.nusc_maps)
-                import pdb
-                pdb.set_trace()
                 # replace planning agent
                 sample = self.trajectron.augment_sample_with_dummy_plan_info(sample, ego_traj=ego)
-
-                # # Debug
-                # (first_history_index,
-                #     x_t, y_t, x_st_t, y_st_t,
-                #     neighbors_data_st,
-                #     neighbors_edge_value,
-                #     robot_traj_st_t,
-                #     map_input, neighbors_future_data, plan_data) = sample
 
                 batch = collate([sample])
 
                 eval_loss_node_type, plot_data = self.trajectron.predict_and_evaluate_batch(batch, node_type, max_hl, return_plot_data=True)
-                # for metric, values in eval_loss_node_type.items():
-                #     eval_loss[metric].append(values.cpu().numpy()) 
-
-                # TODO need to handle invalid planning case, e.g. give up episode or take random action
-
-                plan_metric_dict, plan_info_dict = plot_data['plan']
-        
-                plan_x = plan_info_dict['plan_x'].squeeze(1)  # x, y, yaw, vel
-                plan_u = plan_info_dict['plan_u'].squeeze(1)  # dyaw, acc
-                plan_valid = eval_loss_node_type['plan_valid'].squeeze(0) and eval_loss_node_type['plan_converged'].squeeze(0)
-
-                # local to global
-                plan_x[:, 0] += scene.x_min
-                plan_x[:, 1] += scene.y_min
-                import pdb
-                pdb.set_trace()
-
-        action = Action(positions=opt_traj[...,:2],yaws=opt_traj[...,2:])
-        action_info = dict()
-        action_info["action_samples"] = {"positions":ego_traj_samples[...,:2],"yaws":ego_traj_samples[...,2:]}
-        return action, action_info
 
 
+            # TODO need to handle invalid planning case, e.g. give up episode or take random action
 
-
-
-    class DummySim(object):
-        def __init__(self):
-            self.batch_iterator = iter(eval_dataloader)
-            self.agent_states = {}
-            self.scene_id = None
-
-        def step(self, plan_x, plan_u):
-            # assumes agent_states[0] is ego
-            # always reset
-            return self.reset()
-            # return self.agent_states, self.scene_id
-
-        def reset(self):
-            # currently just ignore the plan and construct observation from a new batch
-            new_form_batch = next(self.batch_iterator)
-            old_form_batch = reformat_batch(new_form_batch, eval_dataset, eval_env, hyperparams, cached_sample_scene_map)
-
-            (first_history_index,
-                x_t, y_t, x_st_t, y_st_t,
-                neighbors_data_st,  # dict of lists. edge_type -> [batch][neighbor]: Tensor(time, statedim). Represetns 
-                neighbors_edge_value,
-                robot_traj_st_t,
-                map, neighbors_future_data, plan_data) = old_form_batch
-            batch_i = 0
-            scene_id = plan_data['scene_ids'][batch_i]
-            
-            same_scene = torch.tensor([scene_id == s_id for s_id in plan_data["scene_ids"]])
-            x_t = x_t[same_scene]
-            
-            # construct dummy observation from x_t and neighbors_data
-            agent_states = {}
-            agent_i = 0
-            # for agent_i, state_hist in enumerate(neighbors_data_st[("VEHICLE", "VEHICLE")][batch_i]):
-            #     # drop incomplete history
-            #     if torch.isnan(state_hist).any():
-            #         continue
-            #     # x, y, vx, vy, ax, ay, yaw, dyaw
-            #     agent_states[agent_i] = state_hist.cpu().numpy()  # (t_hist, 8) 
-            # agent_states[agent_i] = x_t[batch_i]
+            plan_metric_dict, plan_info_dict = plot_data['plan']
+    
+            plan_x = plan_info_dict['plan_x'].squeeze(1)  # x, y, yaw, vel
+            plan_u = plan_info_dict['plan_u'].squeeze(1)  # dyaw, acc
+            plan_valid = eval_loss_node_type['plan_valid'].squeeze(0) and eval_loss_node_type['plan_converged'].squeeze(0)
 
             # local to global
-            scene = find_scene(scene_id)
-            x_t[..., 0] += scene.x_min
-            x_t[..., 1] += scene.y_min
+            plan_x = TensorUtils.to_numpy(plan_x[1:])
+            curr_yaw = ego[-1,6]
+            curr_pos = ego[-1,:2]
+            agent_from_world = np.array(
+                    [
+                        [np.cos(curr_yaw), np.sin(curr_yaw)],
+                        [-np.sin(curr_yaw), np.cos(curr_yaw)],
+                    ]
+                )
 
-            for agent_i in range(5):
-                agent_states[agent_i] = x_t[batch_i+agent_i]  # randomly take from a different batch
-            self.agent_states = agent_states
-            self.scene_id = scene_id
-            return self.agent_states, self.scene_id
+            rel_xy = plan_x[:,:2]-curr_pos
+            local_xy = (agent_from_world@(rel_xy.T)).T
+            local_yaw = plan_x[:,2]-curr_yaw
+            batch_pos.append(local_xy)
+            batch_yaw.append(local_yaw[:,np.newaxis])
+        print(local_xy)
+        action = Action(positions=TensorUtils.to_torch(np.stack(batch_pos,0),device=self.device),
+                        yaws=TensorUtils.to_torch(np.stack(batch_yaw,0),device=self.device))
+        action_info = dict()
+        return action, action_info
+
+def pad_nan(x):
+    if isinstance(x,np.ndarray):
+        flag = ~(np.isnan(x)).any(axis=-1)
+        if flag.sum()==0:
+            x = np.zeros_like(x)
+        else:
+            idx = np.where(flag)[0]
+            nan_idx = np.where(~flag)[0]
+            reps = [nan_idx.shape[0]]+[1]*(x.ndim-1)
+            x[nan_idx] = np.tile(x[idx[0]],reps)
+    elif isinstance(x,torch.Tensor):
+        flag = ~(torch.isnan(x)).any(dim=-1)
+        if flag.sum()==0:
+            x = torch.zeros_like(x)
+        else:
+            idx = torch.where(flag)[0]
+            nan_idx = torch.where(~flag)[0]
+            reps = [nan_idx.shape[0]]+[1]*(x.ndim-1)
+            x[nan_idx] = torch.tile(x[idx[0]],reps)
+    return x
+
 
 
 def create_node(global_x, global_y, vx, vy, ax, ay, yaw, nusc_map, scene, node_type, node_id="custom", is_robot=False, ):
@@ -539,13 +512,18 @@ def create_node(global_x, global_y, vx, vy, ax, ay, yaw, nusc_map, scene, node_t
     # Plan features
     offset_xyh = np.array([scene.x_min, scene.y_min, 0.])
     global_xyh = np.stack((global_x, global_y, heading), axis=-1)
+    if np.isnan(global_xyh).any():
+        global_xyh=pad_nan(global_xyh)
     xyh = global_xyh - offset_xyh[None]
     x = xyh[..., 0]
     y = xyh[..., 1]
     # xyh = np.stack((x, y, heading), axis=-1)
     # global_xyh = xyh + offset_xyh[None]
 
+    
+
     lane_ref_points = get_lane_reference_points(global_xyh, nusc_map)
+
     lane_ref_points -= offset_xyh[None, None]
 
     # Lane simplified using precomputed lane reference points (already local)
@@ -557,6 +535,9 @@ def create_node(global_x, global_y, vx, vy, ax, ay, yaw, nusc_map, scene, node_t
             lane_xyh = pred_metric_utils.lane_frenet_features_simple(xyh[t], lane_ref_points[t, :1])                        
         lane_t_xyh2.append(lane_xyh)
     lane_t_xyh2 = np.stack(lane_t_xyh2)  # (T, 3)
+    if np.isnan(lane_t_xyh2).any():
+        import pdb
+        pdb.set_trace()
     lane_t_xyh = lane_t_xyh2
     projected_t_xyh = lane_t_xyh
 
@@ -586,15 +567,13 @@ def create_node(global_x, global_y, vx, vy, ax, ay, yaw, nusc_map, scene, node_t
     for t in range(CONTROL_FIT_H):
         data_dict[('control_traj_dh', "t"+str(t))] = fitted_controls_traj[:, t, 0]
         data_dict[('control_traj_a', "t"+str(t))] = fitted_controls_traj[:, t, 1]
-    import pdb
-    pdb.set_trace()
+
     node_data = pd.DataFrame(data_dict, columns=data_columns_vehicle)
 
     node = Node(node_type=node_type, node_id=node_id, data=node_data,
                 frequency_multiplier=1., extra_data={'lane_points': lane_ref_points})
     node.first_timestep = np.ones((), dtype=np.int32) * 0
     node.is_robot = is_robot
-
     return node
 
 
