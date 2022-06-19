@@ -212,21 +212,21 @@ class AVDataBatchUtils(BatchUtils):
         pos = torch.cat(
             (
                 data_batch["target_positions"].unsqueeze(1),
-                data_batch["all_other_agents_target_positions"],
+                data_batch["all_other_agents_future_positions"],
             ),
             dim=1,
         )
         yaw = torch.cat(
             (
                 data_batch["target_yaws"].unsqueeze(1),
-                data_batch["all_other_agents_target_yaws"],
+                data_batch["all_other_agents_future_yaws"],
             ),
             dim=1,
         )
         avails = torch.cat(
             (
                 data_batch["target_availabilities"].unsqueeze(1),
-                data_batch["all_other_agents_target_availabilities"],
+                data_batch["all_other_agents_future_availability"],
             ),
             dim=1,
         )
