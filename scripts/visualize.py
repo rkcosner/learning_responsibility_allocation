@@ -366,12 +366,9 @@ def main(hdf5_path, dataset_path, output_dir, env):
         sids = EvaluationConfig().nusc.eval_scenes
         scene_names = list(rasterizer.scene_info.keys())
         # sids = [scene_names[si] for si in sids]
-        # sids = ["scene-0018", "scene-0095", "scene-0098", "scene-0521", "scene-0523",
-        #         "scene-0560", "scene-0627", "scene-0638", "scene-0904"]
-        sids = ['scene-0092', 'scene-0093', 'scene-0094', 'scene-0095', 'scene-0096', 
-        'scene-0097', 'scene-0098', 'scene-0099', 'scene-0100', 'scene-0101', 'scene-0102', 
-        'scene-0103', 'scene-0104', 'scene-0105', 'scene-0106', 'scene-0107']
-        # sids = ["scene-0093"]
+        sids = ["scene-0018", "scene-0095", "scene-0098", "scene-0521", "scene-0523",
+                "scene-0560", "scene-0627", "scene-0638", "scene-0904"]
+
 
     h5f = h5py.File(hdf5_path, "r")
 
