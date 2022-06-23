@@ -10,7 +10,7 @@ from tbsim.utils.batch_utils import batch_utils
 from tbsim.utils.geometry_utils import transform_points_tensor, detect_collision, CollisionType
 import tbsim.utils.metrics as Metrics
 from collections import defaultdict
-from tbsim.models.cnn_roi_encoder import obtain_lane_flag
+from tbsim.models.cnn_roi_encoder import rasterized_ROI_align
 from torchvision.ops.roi_align import RoIAlign
 import tbsim.utils.geometry_utils as GeoUtils
 from pyemd import emd
@@ -1051,11 +1051,7 @@ class Occupancy_rolling(Occupancy_likelihood):
             return None
         else:
             self.state_buffer = self.state_buffer[-self.traj_len-1:]
-            # try:
-            #     assert len(self.state_buffer) == self.traj_len+1
-            # except:
-            #     import pdb
-            #     pdb.set_trace()
+
         appearance_idx = obtain_active_agent_index(self.state_buffer)
         agent_selected = np.where((appearance_idx>=0).all(axis=1))[0]
         # assemble score function input

@@ -917,10 +917,11 @@ class SceneDiscreteCVAE(DiscreteCVAE):
         if decoder_kwargs is None:
             decoder_kwargs = dict()
         else:
-            if decoder_kwargs["current_states"].ndim==2:
-                decoder_kwargs = TensorUtils.unsqueeze_expand_at(decoder_kwargs,self.K,1)
-            else:
-                assert decoder_kwargs["current_states"].ndim==3 and decoder_kwargs["current_states"].shape[1]==Na
+            if "current_states" in decoder_kwargs:
+                if decoder_kwargs["current_states"].ndim==2:
+                    decoder_kwargs = TensorUtils.unsqueeze_expand_at(decoder_kwargs,self.K,1)
+                else:
+                    assert decoder_kwargs["current_states"].ndim==3 and decoder_kwargs["current_states"].shape[1]==Na
             decoder_kwargs = TensorUtils.unsqueeze_expand_at(decoder_kwargs,self.K,2)
             decoder_kwargs = TensorUtils.join_dimensions(decoder_kwargs,0,3)
         

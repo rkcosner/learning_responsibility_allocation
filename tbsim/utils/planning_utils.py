@@ -3,12 +3,9 @@ import numpy as np
 from scipy.interpolate import interp1d
 import torch
 
-from tbsim.models.cnn_roi_encoder import obtain_lane_flag
+from tbsim.models.cnn_roi_encoder import rasterized_ROI_align
 from tbsim.utils.batch_utils import batch_utils
-from tbsim.utils.geometry_utils import (
-    VEH_VEH_collision,
-    VEH_PED_collision,
-)
+import tbsim.utils.geometry_utils as GeoUtils
 TRAJ_INDEX = [0, 1, 4]  
 from Pplan.Sampling.tree import Tree
 class AgentTrajTree(Tree):
@@ -43,8 +40,8 @@ def get_collision_loss(
         )
         if col_funcs is None:
             col_funcs = {
-                "VV": VEH_VEH_collision,
-                "VP": VEH_PED_collision,
+                "VV": GeoUtils.VEH_VEH_collision,
+                "VP": GeoUtils.VEH_PED_collision,
             }
         B, N, T = ego_trajectories.shape[:3]
         col_loss = torch.zeros([B, N]).to(ego_trajectories.device)
@@ -57,7 +54,7 @@ def get_collision_loss(
             ).min(dim=-1)[0]
             if dis.nelement() > 0:
                 col_loss += torch.max(
-                    torch.sigmoid(-dis - 4.0) * type_mask[et].unsqueeze(1), dim=2
+                    torch.sigmoid(-dis*4) * type_mask[et].unsqueeze(1), dim=2
                 )[0]
     return col_loss
 
@@ -67,7 +64,8 @@ def get_drivable_area_loss(
 ):
     """Cost for road departure."""
     with torch.no_grad():
-        lane_flags = obtain_lane_flag(
+
+        lane_flags = rasterized_ROI_align(
             dis_map,
             ego_trajectories[..., :2],
             ego_trajectories[..., 2:],
@@ -78,6 +76,36 @@ def get_drivable_area_loss(
             1,
         ).squeeze(-1)
     return lane_flags.max(dim=-1)[0]
+
+def get_lane_loss_simple(ego_trajectories, raster_from_agent, dis_map):
+    h,w = dis_map.shape[-2:]
+    
+    raster_xy = GeoUtils.batch_nd_transform_points(ego_trajectories[...,:2],raster_from_agent)
+    raster_xy[...,0] = raster_xy[...,0].clip(0,w-1e-5)
+    raster_xy[...,1] = raster_xy[...,1].clip(0,h-1e-5)
+    raster_xy = raster_xy.long()
+    raster_xy_flat = (raster_xy[...,1]*w+raster_xy[...,0])
+    raster_xy_flat = raster_xy_flat.flatten()
+    lane_loss = (dis_map.flatten()[raster_xy_flat]).reshape(*raster_xy.shape[:2])
+    return lane_loss.max(dim=-1)[0]
+
+def get_terminal_likelihood_reward(
+    ego_trajectories, raster_from_agent, log_likelihood
+):
+    """Cost for road departure."""
+
+    log_likelihood = (log_likelihood-log_likelihood.mean())/log_likelihood.std()
+    h,w = log_likelihood.shape[-2:]
+    
+    raster_xy = GeoUtils.batch_nd_transform_points(ego_trajectories[...,-1,:2],raster_from_agent)
+    raster_xy[...,0] = raster_xy[...,0].clip(0,w-1e-5)
+    raster_xy[...,1] = raster_xy[...,1].clip(0,h-1e-5)
+    raster_xy = raster_xy.long()
+    raster_xy_flat = (raster_xy[...,1]*w+raster_xy[...,0])
+
+    ll_reward = log_likelihood.flatten()[raster_xy_flat]
+
+    return ll_reward
 
 def get_progress_reward(ego_trajectories,d_sat = 10):
     dis = torch.linalg.norm(ego_trajectories[...,-1,:2]-ego_trajectories[...,0,:2],dim=-1)
@@ -233,7 +261,8 @@ def contingency_planning(ego_tree,
                          num_frames_per_stage,
                          M,
                          dt,
-                         col_funcs=None):
+                         col_funcs=None,
+                         log_likelihood=None):
     """A sampling-based contingency planning algorithm
 
     Args:
@@ -268,8 +297,9 @@ def contingency_planning(ego_tree,
                     leaf_idx[node] = leaf_idx[node]+leaf_idx[child]
     
 
-    cost_to_go = dict()
-    stage_cost = dict()
+    V = dict()
+    L = dict()
+    Q = dict()
     scenario_tree = tiled_to_tree(agent_traj,mode_prob,num_stage,num_frames_per_stage,M)
     scenario_root = scenario_tree[0][0]
     v0 = ego_root.traj[0,2]
@@ -291,49 +321,58 @@ def contingency_planning(ego_tree,
                                       col_funcs,
                                       )
 
-        lane_loss = get_drivable_area_loss(ego_traj.unsqueeze(0), raster_from_agent.unsqueeze(0), dis_map.unsqueeze(0), ego_extents.unsqueeze(0))
-        
+
+        # lane_loss = get_drivable_area_loss(ego_traj.unsqueeze(0), raster_from_agent.unsqueeze(0), dis_map.unsqueeze(0), ego_extents.unsqueeze(0))
+        lane_loss = get_lane_loss_simple(ego_traj,raster_from_agent,dis_map).unsqueeze(0)
+
         progress_reward = get_progress_reward(ego_traj,d_sat=d_sat)
         
         total_loss = weights["collision_weight"]*col_loss+weights["lane_weight"]*lane_loss-weights["progress_weight"]*progress_reward.unsqueeze(0)
+        if log_likelihood is not None and stage==num_stage:
+            ll_reward = get_terminal_likelihood_reward(ego_traj, raster_from_agent, log_likelihood)
+            total_loss = total_loss-weights["likelihood"]*ll_reward
+        
+
         for i in range(len(ego_nodes)):
             for j in range(len(agent_nodes)):
-                stage_cost[(ego_nodes[i],agent_nodes[j])] = total_loss[j,i]
+                L[(ego_nodes[i],agent_nodes[j])] = total_loss[j,i]
                 if stage==num_stage:
-                    cost_to_go[(ego_nodes[i],agent_nodes[j])] = float(total_loss[j,i])
+                    V[(ego_nodes[i],agent_nodes[j])] = float(total_loss[j,i])
                 else:
-                    children_cost_to_go = [cost_to_go[(child,agent_nodes[j])] for child in ego_nodes[i].children]
-                    cost_to_go[(ego_nodes[i],agent_nodes[j])] = float(total_loss[j,i])+min(children_cost_to_go)
+                    children_cost_to_go = [Q[(child,agent_nodes[j])] for child in ego_nodes[i].children]
+                    V[(ego_nodes[i],agent_nodes[j])] = float(total_loss[j,i])+min(children_cost_to_go)
 
             if stage>1:
                 for agent_node in scenario_tree[stage-1]:
                     cost_i = []
                     prob_i = []
                     for child in agent_node.children:
-                        cost_i.append(cost_to_go[ego_nodes[i],child])
+                        cost_i.append(V[ego_nodes[i],child])
                         prob_i.append(child.prob[leaf_idx[ego_nodes[i]]].sum())
                     cost_i = torch.tensor(cost_i,device=mode_prob.device)
                     prob_i = torch.stack(prob_i)
-                    cost_to_go[(ego_nodes[i],agent_node)] = float((cost_i*prob_i).sum()/prob_i.sum())
+                    Q[(ego_nodes[i],agent_node)] = float((cost_i*prob_i).sum()/prob_i.sum())
+        
     cost = list()
     for ego_node in ego_root.children:
-        cost_i = 0
+        cost_branch = 0
         leaf_index = leaf_idx[ego_node][0]
 
-        for scene_node in scenario_tree[0][0].children:
-            cost_i+=cost_to_go[(ego_node,scene_node)]*scene_node.prob[leaf_index]
+        for scene_node in scenario_root.children:
+            cost_branch+=V[(ego_node,scene_node)]*scene_node.prob[leaf_index]
 
-        cost.append(cost_i)
+        cost.append(cost_branch)
     idx = torch.argmin(torch.tensor(cost)).item()
     optimal_node = ego_root.children[idx]
 
-    motion_policy = TreeMotionPolicy(stage,
+    motion_policy = TreeMotionPolicy(num_stage,
                                      num_frames_per_stage,
                                      ego_root,
                                      scenario_root,
-                                     cost_to_go,
+                                     Q,
                                      leaf_idx,
                                      optimal_node)
+
     return motion_policy
 
             

@@ -597,19 +597,37 @@ class OrnsteinUhlenbeckPerturbation(object):
         Returns:
             obs(Dict[torch.tensor]): perturbed observation
         """
-        target_traj = np.concatenate((obs["target_positions"], obs["target_yaws"]), axis=-1)
-        bs = target_traj.shape[0]
-        T = target_traj.shape[-2]
-        if bs in self.buffers:
-            buffer = self.buffers[bs]
-        else:
-            buffer = [np.zeros([bs,3])]
-            self.buffers[bs]=buffer
-        while len(buffer)<T:
-            buffer.append(buffer[-1]-self.theta*buffer[-1]+np.random.randn(bs,3)*self.sigma)
-        noise = np.stack(buffer,axis=1)
-        target_traj += noise[...,:T,:]
-        obs["target_positions"] = target_traj[..., :2].astype(np.float32)
-        obs["target_yaws"] = target_traj[..., 2:].astype(np.float32)
-        buffer.pop(0)
+        if isinstance(obs["target_positions"],np.ndarray):
+            target_traj = np.concatenate((obs["target_positions"], obs["target_yaws"]), axis=-1)
+            bs = target_traj.shape[0]
+            T = target_traj.shape[-2]
+            if bs in self.buffers:
+                buffer = self.buffers[bs]
+            else:
+                buffer = [np.zeros([bs,3])]
+                self.buffers[bs]=buffer
+            while len(buffer)<T:
+                buffer.append(buffer[-1]-self.theta*buffer[-1]+np.random.randn(bs,3)*self.sigma)
+            noise = np.stack(buffer,axis=1)
+            target_traj += noise[...,:T,:]
+            obs["target_positions"] = target_traj[..., :2].astype(np.float32)
+            obs["target_yaws"] = target_traj[..., 2:].astype(np.float32)
+            buffer.pop(0)
+        elif isinstance(obs["target_positions"],torch.Tensor):
+
+            target_traj = torch.cat((obs["target_positions"], obs["target_yaws"]), dim=-1)
+            bs = target_traj.shape[0]
+            T = target_traj.shape[-2]
+            if bs in self.buffers:
+                buffer = self.buffers[bs]
+            else:
+                buffer = [torch.zeros([bs,3])]
+                self.buffers[bs]=buffer
+            while len(buffer)<T:
+                buffer.append(buffer[-1]-self.theta*buffer[-1]+torch.randn(bs,3)*self.sigma)
+            noise = torch.stack(buffer,dim=1)
+            target_traj += noise[...,:T,:].to(target_traj.device)
+            obs["target_positions"] = target_traj[..., :2].type(torch.float32)
+            obs["target_yaws"] = target_traj[..., 2:].type(torch.float32)
+            buffer.pop(0)
         return obs

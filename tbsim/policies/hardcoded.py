@@ -9,7 +9,8 @@ from copy import deepcopy
 from tbsim.envs.base import BatchedEnv, BaseEnv
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.dynamics as dynamics
-from tbsim.utils.l5_utils import get_current_states, get_drivable_region_map
+from tbsim.utils.l5_utils import get_current_states
+from tbsim.utils.batch_utils import batch_utils
 from tbsim.algos.algo_utils import optimize_trajectories
 from tbsim.utils.geometry_utils import transform_points_tensor, calc_distance_map
 from l5kit.geometry import transform_points
@@ -18,7 +19,7 @@ from tbsim.utils.planning_utils import ego_sample_planning
 from tbsim.policies.common import Action, Plan
 from tbsim.policies.base import Policy
 from tbsim.utils.ftocp import FTOCP
-
+import matplotlib.pyplot as plt
 
 try:
     from Pplan.Sampling.spline_planner import SplinePlanner
@@ -225,7 +226,10 @@ class EC_sampling_controller(Policy):
         EC_pred = self.EC_model.get_EC_pred(agent_obs,cond_traj,agent_plan)
         self.timer.toc("prediction")
         self.timer.tic("planning")
-        drivable_map = get_drivable_region_map(obs["image"]).float()
+        if "drivable_map" in obs:
+            drivable_map = obs["drivable_map"].float()
+        else:
+            drivable_map = batch_utils().get_drivable_region_map(obs["image"]).float()
         dis_map = calc_distance_map(drivable_map)
         
         opt_traj = list()
@@ -320,8 +324,15 @@ class ContingencyPlanner(Policy):
             hist_pos_b.append(agents_hist_pos)
             hist_yaw_b.append(agents_hist_yaw)
             hist_avail_b.append(agents_hist_avail)
-
+            if agent_obs["target_availabilities"].shape[1]<ego_obs["target_availabilities"].shape[1]:
+                pad_shape=(agent_obs["target_availabilities"].shape[0],ego_obs["target_availabilities"].shape[1]-agent_obs["target_availabilities"].shape[1])
+                agent_obs["target_availabilities"] = torch.cat((agent_obs["target_availabilities"],torch.zeros(pad_shape,device=agent_obs["target_availabilities"].device)),1)
             agents_fut_avail = torch.cat((ego_obs["target_availabilities"][i:i+1],agent_obs["target_availabilities"][agent_idx]),0)
+            if agent_obs["target_positions"].shape[1]<ego_obs["target_positions"].shape[1]:
+                pad_shape=(agent_obs["target_positions"].shape[0],ego_obs["target_positions"].shape[1]-agent_obs["target_positions"].shape[1],*agent_obs["target_positions"].shape[2:])
+                agent_obs["target_positions"] = torch.cat((agent_obs["target_positions"],torch.zeros(pad_shape,device=agent_obs["target_positions"].device)),1)
+                pad_shape=(agent_obs["target_yaws"].shape[0],ego_obs["target_yaws"].shape[1]-agent_obs["target_yaws"].shape[1],*agent_obs["target_yaws"].shape[2:])
+                agent_obs["target_yaws"] = torch.cat((agent_obs["target_yaws"],torch.zeros(pad_shape,device=agent_obs["target_yaws"].device)),1)
             fut_pos_raw = torch.cat((ego_obs["target_positions"][i:i+1],agent_obs["target_positions"][agent_idx]),0)
             fut_yaw_raw = torch.cat((ego_obs["target_yaws"][i:i+1],agent_obs["target_yaws"][agent_idx]),0)
             agents_fut_pos = GeoUtils.transform_points_tensor(fut_pos_raw,center_from_agents)*agents_fut_avail.unsqueeze(-1)
@@ -390,19 +401,24 @@ class ContingencyPlanner(Policy):
     def get_action(self,obs,**kwargs)-> Tuple[Action, Dict]:
         assert "agent_obs" in kwargs
         agent_obs = kwargs["agent_obs"]
-        if self.agent_planner is not None:
-            
-            agent_plan,_ = self.agent_planner.get_plan(agent_obs)
-            
-            agent_plan = torch.cat((agent_plan.positions,agent_plan.yaws),-1)
-            agent_plan = agent_plan[...,-1,:]
-            
-        else:
-            agent_plan=None
-        scene_obs,scene_goal = self.get_scene_obs(obs,agent_obs,agent_plan)
-        self.timer.tic("sampling")
         T = self.stage*self.num_frames_per_stage
         bs = obs["history_positions"].shape[0]
+        if self.agent_planner is not None:
+            obs_keys = ["image","drivable_map","agent_from_raster"]
+            combined_obs={k:torch.cat((obs[k],agent_obs[k]),0) for k in obs_keys}
+            combined_plan,info = self.agent_planner.get_plan(combined_obs)
+            ego_likelihood = info["location_map"][:bs]
+
+            
+            agent_plan = torch.cat((combined_plan.positions[bs:],combined_plan.yaws[bs:]),-1)
+            agent_plan = agent_plan[...,-1,:]
+
+        else:
+            agent_plan=None
+            ego_likelihood = None
+        scene_obs,scene_goal = self.get_scene_obs(obs,agent_obs,agent_plan)
+        self.timer.tic("sampling")
+        
         agent_size = agent_obs["image"].shape[0]
         ego_trajs = list()
         #TODO: paralellize this process
@@ -420,7 +436,7 @@ class ContingencyPlanner(Policy):
             lanes = [lanes[i] for i,lane in enumerate(lanes) if lane.any()]
             
             def expand_func(x): return self.ego_sampler.gen_trajectory_batch(
-                    x, self.step_time*self.num_frames_per_stage, lanes,N=self.num_frames_per_stage+1,max_children=10)
+                    x, self.step_time*self.num_frames_per_stage, lanes,N=self.num_frames_per_stage+1,max_children=20)
             
             x0 = TrajTree(traj0, None, 0)
             x0.grow_tree(expand_func, self.stage)
@@ -454,7 +470,10 @@ class ContingencyPlanner(Policy):
         
         self.timer.toc("prediction")
         self.timer.tic("planning")
-        drivable_map = get_drivable_region_map(obs["image"]).float()
+        if "drivable_map" in obs:
+            drivable_map = obs["drivable_map"].float()
+        else:
+            drivable_map = batch_utils().get_drivable_region_map(obs["image"]).float()
         dis_map = calc_distance_map(drivable_map)
         
         opt_traj = list()
@@ -464,6 +483,7 @@ class ContingencyPlanner(Policy):
             agent_traj_local = EC_pred["trajectories"][i,:N_i,:,1:Na_i].float()
             prob = EC_pred["p"][i,:N_i]
             if ego_nodes_by_stage[i] is not None:
+
                 motion_policy = PlanUtils.contingency_planning(ego_nodes_by_stage[i],
                                                             obs["extent"][i,:2],
                                                             agent_traj_local,
@@ -472,15 +492,15 @@ class ContingencyPlanner(Policy):
                                                             scene_obs["agent_type"][i,1:Na_i],
                                                             obs["raster_from_agent"][i],
                                                             dis_map[i],
-                                                            {"collision_weight": 3.0, "lane_weight": 1.0, "progress_weight": 0.5},
+                                                            {"collision_weight": 0.0, "lane_weight": 3.0, "progress_weight": 0.2,"likelihood": 0.0},
                                                             self.num_frames_per_stage,
                                                             self.predictor.algo_config.vae.latent_dim,
                                                             self.config.step_time,
+                                                            log_likelihood=ego_likelihood[i],
                                                             )
             else:
-                import pdb
-                pdb.set_trace()
-                                
+                raise ValueError("ego plan is empty!")
+                            
             opt_traj.append(motion_policy.get_plan(None,self.stage*self.num_frames_per_stage))
         self.timer.toc("planning")
         print(self.timer)
@@ -582,7 +602,10 @@ class HierSplineSamplingPolicy(Policy):
             else:
                 ego_trajs_i = torch.cat((obs_dict["target_positions"][i],obs_dict["target_yaws"][i]),-1).unsqueeze(0)
             ego_trajs.append(ego_trajs_i)
-        drivable_map = get_drivable_region_map(obs_dict["image"]).float()
+        if "drivable_map" in obs_dict:
+            drivable_map = obs_dict["drivable_map"].float()
+        else:    
+            drivable_map = batch_utils().get_drivable_region_map(obs_dict["image"]).float()
         dis_map = calc_distance_map(drivable_map)
         plan = list()
         for i in range(bs):

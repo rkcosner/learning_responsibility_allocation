@@ -10,6 +10,7 @@ import random
 import tbsim.models.base_models as base_models
 from tbsim.models.Transformer import SimpleTransformer
 import tbsim.models.vaes as vaes
+from tbsim.utils.metrics import OrnsteinUhlenbeckPerturbation
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.geometry_utils as GeoUtils
 from tbsim.utils.batch_utils import batch_utils
@@ -1340,6 +1341,15 @@ class RasterizedSceneTreeModel(nn.Module):
             rnn_input_dim = self.dyn.udim
         self.FeatureRoller = base_models.RNNFeatureRoller(rnn_input_dim,algo_config.map_feature_dim)
         self.algo_config = algo_config
+        if "perturb" in algo_config and algo_config.perturb.enabled:
+            self.N_pert = algo_config.perturb.N_pert
+            theta = algo_config.perturb.OU.theta
+            sigma = algo_config.perturb.OU.sigma
+            scale = torch.tensor(algo_config.perturb.OU.scale)
+            self.pert = OrnsteinUhlenbeckPerturbation(theta*torch.ones(3),sigma*scale)
+        else:
+            self.N_pert = 0
+            self.pert = None
     def _traj_to_preds(self, traj):
         pred_positions = traj[..., :2]
         pred_yaws = traj[..., 2:3]
@@ -1437,7 +1447,16 @@ class RasterizedSceneTreeModel(nn.Module):
                 cond_idx = [0 if num_agent[i]>1 else -1 for i in range(bs)]
             cond_traj_local = [trajectories[i,cond_idx[i]] if cond_idx[i]>=0 else torch.zeros_like(trajectories[i,cond_idx[i]]) for i in range(bs)]
             cond_traj_local = torch.stack(cond_traj_local,0)[...,:self.stage*self.num_frames_per_stage,:]
-            cond_traj_local = cond_traj_local.unsqueeze(1)
+            if self.N_pert>0:
+                
+                cond_traj_tiled = cond_traj_local.repeat_interleave(self.N_pert,0)
+                cond_traj_local_pert = self.pert.perturb(dict(target_positions=cond_traj_tiled[...,:2],target_yaws=cond_traj_tiled[...,2:]))
+                cond_traj_local_pert = torch.cat((cond_traj_local_pert["target_positions"],cond_traj_local_pert["target_yaws"]),-1).reshape(bs,self.N_pert,*cond_traj_local.shape[1:])
+                flag = (torch.tensor(cond_idx)>=0).to(cond_traj_tiled.device)
+                cond_traj_local_pert = cond_traj_local_pert*flag[:,None,None,None]
+                cond_traj_local = torch.cat((cond_traj_local.unsqueeze(1),cond_traj_local_pert),1)
+            else:
+                cond_traj_local = cond_traj_local.unsqueeze(1)
             agent_avail[torch.arange(bs).to(device),cond_idx] = 0
         else:
             cond_traj_local = kwargs["cond_traj"]
@@ -1469,29 +1488,36 @@ class RasterizedSceneTreeModel(nn.Module):
 
         for t in range(self.stage):      
             batch_shape = [bs,M]+[self.vae.K]*t
-            
-            if self.dyn is not None:
-                if t==0:
+                 
+            if t==0:
+                
+                
+                if self.dyn is not None:
                     current_states = batch_utils().get_current_states_all_agents(batch_inputs, self.algo_config.step_time,self.dyn.type())
                     local_pos = GeoUtils.batch_nd_transform_points(current_states[...,:2],ego_to_agent)
                     local_yaw = current_states[...,3:]-curr_yaw
                     current_states_local = torch.cat((local_pos,current_states[...,2:3],local_yaw),-1)
                     current_states_local = current_states_local.repeat_interleave(M,0)
                     decoder_kwargs["current_states"] = current_states_local
-                    pos = current_states[...,:2].repeat_interleave(M,0)
+                    
                 else:
-                    current_states_local = outs["x_recons"]["terminal_state"]
-                    pos = TensorUtils.join_dimensions(outs["x_recons"]["trajectories"][...,-1,:2],0,t+2)
-                    decoder_kwargs["current_states"] = TensorUtils.join_dimensions(current_states_local,0,t+2)
-            if t==0:
+                    current_states = batch_utils().get_current_states_all_agents(batch_inputs, self.algo_config.step_time,None)
+                pos = current_states[...,:2].repeat_interleave(M,0)
                 map_feat_t = curr_map_feat
             else:
+                pos = TensorUtils.join_dimensions(outs["x_recons"]["trajectories"][...,-1,:2],0,t+2)
+                if self.dyn is not None:
+                    current_states_local = outs["x_recons"]["terminal_state"]
+                    decoder_kwargs["current_states"] = TensorUtils.join_dimensions(current_states_local,0,t+2)
                 if goal is not None:
                     goal = TensorUtils.repeat_by_expand_at(goal,self.vae.K,0)
 
                 curr_map_feat = TensorUtils.unsqueeze_expand_at(curr_map_feat,self.vae.K,-2).contiguous()
                 curr_map_feat = TensorUtils.join_dimensions(curr_map_feat,0,2).contiguous()
-                input_seq = outs["controls"]
+                if self.dyn is not None:
+                    input_seq = outs["controls"]
+                else:
+                    input_seq = outs["x_recons"]["trajectories"]
                 
                 input_seq_tran = input_seq.reshape(-1,*input_seq.shape[-2:])
                     
@@ -1640,7 +1666,10 @@ class RasterizedSceneTreeModel(nn.Module):
             raw_type.repeat_interleave(M*numMode,0),
             pred_batch["agent_avail"].repeat_interleave(M*numMode,0)
         )
-        EC_coll_loss = collision_loss_masked(EC_edges,type_mask)/numMode
+        EC_edges = TensorUtils.reshape_dimensions(EC_edges,0,1,(bs,M,numMode))
+        type_mask = TensorUtils.reshape_dimensions(type_mask,0,1,(bs,M,numMode))
+
+        EC_coll_loss = collision_loss_masked(EC_edges,type_mask,weight=pred_batch["q"].unsqueeze(-1))/numMode/M
         if not isinstance(EC_coll_loss,torch.Tensor):
             EC_coll_loss = torch.tensor(EC_coll_loss).to(target_traj.device)
         # compute collision loss

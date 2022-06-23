@@ -248,8 +248,12 @@ def launch_experiments_ngc(
             "pip install -r requirements.txt; pip install -e .;",
             "cd {}/Pplan;".format(ngc_config["workspace_mounting_point"]),
             "pip install -e .;",
+            "cd /opt/conda/lib/python3.8/site-packages; rm -rf cv2; "
             "cd {}/tbsim;".format(ngc_config["workspace_mounting_point"]),
+            "pip uninstall -y opencv-python; ",
+            "pip install opencv-python; "
         ]
+        ## the Opencv installation is added to resolve a new bug on NGC caused by non-unique cv2 packages
         py_cmd.extend(script_command)
         py_cmd.extend(["--config_file", cpath])
         py_cmd = " ".join(py_cmd)

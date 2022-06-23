@@ -212,8 +212,12 @@ class TreeVAEConfig(BehaviorCloningConfig):
         self.scene_centric = True
         self.shuffle = True
         self.vectorize_lane = False
-
         self.min_std = 0.1
+        self.perturb.enabled=True
+        self.perturb.N_pert = 3
+        self.perturb.OU.theta = 0.8
+        self.perturb.OU.sigma = 2.0
+        self.perturb.OU.scale = [1.0,1.0,0.2]
 
 
 class BehaviorCloningECConfig(BehaviorCloningConfig):

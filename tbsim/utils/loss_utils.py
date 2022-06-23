@@ -543,7 +543,7 @@ def collision_loss(pred_edges: Dict[str, torch.Tensor], col_funcs=None):
         coll_loss += torch.mean(torch.sigmoid(-dis - 4.0))  # smooth collision loss
     return coll_loss
 
-def collision_loss_masked(edges, type_mask, col_funcs=None):
+def collision_loss_masked(edges, type_mask, weight=None, col_funcs=None):
     if col_funcs is None:
         col_funcs = {
             "VV": VEH_VEH_collision,
@@ -562,8 +562,13 @@ def collision_loss_masked(edges, type_mask, col_funcs=None):
             edges[..., 6:8],
             edges[..., 8:],
         ).min(dim=-1)[0]
-        coll_loss += torch.sum(torch.sigmoid(-dis - 4.0)*v)/(v.sum()+1e-3)
+        coll_loss_tensor = torch.sigmoid(-dis - 4.0)*v
+        if weight is not None:
+            coll_loss += torch.sum(coll_loss_tensor*weight)/((v*weight).sum()+1e-3)
+        else:
+            coll_loss += torch.sum(coll_loss_tensor)/(v.sum()+1e-3)
     return coll_loss
+
 
 def discriminator_loss(likelihood_pred,likelihood_GT):
     label = torch.cat((torch.zeros_like(likelihood_pred),torch.ones_like(likelihood_GT)),0)
