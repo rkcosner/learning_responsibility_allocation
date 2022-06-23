@@ -3,7 +3,11 @@ videos/
 figures/
 checkpoints
 experiments/
+visualizations/
 results/
+.vscode
+scripts/create_experiment_yuxiao.py
+scripts/launch_experiments.py
 ## config files
 #*.yaml
 

@@ -17,9 +17,10 @@ def configs_to_search_nusc(base_cfg):
     plan.add_const_param(Param("algo.dynamics.type", alias="dyn", value=None))
     plan.add_const_param(Param("train.rollout.enabled", alias="rl", value=False))
 
-    plan.extend(plan.compose_cartesian([
-        ParamRange("algo.vae.latent_dim", alias="ld", range=[10, 15, 20]),
-    ]))
+    # plan.extend(plan.compose_cartesian([
+    #     ParamRange("algo.vae.latent_dim", alias="ld", range=[10, 15, 20]),
+    # ]))
+
 
     return plan.generate_configs(base_cfg=base_cfg)
 
