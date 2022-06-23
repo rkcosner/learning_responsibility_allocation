@@ -50,10 +50,18 @@ class RolloutLogger(object):
                     samples = action.agents_info["action_samples"]
                     for k in samples:
                         if k in combined["action_samples"]:
+                            n = combined["action_samples"][k].shape[1]
+                            if samples[k].shape[1]>n:
+                                pad_size=list(combined["action_samples"][k].shape)
+                                pad_size[1] = samples[k].shape[1]-n
+                                combined["action_samples"][k] = np.concatenate((combined["action_samples"][k],np.zeros(pad_size)),1)
+                            elif samples[k].shape[1]<n:
+                                pad_size=list(samples[k].shape)
+                                pad_size[1] = n-samples[k].shape[1]
+                                samples[k] = np.concatenate((samples[k],np.zeros(pad_size)),1)
                             combined["action_samples"][k] = np.concatenate((combined["action_samples"][k], samples[k]), axis=0)
                         else:
                             combined["action_samples"][k] = samples[k]
-
         return combined
 
     def _maybe_initialize(self, obs):
@@ -82,8 +90,8 @@ class RolloutLogger(object):
         state["action_yaws"] = action["action"]["yaws"][:, [0]]
         if "action_samples" in action:
             # only collect up to 10 samples to save space
-            state["action_sample_positions"] = action["action_samples"]["positions"][:, :10]
-            state["action_sample_yaws"] = action["action_samples"]["yaws"][:, :10]
+            state["action_sample_positions"] = action["action_samples"]["positions"][:, :20]
+            state["action_sample_yaws"] = action["action_samples"]["yaws"][:, :20]
 
         for si in self._scene_indices:
 
@@ -132,6 +140,7 @@ class RolloutLogger(object):
                     buffer_len = serialized[si][k].shape[1]
                 assert serialized[si][k].shape[1] == buffer_len
 
+
         self._serialized_scene_buffer = serialized
         return deepcopy(self._serialized_scene_buffer)
 
@@ -156,10 +165,6 @@ class RolloutLogger(object):
     def log_step(self, obs, action: RolloutAction):
         combined_obs = self._combine_obs(obs)
         combined_action = self._combine_action(action)
-        try:
-            assert combined_obs["scene_index"].shape[0] == combined_action["action"]["positions"].shape[0]
-        except:
-            import pdb
-            pdb.set_trace()
+        assert combined_obs["scene_index"].shape[0] == combined_action["action"]["positions"].shape[0]
         self._maybe_initialize(combined_obs)
         self._append_buffer(combined_obs, combined_action)

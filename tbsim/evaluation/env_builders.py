@@ -14,7 +14,7 @@ from tbsim.configs.eval_config import EvaluationConfig
 from tbsim.configs.base import ExperimentConfig
 from tbsim.utils.metrics import OrnsteinUhlenbeckPerturbation
 from tbsim.envs.env_l5kit import EnvL5KitSimulation
-from tbsim.envs.env_avdata import EnvUnifiedSimulation
+from tbsim.envs.env_avdata import EnvUnifiedSimulation, EnvSplitUnifiedSimulation
 from tbsim.utils.config_utils import translate_l5kit_cfg, translate_avdata_cfg
 import tbsim.envs.env_metrics as EnvMetrics
 from tbsim.evaluation.metric_composers import CVAEMetrics, OccupancyMetrics
@@ -140,7 +140,7 @@ class EnvNuscBuilder(EnvironmentBuilder):
         neighbor_distance = data_cfg.max_agents_distance
 
         kwargs = dict(
-            desired_data=["nusc_mini-mini_val"],
+            desired_data=["nusc-val"],
             future_sec=(future_sec, future_sec),
             history_sec=(history_sec, history_sec),
             data_dirs={
@@ -168,15 +168,25 @@ class EnvNuscBuilder(EnvironmentBuilder):
             metrics.update(self._get_analytical_metrics())
         # if self.eval_cfg.metrics.compute_learned_metrics:
         #     metrics.update(self._get_learned_metrics())
-        env = EnvUnifiedSimulation(
-            exp_cfg.env,
-            dataset=env_dataset,
-            seed=self.eval_cfg.seed,
-            num_scenes=self.eval_cfg.num_scenes_per_batch,
-            prediction_only=False,
-            metrics=metrics,
-            split_ego=split_ego,
-            parse_obs = parse_obs,
-        )
+        if split_ego:
+            env = EnvSplitUnifiedSimulation(
+                exp_cfg.env,
+                dataset=env_dataset,
+                seed=self.eval_cfg.seed,
+                num_scenes=self.eval_cfg.num_scenes_per_batch,
+                prediction_only=False,
+                metrics=metrics,
+                split_ego=split_ego,
+                parse_obs = parse_obs,
+            )
+        else:
+            env = EnvUnifiedSimulation(
+                exp_cfg.env,
+                dataset=env_dataset,
+                seed=self.eval_cfg.seed,
+                num_scenes=self.eval_cfg.num_scenes_per_batch,
+                prediction_only=False,
+                metrics=metrics,
+            )
 
         return env

@@ -20,7 +20,7 @@ from tbsim.utils.loss_utils import (
     lane_regulation_loss,
 )
 from tbsim.models.roi_align import ROI_align, generate_ROIs, Indexing_ROI_result
-from tbsim.models.cnn_roi_encoder import obtain_lane_flag
+from tbsim.models.cnn_roi_encoder import rasterized_ROI_align
 from tbsim.models.Transformer import SimpleTransformer
 
 
@@ -247,7 +247,7 @@ class AgentAwareRasterizedModel(nn.Module):
             dim=1,
         )
         # pred_world_yaws = pred_yaws + data_batch['yaw'].reshape(-1,1,1,1)
-        lane_flags = obtain_lane_flag(dis_map,
+        lane_flags = rasterized_ROI_align(dis_map,
                                       pred_positions,
                                       pred_yaws,
                                       data_batch["raster_from_agent"],

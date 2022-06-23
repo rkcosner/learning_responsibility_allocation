@@ -1446,15 +1446,8 @@ class SceneTreeTrafficModel(pl.LightningModule):
         return self.nets["policy"](obs_dict)["predictions"]
 
     def predict(self,obs,**kwargs):
-        prediction = self.nets["policy"](obs,predict=True,**kwargs)
-        TensorUtils.recursive_dict_list_tuple_apply(
-            prediction,
-            {
-                torch.Tensor: lambda x:x.detach(),
-                type(None): lambda x: x,
-            },
-        )
-        return TensorUtils.detach(prediction)
+        return TensorUtils.detach(self.nets["policy"](obs,predict=True,**kwargs))
+
 
 
     def training_step(self, batch, batch_idx):

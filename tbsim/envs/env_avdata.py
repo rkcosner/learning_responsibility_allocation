@@ -18,6 +18,8 @@ from tbsim.utils.timer import Timers
 from tbsim.utils.avdata_utils import parse_avdata_batch, get_drivable_region_map
 from tbsim.utils.rollout_logger import RolloutLogger
 from torch.nn.utils.rnn import pad_sequence
+
+
 class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
     def __init__(
             self,
@@ -28,9 +30,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
             prediction_only=False,
             metrics=None,
             log_data=True,
-            split_ego = False,
-            renderer=None,
-            parse_obs = True,
+            renderer=None
     ):
         """
         A gym-like interface for simulating traffic behaviors (both ego and other agents) with UnifiedDataset
@@ -40,7 +40,6 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
             num_scenes (int): number of scenes to run in parallel
             dataset (UnifiedDataset): a UnifiedDataset instance that contains scene data for simulation
             prediction_only (bool): if set to True, ignore the input action command and only record the predictions
-            split_ego (bool): if set to True, split ego out as the ego observation
         """
         print(env_config)
         self._npr = np.random.RandomState(seed=seed)
@@ -49,8 +48,6 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
         self._num_total_scenes = dataset.num_scenes()
         self._num_scenes = num_scenes
-        self.split_ego = split_ego
-        self.parse_obs = parse_obs
 
         # indices of the scenes (in dataset) that are being used for simulation
         self._current_scenes: List[SimulationScene] = None # corresponding dataset of the scenes
@@ -61,7 +58,6 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         self._prediction_only = prediction_only
 
         self._cached_observation = None
-        self._cached_raw_observation = None
 
         self.timers = Timers()
 
@@ -93,11 +89,8 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
     @property
     def current_agent_track_id(self):
-        ids = np.empty(0)
-        for idx in self.current_scene_index:
-            num_i = np.sum(self.current_agent_scene_index==idx)
-            ids = np.append(ids,np.arange(num_i))
-        return ids
+        return np.arange(self.current_num_agents)
+
     @property
     def current_scene_index(self):
         return self._current_scene_indices.copy()
@@ -129,8 +122,6 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         return self._env_config.simulation.num_simulation_steps
 
     def _disable_offroad_agents(self, scene):
-        if not self.dataset.standardize_data:
-            return
         obs = scene.get_obs()
         obs = parse_avdata_batch(obs)
         drivable_region = get_drivable_region_map(obs["maps"])
@@ -176,8 +167,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 dataset=self.dataset,
                 init_timestep=start_frame_index,
                 freeze_agents=True,
-                return_dict=True,
-                vectorize_lane=self._env_config.simulation.vectorize_lane,
+                return_dict=True
             )
             sim_scene.reset()
             self._disable_offroad_agents(sim_scene)
@@ -185,7 +175,6 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
         self._frame_index = 0
         self._cached_observation = None
-        self._cached_raw_observation = None
         self._done = False
 
         obs_keys_to_log = [
@@ -206,7 +195,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         ego_inds = [i for i, name in enumerate(self.current_agent_names) if name == "ego"]
         for i in ego_inds:
             im = render_state_avdata(
-                batch=self.get_observation(split_ego=False)["agents"],
+                batch=self.get_observation()["agents"],
                 batch_idx=i,
                 action=actions_to_take
             )
@@ -270,12 +259,220 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         return metrics
 
     def get_observation_by_scene(self):
-        obs = self.get_observation(split_ego=False)["agents"]
+        obs = self.get_observation()["agents"]
         obs_by_scene = []
         obs_scene_index = self.current_agent_scene_index
         for i in range(self.num_instances):
             obs_by_scene.append(TensorUtils.map_ndarray(obs, lambda x: x[obs_scene_index == i]))
         return obs_by_scene
+
+    def get_observation(self):
+        if self._cached_observation is not None:
+            return self._cached_observation
+
+        self.timers.tic("get_obs")
+
+        raw_obs = []
+        for si, scene in enumerate(self._current_scenes):
+            raw_obs.extend(scene.get_obs(collate=False))
+        agent_obs = self.dataset.get_collate_fn(return_dict=True)(raw_obs)
+        agent_obs = parse_avdata_batch(agent_obs)
+        agent_obs = TensorUtils.to_numpy(agent_obs)
+        agent_obs["scene_index"] = self.current_agent_scene_index
+        agent_obs["track_id"] = self.current_agent_track_id
+
+        # cache observations
+        self._cached_observation = dict(agents=agent_obs)
+        self.timers.toc("get_obs")
+
+        return self._cached_observation
+
+    def get_observation_skimp(self):
+        self.timers.tic("obs_skimp")
+        raw_obs = []
+        for si, scene in enumerate(self._current_scenes):
+            raw_obs.extend(scene.get_obs(collate=False, get_map=False))
+        agent_obs = self.dataset.get_collate_fn(return_dict=True)(raw_obs)
+        agent_obs = parse_avdata_batch(agent_obs)
+        agent_obs = TensorUtils.to_numpy(agent_obs)
+        agent_obs["scene_index"] = self.current_agent_scene_index
+        agent_obs["track_id"] = self.current_agent_track_id
+        self.timers.toc("obs_skimp")
+        return dict(agents=agent_obs)
+
+    def _add_per_step_metrics(self, obs):
+        for k, v in self._metrics.items():
+            v.add_step(obs, self.current_scene_index)
+
+    def _step(self, step_actions: RolloutAction, num_steps_to_take):
+        if self.is_done():
+            raise SimulationException("Cannot step in a finished episode")
+
+        obs = self.get_observation()["agents"]
+        # record metrics
+        self._add_per_step_metrics(obs)
+
+        action = step_actions.agents.to_dict()
+        assert action["positions"].shape[0] == obs["centroid"].shape[0]
+        for action_index in range(num_steps_to_take):
+            if action_index >= action["positions"].shape[1]:  # GT actions may be shorter
+                self._done = True
+                self._frame_index += action_index
+                self._cached_observation = None
+                return
+            # # log state and action
+            obs_skimp = self.get_observation()
+            # self._add_per_step_metrics(obs_skimp["agents"])
+            if self._log_data:
+                action_to_log = RolloutAction(
+                    agents=Action.from_dict(TensorUtils.map_ndarray(action, lambda x: x[:, action_index:])),
+                    agents_info=step_actions.agents_info
+                )
+                self.logger.log_step(obs_skimp, action_to_log)
+
+            idx = 0
+            for scene in self._current_scenes:
+                scene_action = dict()
+                for agent in scene.agents:
+                    curr_yaw = obs["curr_agent_state"][idx, -1]
+                    curr_pos = obs["curr_agent_state"][idx, :2]
+                    world_from_agent = np.array(
+                        [
+                            [np.cos(curr_yaw), np.sin(curr_yaw)],
+                            [-np.sin(curr_yaw), np.cos(curr_yaw)],
+                        ]
+                    )
+                    next_state = np.zeros(3, dtype=obs["agent_fut"].dtype)
+                    if not np.any(np.isnan(action["positions"][idx, action_index])):  # ground truth action may be NaN
+                        next_state[:2] = action["positions"][idx, action_index] @ world_from_agent + curr_pos
+                        next_state[2] = curr_yaw + action["yaws"][idx, action_index, 0]
+                    else:
+                        print("invalid action!")
+                    scene_action[agent.name] = next_state
+                    idx += 1
+                scene.step(scene_action, return_obs=False)
+
+        self._cached_observation = None
+
+        if self._frame_index + num_steps_to_take >= self.horizon:
+            self._done = True
+        else:
+            self._frame_index += num_steps_to_take
+
+    def step(self, actions: RolloutAction, num_steps_to_take: int = 1, render=False):
+        """
+        Step the simulation with control inputs
+
+        Args:
+            actions (RolloutAction): action for controlling ego and/or agents
+            num_steps_to_take (int): how many env steps to take. Must be less or equal to length of the input actions
+            render (bool): whether to render state and actions and return renderings
+        """
+        actions = actions.to_numpy()
+        renderings = []
+        if render:
+            renderings.append(self.render(actions))
+        self._step(step_actions=actions, num_steps_to_take=num_steps_to_take)
+        return renderings
+
+
+class EnvSplitUnifiedSimulation(EnvUnifiedSimulation):
+    def __init__(
+            self,
+            env_config,
+            num_scenes,
+            dataset: UnifiedDataset,
+            seed=0,
+            prediction_only=False,
+            metrics=None,
+            log_data=True,
+            split_ego = False,
+            renderer=None,
+            parse_obs = True,
+    ):
+        """
+        A gym-like interface for simulating traffic behaviors (both ego and other agents) with UnifiedDataset, with the capability of spliting ego and agent observations
+
+        Args:
+            env_config (NuscEnvConfig): a Config object specifying the behavior of the simulator
+            num_scenes (int): number of scenes to run in parallel
+            dataset (UnifiedDataset): a UnifiedDataset instance that contains scene data for simulation
+            prediction_only (bool): if set to True, ignore the input action command and only record the predictions
+            split_ego (bool): if set to True, split ego out as the ego observation
+            parse_obs (bool or dict): whether to parse the ego and agent observation or not
+        """
+        print(env_config)
+        self._npr = np.random.RandomState(seed=seed)
+        self.dataset = dataset
+        self._env_config = env_config
+
+        self._num_total_scenes = dataset.num_scenes()
+        self._num_scenes = num_scenes
+        self.split_ego = split_ego
+        self.parse_obs = parse_obs
+
+        # indices of the scenes (in dataset) that are being used for simulation
+        self._current_scenes: List[SimulationScene] = None # corresponding dataset of the scenes
+        self._current_scene_indices = None
+
+        self._frame_index = 0
+        self._done = False
+        self._prediction_only = prediction_only
+
+        self._cached_observation = None
+        self._cached_raw_observation = None
+
+        self.timers = Timers()
+
+        self._metrics = dict() if metrics is None else metrics
+        self._log_data = log_data
+        self.logger = None
+
+
+    def reset(self, scene_indices: List = None, start_frame_index = None):
+        """
+        Reset the previous simulation episode. Randomly sample a batch of new scenes unless specified in @scene_indices
+
+        Args:
+            scene_indices (List): Optional, a list of scene indices to initialize the simulation episode
+        """
+        super(EnvSplitUnifiedSimulation,self).reset(scene_indices,start_frame_index)
+        self._cached_raw_observation = None
+
+    def render(self, actions_to_take):
+        scene_ims = []
+        ego_inds = [i for i, name in enumerate(self.current_agent_names) if name == "ego"]
+        for i in ego_inds:
+            im = render_state_avdata(
+                batch=self.get_observation(split_ego=False)["agents"],
+                batch_idx=i,
+                action=actions_to_take
+            )
+            scene_ims.append(im)
+        return np.stack(scene_ims)
+
+    def get_random_action(self):
+        ac = self._npr.randn(self.current_num_agents, 1, 3)
+        if self.split_ego:
+            ego_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name=="ego"])
+            agent_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name!="ego"])
+            ego_action = Action(
+                positions=ac[ego_idx, :, :2],
+                yaws=ac[ego_idx, :, 2:3]
+            )
+            agent_action = Action(
+                positions=ac[agent_idx, :, :2],
+                yaws=ac[agent_idx, :, 2:3]
+            )
+            return RolloutAction(ego=ego_action,agents=agent_action)
+        else:
+            agents = Action(
+                positions=ac[:, :, :2],
+                yaws=ac[:, :, 2:3]
+            )
+
+            return RolloutAction(agents=agents)
+
 
     def get_observation(self,split_ego=None,return_raw=False):
         if split_ego is None:
@@ -302,14 +499,18 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         if return_raw:
             return raw_obs
         if split_ego:
-                
+            # obtain index of ego and agents    
             ego_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name=="ego"])
             agent_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name!="ego"])
+            # raw_obs is the raw avdata batch_element object without collation
             ego_obs_raw = [raw_obs[idx] for idx in ego_idx]
+            # call the collate function to turn batch_element into avdata batch object
             ego_obs_collated = self.dataset.get_collate_fn(return_dict=True)(ego_obs_raw)
             agent_obs_raw = [raw_obs[idx] for idx in agent_idx]
+            # call the collate function to turn batch_element into avdata batch object
             agent_obs_collated = self.dataset.get_collate_fn(return_dict=True)(agent_obs_raw)
             
+            # parse_obs can be True (parse both ego and agent), or False (parse neither), or dictionary that determines whether to parse ego or agent observation
             if self.parse_obs==True:
                 parse_plan = dict(ego=True,agent=True)
             elif self.parse_obs==False:
@@ -322,6 +523,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 ego_obs["scene_index"] = self.current_agent_scene_index[ego_idx]
                 ego_obs["track_id"] = self.current_agent_track_id[ego_idx]
             else:
+                # put collated observation into AgentBatch object from avdata
                 ego_obs = AgentBatch(**ego_obs_collated)
             if parse_plan["agent"]:
                 agent_obs = parse_avdata_batch(agent_obs_collated)
@@ -329,9 +531,11 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 agent_obs["scene_index"] = self.current_agent_scene_index[agent_idx]
                 agent_obs["track_id"] = self.current_agent_track_id[agent_idx]
             else:
+                # put collated observation into AgentBatch object from avdata
                 agent_obs = AgentBatch(**agent_obs_collated)
             self._cached_observation = dict(ego=ego_obs,agents=agent_obs)
         else:
+            # if ego is not splitted out, then either parse all observation or do not parse any observation.
             assert isinstance(self.parse_obs,bool)
             agent_obs = self.dataset.get_collate_fn(return_dict=True)(raw_obs)
             if self.parse_obs:
@@ -344,35 +548,11 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
             self._cached_observation = dict(agents=agent_obs)
 
         self.timers.toc("get_obs")
-
         return self._cached_observation
 
-
-    def get_observation_skimp(self):
-        self.timers.tic("obs_skimp")
-        
-        raw_obs = []
-        if self.parse_obs:
-            
-            for si, scene in enumerate(self._current_scenes):
-                raw_obs.extend(scene.get_obs(collate=False, get_map=False))
-            agent_obs = self.dataset.get_collate_fn(return_dict=True)(raw_obs)
-            agent_obs = parse_avdata_batch(agent_obs)
-            agent_obs = TensorUtils.to_numpy(agent_obs)
-            agent_obs["scene_index"] = self.current_agent_scene_index
-            agent_obs["track_id"] = self.current_agent_track_id
-        else:
-            for si, scene in enumerate(self._current_scenes):
-                raw_obs.append(scene.get_obs(collate=True, get_map=False))
-            agent_obs = raw_obs
-        self.timers.toc("obs_skimp")
-        return dict(agents=agent_obs)
-
-    def _add_per_step_metrics(self, obs):
-        for k, v in self._metrics.items():
-            v.add_step(obs, self.current_scene_index)
     
     def combine_action(self,step_actions):
+        # combine ego and agent actions
         ego_action = step_actions.ego.to_dict()
         agent_action = step_actions.agents.to_dict()
         ego_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name=="ego"])
@@ -384,10 +564,12 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         combined_positions[agent_idx] = agent_action["positions"][:,:min_length]
         combined_yaws[ego_idx] = ego_action["yaws"][:,:min_length]
         combined_yaws[agent_idx] = agent_action["yaws"][:,:min_length]
+
         return RolloutAction(agents=Action(positions=combined_positions,yaws=combined_yaws),agents_info=step_actions.agents_info)
 
 
     def combine_obs(self,ego_obs,agent_obs):
+        # combining ego and agent observation, not really used.
         ego_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name=="ego"])
         agent_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name!="ego"])
         bs = len(self.current_agent_names)
@@ -405,8 +587,10 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         if self.is_done():
             raise SimulationException("Cannot step in a finished episode")
         self.timers.tic("_step")
+        # to bypass all the ego split, collation and parsing, directly get raw obs
         raw_obs = self.get_observation(split_ego=False,return_raw=True)
         obs = self.dataset.get_collate_fn(return_dict=True)(raw_obs)
+        # always parse when stepping
         obs = parse_avdata_batch(obs)
         obs = TensorUtils.to_numpy(obs)
         obs["scene_index"] = self.current_agent_scene_index
@@ -414,11 +598,13 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         obs = {k:v for k,v in obs.items() if not isinstance(v,list)}
 
         # record metrics
-        #TODO: fix the bugs in metrics
-        # self._add_per_step_metrics(obs)
+        #TODO: fix the bugs in metrics when using diffstack
+        self._add_per_step_metrics(obs)
         if step_actions.has_ego:
-            step_actions = self.combine_action(step_actions)
-        action = step_actions.agents.to_dict()
+            combined_step_actions = self.combine_action(step_actions)
+            action = combined_step_actions.agents.to_dict()
+        else:
+            action = step_actions.agents.to_dict()
         
         assert action["positions"].shape[0] == obs["centroid"].shape[0]
         for action_index in range(num_steps_to_take):
@@ -432,10 +618,21 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
             obs_skimp = self.get_observation_skimp()
             # self._add_per_step_metrics(obs_skimp["agents"])
             if self._log_data:
-                action_to_log = RolloutAction(
-                    agents=Action.from_dict(TensorUtils.map_ndarray(action, lambda x: x[:, action_index:])),
-                    agents_info=step_actions.agents_info
-                )
+                if step_actions.has_ego:
+                    ego_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name=="ego"])
+                    agent_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name!="ego"])
+                    action_t = TensorUtils.map_ndarray(action, lambda x: x[:, action_index:])
+                    action_to_log = RolloutAction(
+                        agents=Action.from_dict(dict(positions=action_t["positions"][agent_idx],yaws=action_t["yaws"][agent_idx])),
+                        agents_info=step_actions.agents_info,
+                        ego = Action.from_dict(dict(positions=action_t["positions"][ego_idx],yaws=action_t["yaws"][ego_idx])),
+                        ego_info=step_actions.ego_info,
+                    )
+                else:
+                    action_to_log = RolloutAction(
+                        agents=Action.from_dict(TensorUtils.map_ndarray(action, lambda x: x[:, action_index:])),
+                        agents_info=step_actions.agents_info
+                    )
                 self.logger.log_step(obs_skimp, action_to_log)
 
             idx = 0
@@ -469,20 +666,4 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
             self._frame_index += num_steps_to_take
         print(self.timers)
         
-
-    def step(self, actions: RolloutAction, num_steps_to_take: int = 1, render=False):
-        """
-        Step the simulation with control inputs
-
-        Args:
-            actions (RolloutAction): action for controlling ego and/or agents
-            num_steps_to_take (int): how many env steps to take. Must be less or equal to length of the input actions
-            render (bool): whether to render state and actions and return renderings
-        """
-        actions = actions.to_numpy()
-        renderings = []
-        if render:
-            renderings.append(self.render(actions))
-        self._step(step_actions=actions, num_steps_to_take=num_steps_to_take)
-        return renderings
 

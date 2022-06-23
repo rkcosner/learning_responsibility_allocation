@@ -3,6 +3,7 @@ videos/
 figures/
 checkpoints
 experiments/
+visualizations/
 results/
 ## config files
 #*.yaml

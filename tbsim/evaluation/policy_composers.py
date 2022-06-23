@@ -561,7 +561,7 @@ class AgentAwareEC(Hierarchical):
             planner, _ = self._get_planner()
             predictor, exp_cfg = self._get_EC_predictor()
 
-        ego_sampler = SplinePlanner(self.device, N_seg=planner.algo_config.future_num_frames+1)
+        ego_sampler = SplinePlanner(self.device, N_seg=planner.algo_config.future_num_frames+1,acce_grid=[-5,-2.5,0,2])
         agent_planner = PolicyWrapper.wrap_planner(
             planner,
             mask_drivable=self.eval_config.policy.mask_drivable,
@@ -585,8 +585,8 @@ class TreeContingency(Hierarchical):
         #     ckpt_root_dir=self.ckpt_root_dir
         # )
         tree_ckpt_path, tree_config_path = get_checkpoint(
-            ngc_job_id="0100000",
-            ckpt_key="iter14000",
+            ngc_job_id="0100001",
+            ckpt_key="iter50000",
             ckpt_root_dir="/home/yuxiaoc/repos/behavior-generation/checkpoints"
         )
         predictor_cfg = get_experiment_config_from_file(tree_config_path)

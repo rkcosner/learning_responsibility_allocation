@@ -542,7 +542,6 @@ def create_node(global_x, global_y, vx, vy, ax, ay, yaw, nusc_map, scene, node_t
     projected_t_xyh = lane_t_xyh
 
     fitted_controls_traj = np.full((global_x.shape[0], CONTROL_FIT_H, 2), fill_value=np.nan)
-    # print ("fit", time.time()-t1)
 
     data_dict = {('position', 'x'): x,
                     ('position', 'y'): y,

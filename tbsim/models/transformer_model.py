@@ -20,7 +20,7 @@ from tbsim.models.cnn_roi_encoder import (
     CNNROIMapEncoder,
     generate_ROIs,
     Indexing_ROI_result,
-    obtain_lane_flag,
+    rasterized_ROI_align,
     obtain_map_enc,
 )
 from tbsim.utils.tensor_utils import round_2pi
@@ -284,7 +284,7 @@ class TransformerModel(nn.Module):
         lane_mask = (data_batch["image"][:, self.algo_config.CNN.lane_channel] < 1.0).type(
             torch.float)
 
-        lane_flags = obtain_lane_flag(
+        lane_flags = rasterized_ROI_align(
             lane_mask,
             pos_pred,
             yaw_pred,
