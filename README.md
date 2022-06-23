@@ -1,6 +1,8 @@
 # Traffic Behavior Simulation (tbsim)
 Software infrastructure for learning-based traffic simulation.
 
+<img src="assets/sample_rollout.gif" width="750" height="250"/>
+
 ## Installation
 
 Install `tbsim`
