@@ -1,7 +1,7 @@
 import torch
 
 import tbsim.utils.l5_utils as l5_utils
-import tbsim.utils.avdata_utils as av_utils
+import tbsim.utils.trajdata_utils as av_utils
 from tbsim import dynamics as dynamics
 from tbsim.configs.base import ExperimentConfig
 
@@ -11,17 +11,17 @@ BATCH_TYPE = None
 
 def set_global_batch_type(batch_type):
     global BATCH_TYPE
-    assert batch_type in ["avdata", "l5kit"]
+    assert batch_type in ["trajdata", "l5kit"]
     BATCH_TYPE = batch_type
 
 
 def batch_utils():
-    if BATCH_TYPE == "avdata":
-        return AVDataBatchUtils()
+    if BATCH_TYPE == "trajdata":
+        return trajdataBatchUtils()
     elif BATCH_TYPE == "l5kit":
         return L5BatchUtils()
     else:
-        raise NotImplementedError("Please set BATCH_TYPE in batch_utils.py to {avdata, l5kit}")
+        raise NotImplementedError("Please set BATCH_TYPE in batch_utils.py to {trajdata, l5kit}")
 
 
 class BatchUtils(object):
@@ -147,11 +147,11 @@ class L5BatchUtils(BatchUtils):
         return l5_utils.get_modality_shapes(cfg)
 
 
-class AVDataBatchUtils(BatchUtils):
-    """Batch utils for AVData"""
+class trajdataBatchUtils(BatchUtils):
+    """Batch utils for trajdata"""
     @staticmethod
     def parse_batch(data_batch):
-        return av_utils.parse_avdata_batch(data_batch)
+        return av_utils.parse_trajdata_batch(data_batch)
 
     @staticmethod
     def batch_to_raw_all_agents(data_batch, step_time):

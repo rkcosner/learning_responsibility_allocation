@@ -29,7 +29,7 @@ from imageio import get_writer
 
 def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
     if eval_cfg.env == "nusc":
-        set_global_batch_type("avdata")
+        set_global_batch_type("trajdata")
     elif eval_cfg.env == 'l5kit':
         set_global_batch_type("l5kit")
 

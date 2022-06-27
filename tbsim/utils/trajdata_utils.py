@@ -6,8 +6,8 @@ from tbsim.utils.geometry_utils import transform_points_tensor
 from tbsim.configs.base import ExperimentConfig
 
 
-def avdata2posyawspeed(state, nan_to_zero=True):
-    """Converts avdata's state format to pos, yaw, and speed. Set Nans to 0s"""
+def trajdata2posyawspeed(state, nan_to_zero=True):
+    """Converts trajdata's state format to pos, yaw, and speed. Set Nans to 0s"""
     assert state.shape[-1] == 8  # x, y, vx, vy, ax, ay, sin(heading), cos(heading)
     pos = state[..., :2]
     yaw = torch.atan2(state[..., [-2]], state[..., [-1]])
@@ -84,10 +84,10 @@ def maybe_pad_neighbor(batch):
 
 
 @torch.no_grad()
-def parse_avdata_batch(batch: dict):
+def parse_trajdata_batch(batch: dict):
     maybe_pad_neighbor(batch)
-    fut_pos, fut_yaw, _, fut_mask = avdata2posyawspeed(batch["agent_fut"])
-    hist_pos, hist_yaw, hist_speed, hist_mask = avdata2posyawspeed(batch["agent_hist"])
+    fut_pos, fut_yaw, _, fut_mask = trajdata2posyawspeed(batch["agent_fut"])
+    hist_pos, hist_yaw, hist_speed, hist_mask = trajdata2posyawspeed(batch["agent_hist"])
     curr_speed = hist_speed[..., -1]
     curr_state = batch["curr_agent_state"]
     curr_yaw = curr_state[:, -1]
@@ -101,8 +101,8 @@ def parse_avdata_batch(batch: dict):
     agent_hist_extent = batch["agent_hist_extent"]
     agent_hist_extent[torch.isnan(agent_hist_extent)] = 0.
 
-    neigh_hist_pos, neigh_hist_yaw, neigh_hist_speed, neigh_hist_mask = avdata2posyawspeed(batch["neigh_hist"])
-    neigh_fut_pos, neigh_fut_yaw, _, neigh_fut_mask = avdata2posyawspeed(batch["neigh_fut"])
+    neigh_hist_pos, neigh_hist_yaw, neigh_hist_speed, neigh_hist_mask = trajdata2posyawspeed(batch["neigh_hist"])
+    neigh_fut_pos, neigh_fut_yaw, _, neigh_fut_mask = trajdata2posyawspeed(batch["neigh_fut"])
     neigh_curr_speed = neigh_hist_speed[..., -1]
     neigh_types = batch["neigh_types"]
     # convert nuscenes types to l5kit types

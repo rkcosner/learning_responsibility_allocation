@@ -5,7 +5,7 @@ import os
 
 from l5kit.data import LocalDataManager, ChunkedDataset
 from l5kit.rasterization import build_rasterizer
-from avdata import AgentType, UnifiedDataset
+from trajdata import AgentType, UnifiedDataset
 
 from tbsim.l5kit.vectorizer import build_vectorizer
 
@@ -14,8 +14,8 @@ from tbsim.configs.eval_config import EvaluationConfig
 from tbsim.configs.base import ExperimentConfig
 from tbsim.utils.metrics import OrnsteinUhlenbeckPerturbation
 from tbsim.envs.env_l5kit import EnvL5KitSimulation
-from tbsim.envs.env_avdata import EnvUnifiedSimulation
-from tbsim.utils.config_utils import translate_l5kit_cfg, translate_avdata_cfg
+from tbsim.envs.env_trajdata import EnvUnifiedSimulation
+from tbsim.utils.config_utils import translate_l5kit_cfg, translate_trajdata_cfg
 import tbsim.envs.env_metrics as EnvMetrics
 from tbsim.evaluation.metric_composers import CVAEMetrics, OccupancyMetrics
 
@@ -133,7 +133,7 @@ class EnvNuscBuilder(EnvironmentBuilder):
         exp_cfg.env.simulation.start_frame_index = exp_cfg.algo.history_num_frames + 1
         exp_cfg.lock()
 
-        data_cfg = translate_avdata_cfg(exp_cfg)
+        data_cfg = translate_trajdata_cfg(exp_cfg)
 
         future_sec = data_cfg.future_num_frames * data_cfg.step_time
         history_sec = data_cfg.history_num_frames * data_cfg.step_time
