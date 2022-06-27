@@ -16,7 +16,7 @@ from trajdata.simulation.sim_df_cache import SimulationDataFrameCache
 from trajdata import AgentType, UnifiedDataset
 
 from tbsim.utils.geometry_utils import get_box_world_coords_np
-from tbsim.utils.config_utils import translate_l5kit_cfg, translate_avdata_cfg
+from tbsim.utils.config_utils import translate_l5kit_cfg, translate_trajdata_cfg
 from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.utils.vis_utils import build_visualization_rasterizer_l5kit
 from tbsim.utils.vis_utils import COLORS, draw_agent_boxes

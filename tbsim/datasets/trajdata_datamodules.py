@@ -33,12 +33,12 @@ class UnifiedDataModule(pl.LightningDataModule):
         neighbor_distance = data_cfg.max_agents_distance
 
         kwargs = dict(
-            desired_data=[data_cfg.avdata_source_train],
+            desired_data=[data_cfg.trajdata_source_train],
             desired_dt=data_cfg.step_time,
             future_sec=(future_sec, future_sec),
             history_sec=(history_sec, history_sec),
             data_dirs={
-                data_cfg.avdata_source_root: data_cfg.dataset_path,
+                data_cfg.trajdata_source_root: data_cfg.dataset_path,
             },
             only_types=[AgentType.VEHICLE],
             agent_interaction_distances=defaultdict(lambda: neighbor_distance),
@@ -55,7 +55,7 @@ class UnifiedDataModule(pl.LightningDataModule):
         print(kwargs)
         self.train_dataset = UnifiedDataset(**kwargs)
 
-        kwargs["desired_data"] = [data_cfg.avdata_source_valid]
+        kwargs["desired_data"] = [data_cfg.trajdata_source_valid]
         kwargs["rebuild_cache"] = self._train_config.on_ngc
         self.valid_dataset = UnifiedDataset(**kwargs)
 

@@ -19,7 +19,7 @@ Install `trajdata`
 cd ..
 git clone ssh://git@gitlab-master.nvidia.com:12051/nvr-av/unified-av-data-loader.git trajdata
 cd trajdata
-# replace requirements.txt with avdata_requirements.txt included in tbsim
+# replace requirements.txt with trajdata_requirements.txt included in tbsim
 pip install -e .
 ```
 

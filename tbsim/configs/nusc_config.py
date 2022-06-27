@@ -9,9 +9,9 @@ class NuscTrainConfig(TrainConfig):
     def __init__(self):
         super(NuscTrainConfig, self).__init__()
 
-        self.avdata_source_train = "nusc-train"
-        self.avdata_source_valid = "nusc-val"
-        self.avdata_source_root = "nusc"
+        self.trajdata_source_train = "nusc-train"
+        self.trajdata_source_valid = "nusc-val"
+        self.trajdata_source_root = "nusc"
 
         self.dataset_path = "SET-THIS-THROUGH-TRAIN-SCRIPT-ARGS"
         self.datamodule_class = "UnifiedDataModule"
@@ -49,7 +49,7 @@ class NuscEnvConfig(EnvConfig):
         self.rasterizer.pixel_size = 0.5
 
         # where the agent is on the map, (0.0, 0.0) is the center
-        # WARNING: this should not be changed before resolving TODO in parse_avdata_batch() in avdata_utils.py
+        # WARNING: this should not be changed before resolving TODO in parse_trajdata_batch() in trajdata_utils.py
         self.rasterizer.ego_center = (-0.5, 0.0)
 
         # maximum number of agents to consider during training

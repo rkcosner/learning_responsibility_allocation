@@ -106,7 +106,7 @@ def draw_agent_boxes(image, pos, yaw, extent, raster_from_agent, outline_color, 
     return im
 
 
-def render_state_avdata(
+def render_state_trajdata(
         batch: dict,
         batch_idx: int,
         action,
