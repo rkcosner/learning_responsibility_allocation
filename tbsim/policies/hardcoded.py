@@ -396,7 +396,59 @@ class ContingencyPlanner(Policy):
         )
         return scene_obs, scene_goal
         
+    def get_ego_samples(self,obs):
+        self.timer.tic("sampling")
+        bs = obs["history_positions"].shape[0]
+        ego_trajs = list()
+        #TODO: paralellize this process
+        ego_nodes_by_stage = list()
+        for i in range(bs):
+            pos = obs["history_positions"][i,-1]
+            vel = obs["curr_speed"][i]
+            yaw = obs["history_yaws"][i,-1]
+            traj0 = torch.tensor([[pos[0], pos[1], vel, 0, yaw, 0., 0.]]).to(pos.device)
+            lanes = TensorUtils.to_numpy(obs["ego_lanes"][i])
+            if lanes.shape[-1]==4:
+                lanes = np.concatenate((lanes[...,:2],np.arctan2(lanes[...,3:],lanes[...,2:3])),-1)
 
+            lanes = [lanes[i] for i,lane in enumerate(lanes) if lane.any()]
+            
+            def expand_func(x): return self.ego_sampler.gen_trajectory_batch(
+                    x, self.step_time*self.num_frames_per_stage, lanes,N=self.num_frames_per_stage+1,max_children=20)
+            
+            x0 = TrajTree(traj0, None, 0)
+            x0.grow_tree(expand_func, self.stage)
+            
+            nodes,_ = TrajTree.get_nodes_by_level(x0,depth=self.stage)
+            if len(nodes[0])==0:
+                ego_nodes_by_stage.append(None)
+            else:
+                ego_nodes_by_stage.append(nodes)
+
+            if len(nodes[self.stage]) > 0:
+                ego_trajs_i = torch.stack([leaf.total_traj for leaf in nodes[self.stage]], 0).float()
+                ego_trajs_i = ego_trajs_i[...,1:,[0,1,4]] #TODO: make it less hacky
+            else:
+                ego_trajs_i = torch.cat((obs["target_positions"][i,:T],obs["target_yaws"][i,:T]),-1).unsqueeze(0)
+            ego_trajs.append(ego_trajs_i)
+        
+        self.timer.toc("sampling")
+        return ego_trajs,ego_nodes_by_stage
+    def get_prediction(self,obs,scene_obs,scene_goal,ego_trajs):
+        bs = obs["history_positions"].shape[0]
+        self.timer.tic("prediction")
+        Ns = max(ego_trajs_i.shape[0] for ego_trajs_i in ego_trajs)
+        T = self.stage*self.num_frames_per_stage
+        ego_traj_samples = torch.zeros([bs,Ns,T,3],dtype=torch.float32,device=obs["curr_speed"].device)
+        cond_idx = list()
+        for i in range(bs):
+            cond_idx.append(0)
+            ego_traj_samples[i,:ego_trajs[i].shape[0]] = ego_trajs[i]
+        
+        agent_pred = self.predictor.predict(scene_obs,cond_traj=ego_traj_samples,cond_idx=cond_idx,goal=scene_goal)
+        
+        self.timer.toc("prediction")
+        return agent_pred, ego_traj_samples
     
     def get_action(self,obs,**kwargs)-> Tuple[Action, Dict]:
         assert "agent_obs" in kwargs
@@ -417,58 +469,8 @@ class ContingencyPlanner(Policy):
             agent_plan=None
             ego_likelihood = None
         scene_obs,scene_goal = self.get_scene_obs(obs,agent_obs,agent_plan)
-        self.timer.tic("sampling")
-        
-        agent_size = agent_obs["image"].shape[0]
-        ego_trajs = list()
-        #TODO: paralellize this process
-        ego_trees = list()
-        ego_nodes_by_stage = list()
-        for i in range(bs):
-            pos = obs["history_positions"][i,-1]
-            vel = obs["curr_speed"][i]
-            yaw = obs["history_yaws"][i,0]
-            traj0 = torch.tensor([[pos[0], pos[1], vel, 0, yaw, 0., 0.]]).to(pos.device)
-            lanes = TensorUtils.to_numpy(obs["ego_lanes"][i])
-            if lanes.shape[-1]==4:
-                lanes = np.concatenate((lanes[...,:2],np.arctan2(lanes[...,3:],lanes[...,2:3])),-1)
-
-            lanes = [lanes[i] for i,lane in enumerate(lanes) if lane.any()]
-            
-            def expand_func(x): return self.ego_sampler.gen_trajectory_batch(
-                    x, self.step_time*self.num_frames_per_stage, lanes,N=self.num_frames_per_stage+1,max_children=20)
-            
-            x0 = TrajTree(traj0, None, 0)
-            x0.grow_tree(expand_func, self.stage)
-            
-            ego_trees.append(x0)
-            nodes,_ = TrajTree.get_nodes_by_level(x0,depth=self.stage)
-            if len(nodes[0])==0:
-                ego_nodes_by_stage.append(None)
-            else:
-                ego_nodes_by_stage.append(nodes)
-
-            if len(nodes[self.stage]) > 0:
-                ego_trajs_i = torch.stack([leaf.total_traj for leaf in nodes[self.stage]], 0).float()
-                ego_trajs_i = ego_trajs_i[...,1:,[0,1,4]] #TODO: make it less hacky
-            else:
-                ego_trajs_i = torch.cat((obs["target_positions"][i,:T],obs["target_yaws"][i,:T]),-1).unsqueeze(0)
-            ego_trajs.append(ego_trajs_i)
-        
-        self.timer.toc("sampling")
-        self.timer.tic("prediction")
-        Ns = max(ego_trajs_i.shape[0] for ego_trajs_i in ego_trajs)
-        cond_traj = torch.zeros([bs,Ns,T,3],dtype=torch.float32,device=obs["curr_speed"].device)
-        ego_traj_samples = torch.zeros([bs,Ns,T,3],dtype=torch.float32,device=obs["curr_speed"].device)
-        cond_idx = list()
-        for i in range(bs):
-            cond_idx.append(0)
-            ego_traj_samples[i,:ego_trajs[i].shape[0]] = ego_trajs[i]
-            cond_traj[i,:ego_trajs[i].shape[0]] = ego_trajs[i]
-        
-        EC_pred = self.predictor.predict(scene_obs,cond_traj=cond_traj,cond_idx=cond_idx,goal=scene_goal)
-        
-        self.timer.toc("prediction")
+        ego_trajs,ego_nodes_by_stage = self.get_ego_samples(obs)
+        agent_pred, ego_traj_samples = self.get_prediction(obs,scene_obs,scene_goal,ego_trajs)
         self.timer.tic("planning")
         if "drivable_map" in obs:
             drivable_map = obs["drivable_map"].float()
@@ -480,8 +482,8 @@ class ContingencyPlanner(Policy):
         for i in range(bs):
             N_i = ego_trajs[i].shape[0]
             Na_i = scene_obs["num_agents"][i]
-            agent_traj_local = EC_pred["trajectories"][i,:N_i,:,1:Na_i].float()
-            prob = EC_pred["p"][i,:N_i]
+            agent_traj_local = agent_pred["trajectories"][i,:N_i,:,1:Na_i].float()
+            prob = agent_pred["p"][i,:N_i]
             if ego_nodes_by_stage[i] is not None:
 
                 motion_policy = PlanUtils.contingency_planning(ego_nodes_by_stage[i],
@@ -492,16 +494,18 @@ class ContingencyPlanner(Policy):
                                                             scene_obs["agent_type"][i,1:Na_i],
                                                             obs["raster_from_agent"][i],
                                                             dis_map[i],
-                                                            {"collision_weight": 0.0, "lane_weight": 3.0, "progress_weight": 0.2,"likelihood": 0.0},
+                                                            {"collision_weight": 10.0, "lane_weight": 1.0, "progress_weight": 0.02,"likelihood_weight": 0.05},
                                                             self.num_frames_per_stage,
                                                             self.predictor.algo_config.vae.latent_dim,
                                                             self.config.step_time,
                                                             log_likelihood=ego_likelihood[i],
                                                             )
+                
             else:
                 raise ValueError("ego plan is empty!")
                             
             opt_traj.append(motion_policy.get_plan(None,self.stage*self.num_frames_per_stage))
+
         self.timer.toc("planning")
         print(self.timer)
         opt_traj = torch.stack(opt_traj,0)

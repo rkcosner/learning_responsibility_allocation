@@ -104,7 +104,6 @@ def get_terminal_likelihood_reward(
     raster_xy_flat = (raster_xy[...,1]*w+raster_xy[...,0])
 
     ll_reward = log_likelihood.flatten()[raster_xy_flat]
-
     return ll_reward
 
 def get_progress_reward(ego_trajectories,d_sat = 10):
@@ -149,12 +148,16 @@ def ego_sample_planning(
     progress = get_total_distance(ego_trajectories)
 
     log_likelihood = 0 if log_likelihood is None else log_likelihood
+    if log_likelihood.ndim==3:
+        log_likelihood = get_terminal_likelihood_reward(ego_trajectories, raster_from_agent, log_likelihood)
+
     total_score = (
             + weights["likelihood_weight"] * log_likelihood
             + weights["progress_weight"] * progress
             - weights["collision_weight"] * col_loss
             - weights["lane_weight"] * lane_loss
     )
+
 
     return torch.argmax(total_score, dim=1)
 
@@ -322,15 +325,15 @@ def contingency_planning(ego_tree,
                                       )
 
 
-        # lane_loss = get_drivable_area_loss(ego_traj.unsqueeze(0), raster_from_agent.unsqueeze(0), dis_map.unsqueeze(0), ego_extents.unsqueeze(0))
-        lane_loss = get_lane_loss_simple(ego_traj,raster_from_agent,dis_map).unsqueeze(0)
+        lane_loss = get_drivable_area_loss(ego_traj.unsqueeze(0), raster_from_agent.unsqueeze(0), dis_map.unsqueeze(0), ego_extents.unsqueeze(0))
+        # lane_loss = get_lane_loss_simple(ego_traj,raster_from_agent,dis_map).unsqueeze(0)
 
         progress_reward = get_progress_reward(ego_traj,d_sat=d_sat)
         
         total_loss = weights["collision_weight"]*col_loss+weights["lane_weight"]*lane_loss-weights["progress_weight"]*progress_reward.unsqueeze(0)
         if log_likelihood is not None and stage==num_stage:
             ll_reward = get_terminal_likelihood_reward(ego_traj, raster_from_agent, log_likelihood)
-            total_loss = total_loss-weights["likelihood"]*ll_reward
+            total_loss = total_loss-weights["likelihood_weight"]*ll_reward
         
 
         for i in range(len(ego_nodes)):
