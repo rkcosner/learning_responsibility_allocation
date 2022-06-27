@@ -5,7 +5,7 @@ import os
 
 from l5kit.data import LocalDataManager, ChunkedDataset
 from l5kit.rasterization import build_rasterizer
-from avdata import AgentType, UnifiedDataset
+from trajdata import AgentType, UnifiedDataset
 
 from tbsim.l5kit.vectorizer import build_vectorizer
 

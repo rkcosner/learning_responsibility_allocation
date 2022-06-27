@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 from tbsim.configs.base import TrainConfig
 
-from avdata import AgentBatch, AgentType, UnifiedDataset
+from trajdata import AgentBatch, AgentType, UnifiedDataset
 
 
 class UnifiedDataModule(pl.LightningDataModule):

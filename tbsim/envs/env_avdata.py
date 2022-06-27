@@ -1,9 +1,9 @@
 import numpy as np
 from copy import deepcopy
 from typing import List
-from avdata import UnifiedDataset
-from avdata.simulation import SimulationScene
-from avdata.simulation import sim_metrics
+from trajdata import UnifiedDataset
+from trajdata.simulation import SimulationScene
+from trajdata.simulation import sim_metrics
 
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.utils.vis_utils import render_state_avdata

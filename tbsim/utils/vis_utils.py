@@ -4,7 +4,7 @@ from PIL import Image, ImageDraw
 from l5kit.geometry import transform_points
 from l5kit.rasterization.render_context import RenderContext
 from l5kit.configs.config import load_metadata
-from avdata.data_structures.map import Map
+from trajdata.data_structures.map import Map
 
 from tbsim.utils.tensor_utils import map_ndarray
 from tbsim.l5kit.vis_rasterizer import VisualizationRasterizer

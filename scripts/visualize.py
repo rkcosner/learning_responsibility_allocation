@@ -11,9 +11,9 @@ import os
 
 from l5kit.data import LocalDataManager
 from l5kit.geometry import transform_points
-from avdata.simulation.sim_stats import calc_stats
-from avdata.simulation.sim_df_cache import SimulationDataFrameCache
-from avdata import AgentType, UnifiedDataset
+from trajdata.simulation.sim_stats import calc_stats
+from trajdata.simulation.sim_df_cache import SimulationDataFrameCache
+from trajdata import AgentType, UnifiedDataset
 
 from tbsim.utils.geometry_utils import get_box_world_coords_np
 from tbsim.utils.config_utils import translate_l5kit_cfg, translate_avdata_cfg
