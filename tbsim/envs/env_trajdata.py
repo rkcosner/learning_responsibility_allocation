@@ -4,18 +4,18 @@ import torch
 import numpy as np
 from copy import deepcopy
 from typing import List
-from avdata import UnifiedDataset, AgentBatch
-from avdata.simulation import SimulationScene
-from avdata.simulation import sim_metrics
+from trajdata import UnifiedDataset, AgentBatch
+from trajdata.simulation import SimulationScene
+from trajdata.simulation import sim_metrics
 from scripts.parse_results import parse
 
 import tbsim.utils.tensor_utils as TensorUtils
-from tbsim.utils.vis_utils import render_state_avdata
+from tbsim.utils.vis_utils import render_state_trajdata
 from tbsim.envs.base import BaseEnv, BatchedEnv, SimulationException
 from tbsim.policies.common import RolloutAction, Action
 from tbsim.utils.geometry_utils import transform_points_tensor
 from tbsim.utils.timer import Timers
-from tbsim.utils.avdata_utils import parse_avdata_batch, get_drivable_region_map
+from tbsim.utils.trajdata_utils import parse_trajdata_batch, get_drivable_region_map
 from tbsim.utils.rollout_logger import RolloutLogger
 from torch.nn.utils.rnn import pad_sequence
 
@@ -124,7 +124,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
     def _disable_offroad_agents(self, scene):
         obs = scene.get_obs()
-        obs = parse_avdata_batch(obs)
+        obs = parse_trajdata_batch(obs)
         drivable_region = get_drivable_region_map(obs["maps"])
         raster_pos = transform_points_tensor(obs["centroid"][:, None], obs["raster_from_world"])[:, 0]
         valid_agents = []
@@ -196,7 +196,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         scene_ims = []
         ego_inds = [i for i, name in enumerate(self.current_agent_names) if name == "ego"]
         for i in ego_inds:
-            im = render_state_avdata(
+            im = render_state_trajdata(
                 batch=self.get_observation()["agents"],
                 batch_idx=i,
                 action=actions_to_take
@@ -278,7 +278,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         for si, scene in enumerate(self._current_scenes):
             raw_obs.extend(scene.get_obs(collate=False))
         agent_obs = self.dataset.get_collate_fn(return_dict=True)(raw_obs)
-        agent_obs = parse_avdata_batch(agent_obs)
+        agent_obs = parse_trajdata_batch(agent_obs)
         agent_obs = TensorUtils.to_numpy(agent_obs)
         agent_obs["scene_index"] = self.current_agent_scene_index
         agent_obs["track_id"] = self.current_agent_track_id
@@ -296,7 +296,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
         for si, scene in enumerate(self._current_scenes):
             raw_obs.extend(scene.get_obs(collate=False, get_map=False))
         agent_obs = self.dataset.get_collate_fn(return_dict=True)(raw_obs)
-        agent_obs = parse_avdata_batch(agent_obs)
+        agent_obs = parse_trajdata_batch(agent_obs)
         agent_obs = TensorUtils.to_numpy(agent_obs)
         agent_obs["scene_index"] = self.current_agent_scene_index
         agent_obs["track_id"] = self.current_agent_track_id
@@ -446,7 +446,7 @@ class EnvSplitUnifiedSimulation(EnvUnifiedSimulation):
         scene_ims = []
         ego_inds = [i for i, name in enumerate(self.current_agent_names) if name == "ego"]
         for i in ego_inds:
-            im = render_state_avdata(
+            im = render_state_trajdata(
                 batch=self.get_observation(split_ego=False)["agents"],
                 batch_idx=i,
                 action=actions_to_take
@@ -505,12 +505,12 @@ class EnvSplitUnifiedSimulation(EnvUnifiedSimulation):
             # obtain index of ego and agents    
             ego_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name=="ego"])
             agent_idx = np.array([i for i,name in enumerate(self.current_agent_names) if name!="ego"])
-            # raw_obs is the raw avdata batch_element object without collation
+            # raw_obs is the raw trajdata batch_element object without collation
             ego_obs_raw = [raw_obs[idx] for idx in ego_idx]
-            # call the collate function to turn batch_element into avdata batch object
+            # call the collate function to turn batch_element into trajdata batch object
             ego_obs_collated = self.dataset.get_collate_fn(return_dict=True)(ego_obs_raw)
             agent_obs_raw = [raw_obs[idx] for idx in agent_idx]
-            # call the collate function to turn batch_element into avdata batch object
+            # call the collate function to turn batch_element into trajdata batch object
             agent_obs_collated = self.dataset.get_collate_fn(return_dict=True)(agent_obs_raw)
             
             # parse_obs can be True (parse both ego and agent), or False (parse neither), or dictionary that determines whether to parse ego or agent observation
@@ -521,20 +521,20 @@ class EnvSplitUnifiedSimulation(EnvUnifiedSimulation):
             elif isinstance(self.parse_obs,dict):
                 parse_plan = self.parse_obs
             if parse_plan["ego"]:
-                ego_obs = parse_avdata_batch(ego_obs_collated)
+                ego_obs = parse_trajdata_batch(ego_obs_collated)
                 ego_obs = TensorUtils.to_numpy(ego_obs)
                 ego_obs["scene_index"] = self.current_agent_scene_index[ego_idx]
                 ego_obs["track_id"] = self.current_agent_track_id[ego_idx]
             else:
-                # put collated observation into AgentBatch object from avdata
+                # put collated observation into AgentBatch object from trajdata
                 ego_obs = AgentBatch(**ego_obs_collated)
             if parse_plan["agent"]:
-                agent_obs = parse_avdata_batch(agent_obs_collated)
+                agent_obs = parse_trajdata_batch(agent_obs_collated)
                 agent_obs = TensorUtils.to_numpy(agent_obs)
                 agent_obs["scene_index"] = self.current_agent_scene_index[agent_idx]
                 agent_obs["track_id"] = self.current_agent_track_id[agent_idx]
             else:
-                # put collated observation into AgentBatch object from avdata
+                # put collated observation into AgentBatch object from trajdata
                 agent_obs = AgentBatch(**agent_obs_collated)
             self._cached_observation = dict(ego=ego_obs,agents=agent_obs)
         else:
@@ -542,7 +542,7 @@ class EnvSplitUnifiedSimulation(EnvUnifiedSimulation):
             assert isinstance(self.parse_obs,bool)
             agent_obs = self.dataset.get_collate_fn(return_dict=True)(raw_obs)
             if self.parse_obs:
-                agent_obs = parse_avdata_batch(agent_obs)
+                agent_obs = parse_trajdata_batch(agent_obs)
                 agent_obs = TensorUtils.to_numpy(agent_obs)
                 agent_obs["scene_index"] = self.current_agent_scene_index
                 agent_obs["track_id"] = self.current_agent_track_id
@@ -593,7 +593,7 @@ class EnvSplitUnifiedSimulation(EnvUnifiedSimulation):
         raw_obs = self.get_observation(split_ego=False,return_raw=True)
         obs = self.dataset.get_collate_fn(return_dict=True)(raw_obs)
         # always parse when stepping
-        obs = parse_avdata_batch(obs)
+        obs = parse_trajdata_batch(obs)
         obs = TensorUtils.to_numpy(obs)
         obs["scene_index"] = self.current_agent_scene_index
         obs["track_id"] = self.current_agent_track_id

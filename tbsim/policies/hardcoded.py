@@ -185,10 +185,8 @@ class EC_sampling_controller(Policy):
         ego_trajs = list()
         #TODO: paralellize this process
         for i in range(bs):
-            pos = obs["history_positions"][i,0]
             vel = obs["curr_speed"][i]
-            yaw = obs["history_yaws"][i,0]
-            traj0 = torch.tensor([[pos[0], pos[1], vel, 0, yaw, 0., 0.]]).to(pos.device)
+            traj0 = torch.tensor([[0., 0., vel, 0, 0., 0., 0.]]).to(vel.device)
             lanes = TensorUtils.to_numpy(obs["ego_lanes"][i])
             lanes = np.concatenate((lanes[...,:2],np.arctan2(lanes[...,3:],lanes[...,2:3])),-1)
             lanes = np.split(lanes,obs["ego_lanes"].shape[1])
@@ -403,10 +401,8 @@ class ContingencyPlanner(Policy):
         #TODO: paralellize this process
         ego_nodes_by_stage = list()
         for i in range(bs):
-            pos = obs["history_positions"][i,-1]
             vel = obs["curr_speed"][i]
-            yaw = obs["history_yaws"][i,-1]
-            traj0 = torch.tensor([[pos[0], pos[1], vel, 0, yaw, 0., 0.]]).to(pos.device)
+            traj0 = torch.tensor([[0.0, 0.0, vel, 0, 0.0, 0., 0.]]).to(vel.device)
             lanes = TensorUtils.to_numpy(obs["ego_lanes"][i])
             if lanes.shape[-1]==4:
                 lanes = np.concatenate((lanes[...,:2],np.arctan2(lanes[...,3:],lanes[...,2:3])),-1)
@@ -494,11 +490,12 @@ class ContingencyPlanner(Policy):
                                                             scene_obs["agent_type"][i,1:Na_i],
                                                             obs["raster_from_agent"][i],
                                                             dis_map[i],
-                                                            {"collision_weight": 10.0, "lane_weight": 1.0, "progress_weight": 0.02,"likelihood_weight": 0.05},
+                                                            {"collision_weight": 10.0, "lane_weight": 1.0, "progress_weight": 0.02,"likelihood_weight": 0.15},
                                                             self.num_frames_per_stage,
                                                             self.predictor.algo_config.vae.latent_dim,
                                                             self.config.step_time,
                                                             log_likelihood=ego_likelihood[i],
+                                                            pert_std = 0.2
                                                             )
                 
             else:
@@ -511,16 +508,22 @@ class ContingencyPlanner(Policy):
         opt_traj = torch.stack(opt_traj,0)
         action = Action(positions=opt_traj[...,:2],yaws=opt_traj[...,2:])
         action_info = dict()
+        for i in range(bs):
+            perm = torch.randperm(ego_trajs[i].shape[0],device=ego_traj_samples.device)
+            ego_traj_samples[i,:ego_trajs[i].shape[0]] = ego_traj_samples[i,perm]
+
         action_info["action_samples"] = {"positions":ego_traj_samples[...,:2],"yaws":ego_traj_samples[...,2:]}
         return action, action_info
 
 
 class ModelPredictiveController(Policy):
-    def __init__(self, device, step_time, predictor, *args, **kwargs):
+    def __init__(self, device, step_time, predictor, solver="casadi", *args, **kwargs):
         super().__init__(device, *args, **kwargs)
         self.device = device
         self.step_time = step_time
         self.predictor = predictor
+        self.solver=solver
+
 
     def eval(self):
         self.predictor.eval()
@@ -533,25 +536,53 @@ class ModelPredictiveController(Policy):
         agent_preds = TensorUtils.to_numpy(agent_preds.to_dict())
         obs_np = TensorUtils.to_numpy(obs_dict)
         plan = list()
+        if "dt" in obs_dict:
+            dt = obs_dict["dt"]
+        else:
+            dt = 0.1
+        if "coarse_plan" in kwargs:
+            coarse_plan = kwargs["coarse_plan"]
+            
+            ref_positions = coarse_plan.positions
+            ref_yaws = coarse_plan.yaws
+            mask = torch.ones_like(ref_positions[...,0],dtype=torch.bool)
+            ref_vel = dynamics.Unicycle.calculate_vel(ref_positions,ref_yaws,dt,mask)
+            xref = torch.cat((ref_positions,ref_vel,ref_yaws),-1)
+            xref = TensorUtils.to_numpy(xref)
+        else:
+            xref = None
+        x0 = batch_utils().get_current_states(obs_dict,dyn_type=dynamics.Unicycle)
+        x0 = TensorUtils.to_numpy(x0)
         for i in range(bs):
             planner = FTOCP(horizon, 1, self.step_time, obs_dict["extent"][i,1].item(), obs_dict["extent"][i,0].item())
             
-            x0 = torch.cat((obs_dict["history_positions"][i,0],obs_dict["curr_speed"][i:i+1],obs_dict["history_yaws"][i,0]))
-            x0 = TensorUtils.to_numpy(x0)
-            vdes = np.clip(x0[2],2.0,25.0)
-            if "ego_lanes" in obs_dict and not (obs_dict["ego_lanes"][i,0]==0).all():
-                lane = TensorUtils.to_numpy(obs_dict["ego_lanes"][i,0])
-                lane = np.concatenate([lane[:,:2],np.arctan2(lane[:,3],lane[:,2])[:,np.newaxis]],-1)
-                xref = PlanUtils.obtain_ref(lane, x0[0:2], vdes, horizon, self.step_time)
+            
+            x0_i = x0_i=x0[i]
+            if xref is not None:
+                xref_i = xref[i]
+                xref_extended = np.concatenate((x0_i[None,:],xref_i))
+                uref_i = dynamics.Unicycle.inverse_dyn(xref_extended[:-1],xref_extended[1:],dt)
+                xref_i = np.clip(xref_i,planner.x_lb,planner.x_ub)
+                uref_i = np.clip(uref_i,planner.u_lb,planner.u_ub)
+
+
             else:
-                s1 = (vdes * np.arange(1, horizon + 1) * self.step_time).reshape(-1,1)
-                xref = np.concatenate((np.cos(x0[3])*s1,np.sin(x0[3])*s1,np.zeros([s1.shape[0],2])),-1)
-                xref = xref+x0[np.newaxis,:]
+                vdes = np.clip(x0_i[2],2.0,25.0)
+                if "ego_lanes" in obs_dict and not (obs_dict["ego_lanes"][i,0]==0).all():
+                    lane = TensorUtils.to_numpy(obs_dict["ego_lanes"][i,0])
+                    lane = np.concatenate([lane[:,:2],np.arctan2(lane[:,3],lane[:,2])[:,np.newaxis]],-1)
+                    xref_i = PlanUtils.obtain_ref(lane, x0_i[0:2], vdes, horizon, self.step_time)
+                else:
+                    s1 = (vdes * np.arange(1, horizon + 1) * self.step_time).reshape(-1,1)
+                    xref_i = np.concatenate((np.cos(x0_i[3])*s1,np.sin(x0_i[3])*s1,np.zeros([s1.shape[0],2])),-1)
+                    xref_i = xref+x0_i[np.newaxis,:]
 
             agent_idx = np.where(obs_np["all_other_agents_types"][i]>0)[0]
             ypreds = agent_preds["positions"][i,agent_idx,np.newaxis]
             agent_extent = np.max(obs_np["all_other_agents_history_extents"][i,agent_idx,:,:2],axis=-2)
-            planner.buildandsolve(x0, ypreds, agent_extent, xref, np.ones(1))
+            import pdb
+            pdb.set_trace()
+            planner.buildandsolve(x0_i, ypreds, agent_extent, xref_i, np.ones(1))
             xplan = planner.xSol[1:].reshape((horizon, 4))
             plan.append(TensorUtils.to_torch(xplan,device=self.device))
         plan = torch.stack(plan,0)
@@ -584,10 +615,9 @@ class HierSplineSamplingPolicy(Policy):
         ego_trajs = list()
         #TODO: paralellize this process
         for i in range(bs):
-            pos = obs_dict["history_positions"][i,0]
             vel = obs_dict["curr_speed"][i]
-            yaw = obs_dict["history_yaws"][i,0]
-            traj0 = torch.tensor([[pos[0], pos[1], vel, 0, yaw, 0., 0.]]).to(pos.device)
+
+            traj0 = torch.tensor([[0., 0., vel, 0, 0., 0., 0.]]).to(vel.device)
             lanes = TensorUtils.to_numpy(obs_dict["ego_lanes"][i])
             lanes = np.concatenate((lanes[...,:2],np.arctan2(lanes[...,3:],lanes[...,2:3])),-1)
             lanes = np.split(lanes,obs_dict["ego_lanes"].shape[1])

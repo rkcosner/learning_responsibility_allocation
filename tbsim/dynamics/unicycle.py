@@ -177,3 +177,6 @@ class Unicycle(Dynamics):
         else:
             raise NotImplementedError
         return vel
+    @staticmethod
+    def inverse_dyn(x,xp,dt):
+        return (xp[...,2:]-x[...,2:])/dt

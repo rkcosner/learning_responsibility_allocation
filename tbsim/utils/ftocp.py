@@ -119,7 +119,8 @@ class FTOCP(object):
 
 		self.lbx = x0_val.tolist() + self.x_lb*(N*M) + self.u_lb*(M*(N-1)+1) + [0]*(N*M)
 		self.ubx = x0_val.tolist() + self.x_ub*(N*M) + self.u_ub*(M*(N-1)+1) + [np.inf]*(N*M)
-		
+		import pdb
+		pdb.set_trace()
 		if self.xGuessTot is not None and self.xGuessTot.shape[0]==nlp['x'].shape[0]:
 			sol = self.solver(lbx=self.lbx, ubx=self.ubx, lbg=self.lbg_dyanmics, ubg=self.ubg_dyanmics, x0 = self.xGuessTot)
 

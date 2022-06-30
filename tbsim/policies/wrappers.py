@@ -149,6 +149,26 @@ class PolicyWrapper(object):
     def wrap_planner(cls, model, **kwargs):
         return cls(model=model, get_plan_kwargs=kwargs)
 
+class RefineWrapper(object):
+    """A wrapper that feeds coarse motion plan to a optimization-based planner for refinement"""
+    def __init__(self, initial_planner, refiner, device):
+        """
+        Args:
+            planner: a policy that generates a coarse motion plan
+            refiner: a policy (optimization based) that takes the coarse motion plan and refine it
+            device: device for torch
+        """
+        self.initial_planner = initial_planner
+        self.refiner = refiner
+        self.device = device
+    def eval(self):
+        self.initial_planner.eval()
+        self.refiner.eval()
+    def get_action(self, obs, **kwargs):
+        coarse_plan,_ = self.initial_planner.get_action(obs,**kwargs)
+        action, action_info = self.refiner.get_action(obs,coarse_plan = coarse_plan)
+        return action, action_info
+    
 
 class Pos2YawWrapper(object):
     """A wrapper that computes action yaw from action positions"""

@@ -7,8 +7,8 @@ from tbsim.utils.geometry_utils import transform_points_tensor
 from tbsim.configs.base import ExperimentConfig
 
 
-def avdata2posyawspeed(state, nan_to_zero=True):
-    """Converts avdata's state format to pos, yaw, and speed. Set Nans to 0s"""
+def trajdata2posyawspeed(state, nan_to_zero=True):
+    """Converts trajdata's state format to pos, yaw, and speed. Set Nans to 0s"""
     
     if state.shape[-1] == 7:  # x, y, vx, vy, ax, ay, sin(heading), cos(heading)
         state = torch.cat((state[...,:6],torch.sin(state[...,6:7]),torch.cos(state[...,6:7])),-1)
@@ -129,8 +129,8 @@ def maybe_pad_neighbor(batch):
 
 def parse_scene_centric(batch: dict):
     num_agents = batch["num_agents"]
-    fut_pos, fut_yaw, _, fut_mask = avdata2posyawspeed(batch["agent_fut"])
-    hist_pos, hist_yaw, hist_speed, hist_mask = avdata2posyawspeed(batch["agent_hist"])
+    fut_pos, fut_yaw, _, fut_mask = trajdata2posyawspeed(batch["agent_fut"])
+    hist_pos, hist_yaw, hist_speed, hist_mask = trajdata2posyawspeed(batch["agent_hist"])
 
     curr_pos = hist_pos[:,:,-1]
     curr_yaw = hist_yaw[:,:,-1]
@@ -224,8 +224,8 @@ def parse_scene_centric(batch: dict):
 
 def parse_node_centric(batch: dict):
     maybe_pad_neighbor(batch)
-    fut_pos, fut_yaw, _, fut_mask = avdata2posyawspeed(batch["agent_fut"])
-    hist_pos, hist_yaw, hist_speed, hist_mask = avdata2posyawspeed(batch["agent_hist"])
+    fut_pos, fut_yaw, _, fut_mask = trajdata2posyawspeed(batch["agent_fut"])
+    hist_pos, hist_yaw, hist_speed, hist_mask = trajdata2posyawspeed(batch["agent_hist"])
     curr_speed = hist_speed[..., -1]
     curr_state = batch["curr_agent_state"]
     curr_yaw = curr_state[:, -1]
@@ -239,8 +239,8 @@ def parse_node_centric(batch: dict):
     agent_hist_extent = batch["agent_hist_extent"]
     agent_hist_extent[torch.isnan(agent_hist_extent)] = 0.
 
-    neigh_hist_pos, neigh_hist_yaw, neigh_hist_speed, neigh_hist_mask = avdata2posyawspeed(batch["neigh_hist"])
-    neigh_fut_pos, neigh_fut_yaw, _, neigh_fut_mask = avdata2posyawspeed(batch["neigh_fut"])
+    neigh_hist_pos, neigh_hist_yaw, neigh_hist_speed, neigh_hist_mask = trajdata2posyawspeed(batch["neigh_hist"])
+    neigh_fut_pos, neigh_fut_yaw, _, neigh_fut_mask = trajdata2posyawspeed(batch["neigh_fut"])
     neigh_curr_speed = neigh_hist_speed[..., -1]
     neigh_types = batch["neigh_types"]
     # convert nuscenes types to l5kit types
@@ -323,7 +323,7 @@ def parse_node_centric(batch: dict):
     return d
 
 @torch.no_grad()
-def parse_avdata_batch(batch: dict):
+def parse_trajdata_batch(batch: dict):
     
     if "num_agents" in batch:
         # scene centric

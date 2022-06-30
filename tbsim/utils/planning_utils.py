@@ -265,7 +265,8 @@ def contingency_planning(ego_tree,
                          M,
                          dt,
                          col_funcs=None,
-                         log_likelihood=None):
+                         log_likelihood=None,
+                         pert_std = None):
     """A sampling-based contingency planning algorithm
 
     Args:
@@ -331,6 +332,8 @@ def contingency_planning(ego_tree,
         progress_reward = get_progress_reward(ego_traj,d_sat=d_sat)
         
         total_loss = weights["collision_weight"]*col_loss+weights["lane_weight"]*lane_loss-weights["progress_weight"]*progress_reward.unsqueeze(0)
+        if pert_std is not None:
+            total_loss +=torch.randn(total_loss.shape[1],device=total_loss.device).unsqueeze(0)*pert_std
         if log_likelihood is not None and stage==num_stage:
             ll_reward = get_terminal_likelihood_reward(ego_traj, raster_from_agent, log_likelihood)
             total_loss = total_loss-weights["likelihood_weight"]*ll_reward

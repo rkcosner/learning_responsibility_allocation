@@ -13,12 +13,12 @@ import glob
 
 from l5kit.data import LocalDataManager
 from l5kit.geometry import transform_points
-from avdata.simulation.sim_stats import calc_stats
-from avdata.simulation.sim_df_cache import SimulationDataFrameCache
-from avdata import AgentType, UnifiedDataset
+from trajdata.simulation.sim_stats import calc_stats
+from trajdata.simulation.sim_df_cache import SimulationDataFrameCache
+from trajdata import AgentType, UnifiedDataset
 
 from tbsim.utils.geometry_utils import get_box_world_coords_np
-from tbsim.utils.config_utils import translate_l5kit_cfg, translate_avdata_cfg
+from tbsim.utils.config_utils import translate_l5kit_cfg, translate_trajdata_cfg
 from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.utils.vis_utils import build_visualization_rasterizer_l5kit
 from tbsim.utils.vis_utils import COLORS, draw_agent_boxes
@@ -267,7 +267,7 @@ def draw_scene_data(ax, scene_name, scene_data, starting_frame, rasterizer, draw
                 action_samples=scene_data["action_sample_positions"][focus_agent_id, t],
                 raster_from_world=raster_from_world,
                 world_from_agent = scene_data["world_from_agent"][focus_agent_id,t],
-                linewidth=linewidth*0.8
+                linewidth=linewidth*0.3
             )
 
 
@@ -338,7 +338,7 @@ def scene_to_video(rasterizer, h5f, scene_index, output_dir):
                 focus_agent_id=[0],
                 traj_len=20,
                 linewidth=2.0,
-                ras_pos=scene_data["centroid"][0, 0]
+                # ras_pos=scene_data["centroid"][0, 0]
             )
 
             if not os.path.exists(video_dir):
@@ -348,7 +348,7 @@ def scene_to_video(rasterizer, h5f, scene_index, output_dir):
             plt.savefig(ffn, dpi=400, bbox_inches="tight", pad_inches=0)
             plt.close()
             print("Figure written to {}".format(ffn))
-        writer = imageio.get_writer(os.path.join(video_dir, "animation.mp4"), fps=10)
+        writer = imageio.get_writer(os.path.join(video_dir, "{}_anim.mp4".format(scene_name)), fps=10)
         for file in sorted(glob.glob(os.path.join(video_dir,"*.png"))):
             im = imageio.imread(file)
             writer.append_data(im)
@@ -365,10 +365,10 @@ def main(hdf5_path, dataset_path, output_dir, env):
         rasterizer = get_nusc_renderer(dataset_path)
         sids = EvaluationConfig().nusc.eval_scenes
         scene_names = list(rasterizer.scene_info.keys())
-        # sids = [scene_names[si] for si in sids]
-        sids = ["scene-0018", "scene-0095", "scene-0098", "scene-0521", "scene-0523",
-                "scene-0560", "scene-0627", "scene-0638", "scene-0904"]
-
+        sids = [scene_names[si] for si in sids]
+        # sids = ["scene-0093","scene-0018", "scene-0095", "scene-0098", "scene-0521", "scene-0523",
+        #         "scene-0560", "scene-0627", "scene-0638", "scene-0904"]
+        # sids = [ "scene-0559","scene-0564"]
 
     h5f = h5py.File(hdf5_path, "r")
 

@@ -32,7 +32,7 @@ def get_experiment_config_from_file(file_path, locked=False):
     return cfg
 
 
-def translate_avdata_cfg(cfg: ExperimentConfig):
+def translate_trajdata_cfg(cfg: ExperimentConfig):
     rcfg = Dict()
     # assert cfg.algo.step_time == 0.5  # TODO: support interpolation
     if "scene_centric" in cfg.algo and cfg.algo.scene_centric:
@@ -44,9 +44,9 @@ def translate_avdata_cfg(cfg: ExperimentConfig):
     else:
         rcfg.standardize_data = True
     rcfg.step_time = cfg.algo.step_time
-    rcfg.avdata_source_root = cfg.train.avdata_source_root
-    rcfg.avdata_source_train = cfg.train.avdata_source_train
-    rcfg.avdata_source_valid = cfg.train.avdata_source_valid
+    rcfg.trajdata_source_root = cfg.train.trajdata_source_root
+    rcfg.trajdata_source_train = cfg.train.trajdata_source_train
+    rcfg.trajdata_source_valid = cfg.train.trajdata_source_valid
     rcfg.dataset_path = cfg.train.dataset_path
     rcfg.history_num_frames = cfg.algo.history_num_frames
     rcfg.future_num_frames = cfg.algo.future_num_frames

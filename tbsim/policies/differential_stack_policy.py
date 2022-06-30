@@ -34,7 +34,7 @@ from tbsim.utils.timer import Timers
 
 import sys
 # sys.path.append('./trajectron/trajectron')
-# sys.path.append('./avdata/src/avdata')
+# sys.path.append('./trajdata/src/trajdata')
 
 from torch import nn, optim
 from torch.utils import data
@@ -68,7 +68,7 @@ from pathlib import Path
 
 import ipdb as pdb
 
-from avdata import UnifiedDataset, AgentType
+from trajdata import UnifiedDataset, AgentType
 from diffstack.trajectron.trajectron.utils.batch_utils import reformat_batch
 
 from diffstack.trajectron.trajectron.model.dataset.preprocessing import get_node_timestep_data, get_timesteps_data

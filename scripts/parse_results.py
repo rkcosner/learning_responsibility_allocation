@@ -5,7 +5,7 @@ import os
 from pprint import pprint
 import torch
 import h5py
-from avdata.simulation.sim_stats import calc_stats
+from trajdata.simulation.sim_stats import calc_stats
 import tbsim.utils.tensor_utils as TensorUtils
 import pathlib
 from pyemd import emd

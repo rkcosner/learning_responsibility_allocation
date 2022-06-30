@@ -28,6 +28,7 @@ from tbsim.policies.wrappers import (
     HierarchicalWrapper,
     HierarchicalSamplerWrapper,
     SamplingPolicyWrapper,
+    RefineWrapper,
 )
 from tbsim.configs.config import Dict
 from tbsim.utils.experiment_utils import get_checkpoint
@@ -484,7 +485,7 @@ class HierAgentAwareMPC(Hierarchical):
         ).to(self.device).eval()
         return predictor, predictor_cfg.clone()
 
-    def get_policy(self, planner=None, predictor=None, controller=None):
+    def get_policy(self, planner=None, predictor=None, initial_planner=None):
         if planner is not None:
             assert isinstance(planner, SpatialPlanner)
         else:
@@ -500,6 +501,28 @@ class HierAgentAwareMPC(Hierarchical):
         policy = ModelPredictiveController(self.device, exp_cfg.algo.step_time, predictor)
         return policy, exp_cfg
 
+class GuidedHAAMPC(HierAgentAwareMPC):
+    def _get_initial_planner(self):
+        composer = HierAgentAware(self.eval_config, self.device, self.ckpt_root_dir)
+        return composer.get_policy()
+    def get_policy(self, planner=None, predictor=None, initial_planner=None):
+        if planner is not None:
+            assert isinstance(planner, SpatialPlanner)
+        else:
+            planner, _ = self._get_planner()
+
+        if predictor is not None:
+            assert isinstance(predictor, MATrafficModel)
+            exp_cfg = None
+        else:
+            predictor, exp_cfg = self._get_predictor()
+            exp_cfg = exp_cfg.clone()
+        if initial_planner is None:
+            initial_planner, _ = self._get_initial_planner()
+        exp_cfg.env.data_generation_params.vectorize_lane = True
+        policy = ModelPredictiveController(self.device, exp_cfg.algo.step_time, predictor)
+        policy = RefineWrapper(initial_planner=initial_planner,refiner=policy,device=self.device)
+        return policy, exp_cfg
 
 class HAASplineSampling(Hierarchical):
     def _get_predictor(self):
