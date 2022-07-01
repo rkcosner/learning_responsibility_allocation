@@ -167,7 +167,7 @@ class RefineWrapper(object):
     def get_action(self, obs, **kwargs):
         coarse_plan,_ = self.initial_planner.get_action(obs,**kwargs)
         action, action_info = self.refiner.get_action(obs,coarse_plan = coarse_plan)
-        return action, action_info
+        return action, {"coarse_plan":coarse_plan.to_dict(), **action_info}
     
 
 class Pos2YawWrapper(object):

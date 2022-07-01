@@ -536,19 +536,15 @@ class ModelPredictiveController(Policy):
         agent_preds = TensorUtils.to_numpy(agent_preds.to_dict())
         obs_np = TensorUtils.to_numpy(obs_dict)
         plan = list()
-        if "dt" in obs_dict:
-            dt = obs_dict["dt"]
-        else:
-            dt = 0.1
+
         if "coarse_plan" in kwargs:
             coarse_plan = kwargs["coarse_plan"]
             
-            ref_positions = coarse_plan.positions
-            ref_yaws = coarse_plan.yaws
-            mask = torch.ones_like(ref_positions[...,0],dtype=torch.bool)
-            ref_vel = dynamics.Unicycle.calculate_vel(ref_positions,ref_yaws,dt,mask)
-            xref = torch.cat((ref_positions,ref_vel,ref_yaws),-1)
-            xref = TensorUtils.to_numpy(xref)
+            ref_positions = TensorUtils.to_numpy(coarse_plan.positions)
+            ref_yaws = TensorUtils.to_numpy(coarse_plan.yaws)
+            mask = np.ones_like(ref_positions[...,0],dtype=np.bool)
+            ref_vel = dynamics.Unicycle.calculate_vel(ref_positions,ref_yaws,self.step_time,mask)
+            xref = np.concatenate((ref_positions,ref_vel,ref_yaws),-1)
         else:
             xref = None
         x0 = batch_utils().get_current_states(obs_dict,dyn_type=dynamics.Unicycle)
@@ -561,10 +557,12 @@ class ModelPredictiveController(Policy):
             if xref is not None:
                 xref_i = xref[i]
                 xref_extended = np.concatenate((x0_i[None,:],xref_i))
-                uref_i = dynamics.Unicycle.inverse_dyn(xref_extended[:-1],xref_extended[1:],dt)
+                uref_i = dynamics.Unicycle.inverse_dyn(xref_extended[:-1],xref_extended[1:],self.step_time)
                 xref_i = np.clip(xref_i,planner.x_lb,planner.x_ub)
                 uref_i = np.clip(uref_i,planner.u_lb,planner.u_ub)
-
+                x0_guess = np.concatenate((x0_i[np.newaxis,:],xref_i.repeat(planner.M,axis=0)),0).flatten()
+                u0_guess = uref_i.repeat(planner.M,axis=0).flatten()
+                planner.xGuessTot = np.concatenate((x0_guess,u0_guess,np.zeros(planner.N*planner.M)))
 
             else:
                 vdes = np.clip(x0_i[2],2.0,25.0)
@@ -580,8 +578,6 @@ class ModelPredictiveController(Policy):
             agent_idx = np.where(obs_np["all_other_agents_types"][i]>0)[0]
             ypreds = agent_preds["positions"][i,agent_idx,np.newaxis]
             agent_extent = np.max(obs_np["all_other_agents_history_extents"][i,agent_idx,:,:2],axis=-2)
-            import pdb
-            pdb.set_trace()
             planner.buildandsolve(x0_i, ypreds, agent_extent, xref_i, np.ones(1))
             xplan = planner.xSol[1:].reshape((horizon, 4))
             plan.append(TensorUtils.to_torch(xplan,device=self.device))
