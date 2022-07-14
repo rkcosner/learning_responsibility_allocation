@@ -28,6 +28,7 @@ from imageio import get_writer
 
 
 def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
+    
     if eval_cfg.env == "nusc":
         set_global_batch_type("trajdata")
     elif eval_cfg.env == 'l5kit':
@@ -54,6 +55,7 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # create policy and rollout wrapper
+    
     policy_composers = importlib.import_module("tbsim.evaluation.policy_composers")
     composer_class = getattr(policy_composers, eval_cfg.eval_class)
     composer = composer_class(eval_cfg, device, ckpt_root_dir=eval_cfg.ckpt_root_dir)
@@ -74,9 +76,20 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
         composer_class = getattr(policy_composers, eval_cfg.agent_eval_class)
         composer = composer_class(eval_cfg, device, ckpt_root_dir=eval_cfg.ckpt_root_dir)
         agent_policy, _ = composer.get_policy()
-
+        if eval_cfg.policy.pos_to_yaw:
+            agent_policy = Pos2YawWrapper(
+                agent_policy,
+                dt=exp_config.algo.step_time,
+                yaw_correction_speed=eval_cfg.policy.yaw_correction_speed
+            )
+    else:
+        agent_policy = None
+    
     if eval_cfg.env == "nusc":
-        rollout_policy = RolloutWrapper(agents_policy=policy)
+        if eval_cfg.agent_eval_class is not None:
+            rollout_policy = RolloutWrapper(ego_policy=policy, agents_policy=agent_policy)
+        else:
+            rollout_policy = RolloutWrapper(agents_policy=policy)
     elif eval_cfg.ego_only:
         rollout_policy = RolloutWrapper(ego_policy=policy)
     else:
@@ -84,18 +97,28 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
             rollout_policy = RolloutWrapper(ego_policy=policy, agents_policy=agent_policy)
         else:
             rollout_policy = RolloutWrapper(ego_policy=policy, agents_policy=policy)
-
+    
     print(exp_config.algo)
 
     # create env
     if eval_cfg.env == "nusc":
+        if agent_policy is not None:
+            split_ego = True
+        else:
+            split_ego = False
         env_builder = EnvNuscBuilder(eval_config=eval_cfg, exp_config=exp_config, device=device)
+        if "parse_obs" in exp_config.env.data_generation_params:
+            parse_obs=exp_config.env.data_generation_params.parse_obs
+        else:
+            parse_obs=True
+        env = env_builder.get_env(split_ego=split_ego,parse_obs=parse_obs)
     elif eval_cfg.env == 'l5kit':
         env_builder = EnvL5Builder(eval_config=eval_cfg, exp_config=exp_config, device=device)
+        env = env_builder.get_env()
     else:
         raise NotImplementedError("{} is not a valid env".format(eval_cfg.env))
 
-    env = env_builder.get_env()
+    
 
     # eval loop
     obs_to_torch = eval_cfg.eval_class not in ["GroundTruth", "ReplayAction"]
@@ -103,7 +126,7 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
     result_stats = None
     scene_i = 0
     eval_scenes = eval_cfg.eval_scenes
-
+    
     while scene_i < eval_cfg.num_scenes_to_evaluate:
         scene_indices = eval_scenes[scene_i: scene_i + eval_cfg.num_scenes_per_batch]
         scene_i += eval_cfg.num_scenes_per_batch
@@ -188,6 +211,13 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--local_rank",
+        type=int,
+        default=0,
+        help="local rank for torch.distributed"
+    )
+
+    parser.add_argument(
         "--env",
         type=str,
         choices=["nusc", "l5kit"],
@@ -199,6 +229,13 @@ if __name__ == "__main__":
         "--ckpt_yaml",
         type=str,
         help="specify a yaml file that specifies checkpoint and config location of each model",
+        default=None
+    )
+
+    parser.add_argument(
+        "--metric_ckpt_yaml",
+        type=str,
+        help="specify a yaml file that specifies checkpoint and config location for the learned metric",
         default=None
     )
 
@@ -335,7 +372,11 @@ if __name__ == "__main__":
         with open(args.ckpt_yaml, "r") as f:
             ckpt_info = yaml.safe_load(f)
             cfg.ckpt.update(**ckpt_info)
-
+    if args.metric_ckpt_yaml is not None:
+        with open(args.ckpt_yaml, "r") as f:
+            ckpt_info = yaml.safe_load(f)
+            cfg.ckpt.update(**ckpt_info)
+    
     cfg.lock()
     run_evaluation(
         cfg,

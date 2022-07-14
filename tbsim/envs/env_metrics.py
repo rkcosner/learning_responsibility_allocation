@@ -10,17 +10,18 @@ from tbsim.utils.batch_utils import batch_utils
 from tbsim.utils.geometry_utils import transform_points_tensor, detect_collision, CollisionType
 import tbsim.utils.metrics as Metrics
 from collections import defaultdict
-from tbsim.models.cnn_roi_encoder import obtain_lane_flag
+from tbsim.models.cnn_roi_encoder import rasterized_ROI_align
 from torchvision.ops.roi_align import RoIAlign
 import tbsim.utils.geometry_utils as GeoUtils
 from pyemd import emd
 import matplotlib.pyplot as plt
 import matplotlib
+import pandas as pd
 
 class EnvMetrics(abc.ABC):
     def __init__(self):
-        self._per_step = None
-        self._per_step_mask = None
+        self._df = None
+        self._scene_ts = defaultdict(lambda:0)
         self.reset()
 
     @abc.abstractmethod
@@ -42,7 +43,7 @@ class EnvMetrics(abc.ABC):
         pass
 
     def __len__(self):
-        return len(self._per_step)
+        return max(self._scene_ts.values()) if len(self._scene_ts)>0 else 0
 
 
 def step_aggregate_per_scene(agent_met, agent_scene_index, all_scene_index, agg_func=np.mean):
@@ -134,8 +135,8 @@ def masked_max_per_episode(met, met_mask):
 class OffRoadRate(EnvMetrics):
     """Compute the fraction of the time that the agent is in undrivable regions"""
     def reset(self):
-        self._per_step = []
-        self._per_step_mask = []
+        self._df = pd.DataFrame(columns = ['scene_index', 'track_id', 'ts', "met"])
+        self._scene_ts = defaultdict(lambda:0)
 
     @staticmethod
     def compute_per_step(state_info: dict, all_scene_index: np.ndarray):
@@ -148,21 +149,24 @@ class OffRoadRate(EnvMetrics):
 
     def add_step(self, state_info: dict, all_scene_index: np.ndarray):
         met = self.compute_per_step(state_info, all_scene_index)
-        met, met_mask = step_aggregate_per_scene(
-            met,
-            state_info["scene_index"],
-            all_scene_index,
-            agg_func=lambda x: float(np.mean(x, axis=0))
-        )
-        self._per_step.append(met)
-        self._per_step_mask.append(met_mask)
+        
+        ts = np.array([self._scene_ts[sid] for sid in state_info["scene_index"]])
+        step_df = dict(scene_index=state_info["scene_index"],
+                       track_id=state_info["track_id"],
+                       ts=ts,
+                       met=met)
+        step_df = pd.DataFrame(step_df)
+        self._df = pd.concat((self._df,step_df))
+        for sid in np.unique(state_info["scene_index"]):
+            self._scene_ts[sid]+=1
 
     def get_episode_metrics(self):
-        met = np.stack(self._per_step, axis=0).transpose((1, 0))  # [num_scene, num_steps]
-        met_mask = np.stack(self._per_step_mask, axis=0).transpose((1, 0))  # [num_scene, num_steps]
+        self._df.set_index(["scene_index","track_id","ts"])
+        metric_by_step = self._df.groupby(["scene_index","ts"])["met"].mean()
+        metric_nframe = metric_by_step.groupby(["scene_index"]).sum()
         return {
-            "rate": masked_average_per_episode(met, met_mask),
-            "nframe": masked_sum_per_episode(met, met_mask)
+            "rate": self._df.groupby(["scene_index"])["met"].mean().to_numpy(),
+            "nframe": metric_nframe.to_numpy()
         }
 
 
@@ -170,18 +174,12 @@ class CollisionRate(EnvMetrics):
     """Compute collision rate across all agents in a batch of data."""
     def __init__(self):
         super(CollisionRate, self).__init__()
-        self._all_scene_index = None
-        self._agent_scene_index = None
-        self._agent_track_id = None
+        self._df = pd.DataFrame(columns = ['scene_index', 'track_id', 'ts', 'type', "met"])
+        self._scene_ts = defaultdict(lambda:0)
 
     def reset(self):
-        self._per_step = {CollisionType.FRONT: [], CollisionType.REAR: [], CollisionType.SIDE:[], "coll_any": []}
-        self._all_scene_index = None
-        self._agent_scene_index = None
-        self._agent_track_id = None
-
-    def __len__(self):
-        return len(self._per_step["coll_any"])
+        self._df = pd.DataFrame(columns = ['scene_index', 'track_id', 'ts', 'type', "met"])
+        self._scene_ts = defaultdict(lambda:0)
 
     @staticmethod
     def compute_per_step(state_info: dict, all_scene_index: np.ndarray):
@@ -213,6 +211,7 @@ class CollisionRate(EnvMetrics):
                     other_yaw=yaw_per_scene[i][other_agent_mask],
                     other_extent=extent_per_scene[i][other_agent_mask]
                 )
+                
                 if coll is not None:
                     coll_rates[coll[0]][agent_index_per_scene[i][j]] = 1.
                     coll_rates["coll_any"][agent_index_per_scene[i][j]] = 1.
@@ -231,36 +230,36 @@ class CollisionRate(EnvMetrics):
 
     def add_step(self, state_info: dict, all_scene_index: np.ndarray):
         
-        if self._all_scene_index is None:  # start of an episode
-            self._all_scene_index = all_scene_index
-            self._agent_scene_index = state_info["scene_index"]
-            self._agent_track_id = state_info["track_id"]
-
         met_all, _ = self.compute_per_step(state_info, all_scene_index)
-
-        # reassign metrics according to the track id of the initial state (in case some agents go missing)
-        for k, met in met_all.items():
-            met_a = np.zeros(len(self._agent_track_id))  # assume no collision for missing agents
-            for i, (sid, tid) in enumerate(zip(state_info["scene_index"], state_info["track_id"])):
-                agent_index = np.bitwise_and(self._agent_track_id == tid, self._agent_scene_index == sid)
-                assert np.sum(agent_index) == 1  # make sure there is no new agent
-                met_a[agent_index] = met[i]
-            met_all[k] = met_a
-
-        for k in self._per_step:
-            self._per_step[k].append(met_all[k])
+        ts = np.array([self._scene_ts[sid] for sid in state_info["scene_index"]])
+        step_df = []
+        for k in met_all:
+            if k=="coll_any":
+                type=-1
+            else:
+                type=k
+            step_df_k = dict(scene_index=state_info["scene_index"],
+                        track_id=state_info["track_id"],
+                        ts=ts,
+                        type=type,
+                        met=met_all[k])
+            step_df.append(pd.DataFrame(step_df_k))
+        step_df = pd.concat(step_df)
+        self._df = pd.concat((self._df,step_df))
+        for sid in np.unique(state_info["scene_index"]):
+            self._scene_ts[sid]+=1
 
     def get_episode_metrics(self):
+
+        self._df.set_index(["scene_index","track_id","type","ts"])
+        coll_whole_horizon = self._df.groupby(["scene_index","track_id","type"])["met"].max()
         met_all = dict()
-        for coll_type, coll_all_agents in self._per_step.items():
-            coll_all_agents = np.stack(coll_all_agents)  # [num_steps, num_agents]
-            coll_all_agents_ep = np.max(coll_all_agents, axis=0)  # whether an agent has ever collided into another
-            met, met_mask = step_aggregate_per_scene(
-                agent_met=coll_all_agents_ep,
-                agent_scene_index=self._agent_scene_index,
-                all_scene_index=self._all_scene_index
-            )
-            met_all[str(coll_type)] = met * met_mask
+        
+        for k in CollisionType:
+            coll_data = coll_whole_horizon[coll_whole_horizon.index.isin([k],level=2)]
+            met_all[str(k)] = coll_data.groupby(["scene_index"]).mean().to_numpy()
+        coll_data = coll_whole_horizon[coll_whole_horizon.index.isin([-1],level=2)]
+        met_all["coll_any"] = coll_data.groupby(["scene_index"]).mean().to_numpy()
         return met_all
 
 
@@ -268,105 +267,67 @@ class CriticalFailure(EnvMetrics):
     """Metrics that report failures caused by either collision or offroad"""
     def __init__(self, num_collision_frames=1, num_offroad_frames=3):
         super(CriticalFailure, self).__init__()
-        self._num_offroad_frames = num_offroad_frames
-        self._num_collision_frames = num_collision_frames
-        self._all_scene_index = None
-        self._agent_scene_index = None
-        self._agent_track_id = None
+        self._df = pd.DataFrame(columns=["scene_index","track_id","ts","offroad","collision"])
+        self._scene_ts = defaultdict(lambda:0)
 
     def reset(self):
-        self._per_step = dict(coll=[], offroad=[])
-        self._all_scene_index = None
-        self._agent_scene_index = None
-        self._agent_track_id = None
+        self._df = pd.DataFrame(columns=["scene_index","track_id","ts","offroad","collision"])
+        self._scene_ts = defaultdict(lambda:0)
 
-    @property
-    def all_agent_ids(self):
-        return self._agent_track_id
-
-    @property
-    def all_scene_index(self):
-        return self._agent_scene_index
 
     def add_step(self, state_info: dict, all_scene_index: np.ndarray):
-        if self._all_scene_index is None:  # start of an episode
-            self._all_scene_index = all_scene_index
-            self._agent_scene_index = state_info["scene_index"]
-            self._agent_track_id = state_info["track_id"]
-
         met_all = dict(
             offroad=OffRoadRate.compute_per_step(state_info, all_scene_index),
-            coll=CollisionRate.compute_per_step(state_info, all_scene_index)[0]["coll_any"]
+            collision=CollisionRate.compute_per_step(state_info, all_scene_index)[0]["coll_any"]
         )
-
-        # reassign metrics according to the track id of the initial state (in case some agents go missing)
-        for k, met in met_all.items():
-            met_a = np.zeros(len(self._agent_track_id))  # assume no collision for missing agents
-            for i, (sid, tid) in enumerate(zip(state_info["scene_index"], state_info["track_id"])):
-                agent_index = np.bitwise_and(self._agent_track_id == tid, self._agent_scene_index == sid)
-                assert np.sum(agent_index) == 1, np.sum(agent_index)  # make sure there is no new agent
-                met_a[agent_index] = met[i]
-            met_all[k] = met_a
-
-        for k in self._per_step:
-            self._per_step[k].append(met_all[k])
-
+        ts = np.array([self._scene_ts[sid] for sid in state_info["scene_index"]])
+        step_df = dict(scene_index=state_info["scene_index"],
+                       track_id=state_info["track_id"],
+                       ts=ts,
+                       offroad=met_all["offroad"],
+                       collision = met_all["collision"])
+        step_df = pd.DataFrame(step_df)
+        self._df = pd.concat((self._df,step_df))
+        for sid in np.unique(state_info["scene_index"]):
+            self._scene_ts[sid]+=1
+    
     def get_per_agent_metrics(self):
-        coll_per_step = np.stack(self._per_step["coll"])
-        offroad_per_step = np.stack(self._per_step["offroad"])
+        coll_fail_cases = self._df.groupby(["scene_index","track_id"])["collision"].any()
+        offroad_fail_cases = self._df.groupby(["scene_index","track_id"])["offroad"].any()
+        any_fail_cases = coll_fail_cases|offroad_fail_cases
+        return dict(offroad=offroad_fail_cases,collision=coll_fail_cases,any=any_fail_cases)
 
-        coll_ttf = np.ones(len(self._agent_track_id)) * np.inf  # time-to-failure
-        offroad_ttf = coll_ttf.copy()
-        num_steps = coll_per_step.shape[0]
-        for i in range(num_steps):
-            coll = coll_per_step[:i + 1].sum(axis=0)  # [A]
-            coll_failure = coll >= self._num_collision_frames
-
-            offroad = offroad_per_step[:i + 1].sum(axis=0)  # [A]
-            offroad_failure = offroad >= self._num_offroad_frames
-
-            coll_ttf[np.bitwise_and(coll_failure, np.isinf(coll_ttf))] = i
-            offroad_ttf[np.bitwise_and(offroad_failure, np.isinf(offroad_ttf))] = i
-
-        any_ttf = np.minimum(coll_ttf, offroad_ttf)
-
-        offroad_failure = offroad_ttf < num_steps
-        coll_failure = coll_ttf < num_steps
-        any_failure = any_ttf < num_steps
-
-        ttf_brackets = np.arange(0, num_steps + 1, 5)
-        ttfs = dict()
-        for i in range(len(ttf_brackets) - 1):
-            ttfs["offroad_ttf@{}".format(ttf_brackets[i + 1])] = \
-                np.bitwise_and(offroad_ttf >= ttf_brackets[i], offroad_ttf < ttf_brackets[i + 1])
-            ttfs["coll_ttf@{}".format(ttf_brackets[i + 1])] = \
-                np.bitwise_and(coll_ttf >= ttf_brackets[i], coll_ttf < ttf_brackets[i + 1])
-            ttfs["any_ttf@{}".format(ttf_brackets[i + 1])] = \
-                np.bitwise_and(any_ttf >= ttf_brackets[i], any_ttf < ttf_brackets[i + 1])
-
-        for k in ttfs:
-            ttfs[k] = ttfs[k].astype(np.float32)
-
-        metrics = dict(
-            offroad=offroad_failure.astype(np.float32),
-            coll=coll_failure.astype(np.float32),
-            any=any_failure.astype(np.float32),
-        )
-
-        metrics.update(ttfs)
-        return metrics
 
     def get_episode_metrics(self) -> Dict[str, np.ndarray]:
-        met_per_agent = self.get_per_agent_metrics()
-        met_per_scene = dict()
-        for met_k, met in met_per_agent.items():
-            met_per_scene[met_k], _ = step_aggregate_per_scene(
-                agent_met=met,
-                agent_scene_index=self._agent_scene_index,
-                all_scene_index=self._all_scene_index
-            )
-        return met_per_scene
+        num_steps = len(self)
+        grid_points = np.arange(5,num_steps,5)
 
+        coll_fail_cases = self._df.groupby(["scene_index","track_id"])["collision"].any()
+        coll_by_scene = coll_fail_cases.groupby(["scene_index"])
+        coll_fail_rate = (coll_by_scene.sum()/coll_by_scene.count()).to_numpy()
+        offroad_fail_cases = self._df.groupby(["scene_index","track_id"])["offroad"].any()
+        offroad_by_scene = offroad_fail_cases.groupby(["scene_index"])
+        offroad_fail_rate = (offroad_by_scene.sum()/offroad_by_scene.count()).to_numpy()
+        any_fail_cases = coll_fail_cases | offroad_fail_cases
+        any_fail_by_scene = any_fail_cases.groupby(["scene_index"])
+        any_fail_rate = (any_fail_by_scene.sum()/any_fail_by_scene.count()).to_numpy()
+
+        met = dict(failure_offroad=offroad_fail_rate,failure_collision=coll_fail_rate,failure_any=any_fail_rate)
+        for t in grid_points:
+            df_sel = self._df.loc[self._df["ts"]<t]
+            coll_fail_cases = df_sel.groupby(["scene_index","track_id"])["collision"].any()
+            coll_by_scene = coll_fail_cases.groupby(["scene_index"])
+            coll_fail_rate = (coll_by_scene.sum()/coll_by_scene.count()).to_numpy()
+            offroad_fail_cases = df_sel.groupby(["scene_index","track_id"])["offroad"].any()
+            offroad_by_scene = offroad_fail_cases.groupby(["scene_index"])
+            offroad_fail_rate = (offroad_by_scene.sum()/offroad_by_scene.count()).to_numpy()
+            any_fail_cases = coll_fail_cases | offroad_fail_cases
+            any_fail_by_scene = any_fail_cases.groupby(["scene_index"])
+            any_fail_rate = (any_fail_by_scene.sum()/any_fail_by_scene.count()).to_numpy()
+            met["failure_offroad@{}".format(t)]=offroad_fail_rate
+            met["failure_collision@{}".format(t)]=coll_fail_rate
+            met["failure_any@{}".format(t)]=any_fail_rate
+        return met
 
 class LearnedMetric(EnvMetrics):
     def __init__(self, metric_algo, perturbations=None):
@@ -376,10 +337,10 @@ class LearnedMetric(EnvMetrics):
         self.state_buffer = []
         self.perturbations = dict() if perturbations is None else perturbations
         self.total_steps = 0
+        self._df = pd.DataFrame(columns = ['scene_index', 'track_id', 'ts', "met"])
 
     def reset(self):
         self.state_buffer = []
-        self._per_step = []
         self._per_step_mask = []
         self.total_steps = 0
 
@@ -393,7 +354,7 @@ class LearnedMetric(EnvMetrics):
         while len(self.state_buffer) > self.traj_len + 1:
             self.state_buffer.pop(0)
         if len(self.state_buffer) == self.traj_len + 1:
-            step_metrics = self.compute_per_step(self.state_buffer, all_scene_index)
+            step_metrics, agent_selected = self.compute_per_step(self.state_buffer, all_scene_index)
             self._per_step.append(step_metrics)
 
         self.total_steps += 1
@@ -465,7 +426,8 @@ class LearnedMetric(EnvMetrics):
             met, met_mask = step_aggregate_per_scene(metrics[k], state["scene_index"], all_scene_index)
             assert np.all(met_mask > 0)  # since we will always use it for all agents
             step_metrics[k] = met
-        return step_metrics
+
+        return step_metrics, agent_selected
 
     def get_episode_metrics(self):
         ep_metrics = dict()
@@ -610,7 +572,8 @@ class LearnedCVAENLLRolling(LearnedCVAENLL):
         # assemble score function input
         state = dict(self.state_buffer[0])  # avoid changing the original state_dict
         for k,v in state.items():
-            state[k]=v[agent_selected]
+            if isinstance(v,np.ndarray):
+                state[k]=v[agent_selected]
         state["image"] = (state["image"] / 255.).astype(np.float32)
         agent_from_world = state["agent_from_world"]
         yaw_current = state["yaw"]
@@ -837,8 +800,9 @@ class OccupancyCoverage(Occupancymet):
         assert self.episode_index + 1 == len(self.failure_metric)
         for fm in self.failure_metric:
             per_agent_failure = fm.get_per_agent_metrics()["any"]
-            failed_agent_ids.append(fm.all_agent_ids[per_agent_failure > 0])
-            failed_scene_index.append(fm.all_scene_index[per_agent_failure > 0])
+            fail_index = per_agent_failure[per_agent_failure==True].index
+            failed_scene_index.append(fail_index.get_level_values("scene_index").to_numpy())
+            failed_agent_ids.append(fail_index.get_level_values("track_id").to_numpy())
 
         coverage_num = OrderedDict(total=[], onroad=[], success=[])
         for scene_idx, og in self.og.items():
@@ -1051,17 +1015,14 @@ class Occupancy_rolling(Occupancy_likelihood):
             return None
         else:
             self.state_buffer = self.state_buffer[-self.traj_len-1:]
-            # try:
-            #     assert len(self.state_buffer) == self.traj_len+1
-            # except:
-            #     import pdb
-            #     pdb.set_trace()
+
         appearance_idx = obtain_active_agent_index(self.state_buffer)
         agent_selected = np.where((appearance_idx>=0).all(axis=1))[0]
         # assemble score function input
         state = dict(self.state_buffer[0])  # avoid changing the original state_dict
         for k,v in state.items():
-            state[k]=v[agent_selected]
+            if isinstance(v,np.ndarray):
+                state[k]=v[agent_selected]
         state["image"] = (state["image"] / 255.).astype(np.float32)
         agent_from_world = state["agent_from_world"]
         yaw_current = state["yaw"]

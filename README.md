@@ -23,6 +23,14 @@ cd trajdata
 pip install -e .
 ```
 
+Install `Pplan`
+```
+cd ..
+git clone ssh://git@gitlab-master.nvidia.com:12051/nvr-av/Pplan.git Pplan
+cd Pplan
+pip install -e .
+```
+
 ## Quick start
 ### 1. Obtain dataset(s)
 We currently support the Lyft Level 5 [dataset](https://level-5.global/data/) and the nuScenes [dataset](https://www.nuscenes.org/nuscenes).

@@ -6,7 +6,8 @@ from tbsim.algos.algos import (
     SpatialPlanner,
     GANTrafficModel,
     DiscreteVAETrafficModel,
-    BehaviorCloningEC
+    BehaviorCloningEC,
+    SceneTreeTrafficModel
 )
 from tbsim.utils.batch_utils import batch_utils
 from tbsim.algos.multiagent_algos import MATrafficModel, HierarchicalAgentAwareModel
@@ -27,6 +28,7 @@ from tbsim.policies.wrappers import (
     HierarchicalWrapper,
     HierarchicalSamplerWrapper,
     SamplingPolicyWrapper,
+    RefineWrapper,
 )
 from tbsim.configs.config import Dict
 from tbsim.utils.experiment_utils import get_checkpoint
@@ -483,7 +485,7 @@ class HierAgentAwareMPC(Hierarchical):
         ).to(self.device).eval()
         return predictor, predictor_cfg.clone()
 
-    def get_policy(self, planner=None, predictor=None, controller=None):
+    def get_policy(self, planner=None, predictor=None, initial_planner=None):
         if planner is not None:
             assert isinstance(planner, SpatialPlanner)
         else:
@@ -499,6 +501,28 @@ class HierAgentAwareMPC(Hierarchical):
         policy = ModelPredictiveController(self.device, exp_cfg.algo.step_time, predictor)
         return policy, exp_cfg
 
+class GuidedHAAMPC(HierAgentAwareMPC):
+    def _get_initial_planner(self):
+        composer = HierAgentAware(self.eval_config, self.device, self.ckpt_root_dir)
+        return composer.get_policy()
+    def get_policy(self, planner=None, predictor=None, initial_planner=None):
+        if planner is not None:
+            assert isinstance(planner, SpatialPlanner)
+        else:
+            planner, _ = self._get_planner()
+
+        if predictor is not None:
+            assert isinstance(predictor, MATrafficModel)
+            exp_cfg = None
+        else:
+            predictor, exp_cfg = self._get_predictor()
+            exp_cfg = exp_cfg.clone()
+        if initial_planner is None:
+            initial_planner, _ = self._get_initial_planner()
+        exp_cfg.env.data_generation_params.vectorize_lane = True
+        policy = ModelPredictiveController(self.device, exp_cfg.algo.step_time, predictor)
+        policy = RefineWrapper(initial_planner=initial_planner,refiner=policy,device=self.device)
+        return policy, exp_cfg
 
 class HAASplineSampling(Hierarchical):
     def _get_predictor(self):
@@ -560,7 +584,7 @@ class AgentAwareEC(Hierarchical):
             planner, _ = self._get_planner()
             predictor, exp_cfg = self._get_EC_predictor()
 
-        ego_sampler = SplinePlanner(self.device, N_seg=planner.algo_config.future_num_frames+1)
+        ego_sampler = SplinePlanner(self.device, N_seg=planner.algo_config.future_num_frames+1,acce_grid=[-5,-2.5,0,2])
         agent_planner = PolicyWrapper.wrap_planner(
             planner,
             mask_drivable=self.eval_config.policy.mask_drivable,
@@ -583,23 +607,23 @@ class TreeContingency(Hierarchical):
         #     ckpt_key=self.eval_config.ckpt.policy.ckpt_key,
         #     ckpt_root_dir=self.ckpt_root_dir
         # )
-        # tree_ckpt_path, tree_config_path = get_checkpoint(
-        #     ngc_job_id="2000000",
-        #     ckpt_key="iter90000",
-        #     ckpt_root_dir=self.ckpt_root_dir
-        # )
-        # predictor_cfg = get_experiment_config_from_file(tree_config_path)
+        tree_ckpt_path, tree_config_path = get_checkpoint(
+            ngc_job_id="0100001",
+            ckpt_key="iter50000",
+            ckpt_root_dir="/home/yuxiaoc/repos/behavior-generation/checkpoints"
+        )
+        predictor_cfg = get_experiment_config_from_file(tree_config_path)
 
-        # predictor = L5TreeVAETrafficModel.load_from_checkpoint(
-        #     tree_ckpt_path,
-        #     algo_config=predictor_cfg.algo,
-        #     modality_shapes=self.get_modality_shapes(predictor_cfg),
-        # ).to(self.device).eval()
-        predictor_cfg = get_experiment_config_from_file("experiments/templates/l5_mixed_tree_vae_plan.json")
-        predictor = TreeVAETrafficModel(
+        predictor = SceneTreeTrafficModel.load_from_checkpoint(
+            tree_ckpt_path,
             algo_config=predictor_cfg.algo,
             modality_shapes=self.get_modality_shapes(predictor_cfg),
         ).to(self.device).eval()
+        # predictor_cfg = get_experiment_config_from_file("experiments/templates/l5_mixed_tree_vae_plan.json")
+        # predictor = SceneTreeTrafficModel(
+        #     algo_config=predictor_cfg.algo,
+        #     modality_shapes=self.get_modality_shapes(predictor_cfg),
+        # ).to(self.device).eval()
         return predictor, predictor_cfg.clone()
 
     def get_policy(self, planner=None, predictor=None, controller=None):
@@ -629,5 +653,55 @@ class TreeContingency(Hierarchical):
             agent_planner=agent_planner,
             device=self.device
         )
-        exp_cfg.env.data_generation_params.vectorize_lane=True
+        exp_cfg.env.data_generation_params.vectorize_lane="ego"
         return policy, exp_cfg
+
+class DSPolicy(PolicyComposer):
+    
+    """A policy from the differential stack"""
+    def get_policy(self):
+        
+        if self.eval_config.env == "nusc":
+            exp_cfg = get_registered_experiment_config("nusc_diff_stack")
+            exp_cfg.env.data_generation_params.vectorize_lane="None"
+            exp_cfg.env.data_generation_params.standardize_data = False
+            exp_cfg.env.data_generation_params.parse_obs = {"ego":False,"agent":True}
+            exp_cfg.algo.history_num_frames = 10
+            exp_cfg.algo.history_num_frames_ego = 10
+            exp_cfg.algo.history_num_frames_agents = 10
+            exp_cfg.eval.metrics.compute_analytical_metrics=False
+            exp_cfg.eval.metrics.compute_learned_metrics=False
+        elif self.eval_config.env == "l5kit":
+            exp_cfg = get_registered_experiment_config("l5_bc")
+        else:
+            raise NotImplementedError("invalid env {}".format(self.eval_config.env))
+
+        from tbsim.policies.differential_stack_policy import DiffStackPolicy
+        diffstack_args = dict(augment=False, batch_size=256, bias_predictions=False, 
+                      cache_dir='/home/yuxiaoc/data/cache', 
+                      conf='/home/yuxiaoc/repos/planning-aware-trajectron/diffstack/trajectron/config/plan6_ego_nofilt.json', 
+                      data_dir='/home/yuxiaoc/data/nuscenes_mini_plantpp_v5', dataset_version='', 
+                      debug=False, device='cuda:0', dynamic_edges='yes', edge_addition_filter=[0.25, 0.5, 0.75, 1.0], 
+                      edge_influence_combine_method='attention', edge_removal_filter=[1.0, 0.0], 
+                      edge_state_combine_method='sum', eval_batch_size=256, eval_data_dict='nuScenes_mini_val.pkl', 
+                      eval_every=1, experiment='diffstack-def', incl_robot_node=False, indexing_workers=0, 
+                      interactive=False, k_eval=25, learning_rate=None, load='', load2='', local_rank=0, 
+                      log_dir='../experiments/logs', log_tag='', lr_step=None, map_encoding=False, 
+                      no_edge_encoding=False, no_plan_train=False, no_train_pred=False, node_freq_mult_eval=False, 
+                      node_freq_mult_train=False, offline_scene_graph='yes', override_attention_radius=[], 
+                      plan_cost='', plan_cost_for_gt='', plan_dt=0.0, plan_init='nopred_plan', plan_loss='mse', 
+                      plan_loss_scale_end=-1, plan_loss_scale_start=-1, plan_loss_scaler=10000.0, 
+                      plan_lqr_eps=0.01, planner='', pred_loss_scaler=1.0, pred_loss_temp=1.0, 
+                      pred_loss_weights='none', preprocess_workers=0, profile='', runmode='train', 
+                      save_every=1, scene_freq_mult_eval=False, scene_freq_mult_train=False, 
+                      scene_freq_mult_viz=False, seed=123, train_data_dict='train.pkl', train_epochs=1, 
+                      train_plan_cost=False, vis_every=0)
+        from collections import namedtuple
+        DiffArgs = namedtuple("DiffArgs",diffstack_args)
+        diff_args = DiffArgs(**diffstack_args)
+        import torch.distributed as dist
+        dist.init_process_group(backend='nccl',
+                            init_method='env://')
+
+
+        return DiffStackPolicy(diff_args,device=self.device), exp_cfg

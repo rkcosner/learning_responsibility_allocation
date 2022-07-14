@@ -57,19 +57,7 @@ class BatchUtils(object):
 
     @classmethod
     def get_current_states_all_agents(cls, batch: dict, step_time, dyn_type: dynamics.DynType) -> torch.Tensor:
-        state_all = cls.batch_to_raw_all_agents(batch, step_time)
-        bs, na = state_all["curr_speed"].shape[:2]
-        if dyn_type == dynamics.DynType.BICYCLE:
-            current_states = torch.zeros(bs, na, 6).to(state_all["curr_speed"].device)  # [x, y, yaw, vel, dh, veh_len]
-            current_states[:, :, :2] = state_all["history_positions"][:, :, -1]
-            current_states[:, :, 3] = state_all["curr_speed"].abs()
-            current_states[:, :, [4]] = (state_all["history_yaws"][:, :, 0] - state_all["history_yaws"][:, :, 1]).abs()
-            current_states[:, :, 5] = state_all["extent"][:, :, 0]  # [veh_len]
-        else:
-            current_states = torch.zeros(bs, na, 4).to(state_all["curr_speed"].device)  # [x, y, vel, yaw]
-            current_states[:, :, :2] = state_all["history_positions"][:, :, -1]
-            current_states[:, :, 2] = state_all["curr_speed"]
-        return current_states
+        raise NotImplementedError
 
     @staticmethod
     def parse_batch(data_batch):
@@ -117,6 +105,10 @@ class L5BatchUtils(BatchUtils):
     @staticmethod
     def batch_to_raw_all_agents(data_batch, step_time):
         return l5_utils.batch_to_raw_all_agents(data_batch, step_time)
+    
+    @staticmethod
+    def get_current_states_all_agents(batch, step_time, dyn_type):
+        return l5_utils.get_current_states_all_agents(batch,step_time,dyn_type)
 
     @staticmethod
     def batch_to_target_all_agents(data_batch):
@@ -245,6 +237,26 @@ class trajdataBatchUtils(BatchUtils):
             "target_availabilities": avails,
             "extents": extents
         }
+    
+    @staticmethod
+    def get_current_states_all_agents(batch: dict, step_time, dyn_type: dynamics.DynType) -> torch.Tensor:
+        if batch["history_positions"].ndim==3:
+            state_all = trajdataBatchUtils.batch_to_raw_all_agents(batch, step_time)
+        else:
+            state_all = batch
+        bs, na = state_all["curr_speed"].shape[:2]
+        if dyn_type == dynamics.DynType.BICYCLE:
+            current_states = torch.zeros(bs, na, 6).to(state_all["curr_speed"].device)  # [x, y, yaw, vel, dh, veh_len]
+            current_states[:, :, :2] = state_all["history_positions"][:, :, -1]
+            current_states[:, :, 3] = state_all["curr_speed"].abs()
+            current_states[:, :, [4]] = (state_all["history_yaws"][:, :, -1] - state_all["history_yaws"][:, :, 1]).abs()
+            current_states[:, :, 5] = state_all["extent"][:, :, -1]  # [veh_len]
+        else:
+            current_states = torch.zeros(bs, na, 4).to(state_all["curr_speed"].device)  # [x, y, vel, yaw]
+            current_states[:, :, :2] = state_all["history_positions"][:, :, -1]
+            current_states[:, :, 2] = state_all["curr_speed"]
+            current_states[:,:,3:] = state_all["history_yaws"][:,:,-1]
+        return current_states
 
     @staticmethod
     def get_edges_from_batch(data_batch, ego_predictions=None, all_predictions=None):
@@ -252,15 +264,15 @@ class trajdataBatchUtils(BatchUtils):
 
     @staticmethod
     def generate_edges(raw_type, extents, pos_pred, yaw_pred):
-        raise NotImplementedError
+        return l5_utils.generate_edges(raw_type, extents, pos_pred, yaw_pred)
 
     @staticmethod
     def gen_ego_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types):
-        raise NotImplementedError
+        return l5_utils.gen_ego_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types)
 
     @staticmethod
-    def gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types):
-        raise NotImplementedError
+    def gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types, mask=None):
+        return l5_utils.gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types, mask)
 
     @staticmethod
     def get_drivable_region_map(rasterized_map):

@@ -100,5 +100,9 @@ if __name__ == "__main__":
         "--on_ngc"
     ]
 
-    res = input("make sure you have synced your code to ngc workspace! (enter to continue)")
+    # res = input("make sure you have synced your code to ngc workspace! (enter to continue)")
+    res = input("upload codebase to ngc workspace? (y/n)")
+    if res == "y":
+        print("uploading codebase ... (this may take a while)")
+        upload_codebase_to_ngc_workspace(ngc_cfg)
     launch_experiments_ngc(script_command, cfgs, cfg_fns, ngc_config=ngc_cfg, dry_run=args.dry_run)

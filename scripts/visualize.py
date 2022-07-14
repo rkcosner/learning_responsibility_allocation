@@ -8,6 +8,8 @@ import pathlib
 import json
 from scipy.signal import savgol_filter
 import os
+import imageio
+import glob
 
 from l5kit.data import LocalDataManager
 from l5kit.geometry import transform_points
@@ -20,6 +22,7 @@ from tbsim.utils.config_utils import translate_l5kit_cfg, translate_trajdata_cfg
 from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.utils.vis_utils import build_visualization_rasterizer_l5kit
 from tbsim.utils.vis_utils import COLORS, draw_agent_boxes
+import tbsim.utils.geometry_utils as GeoUtils
 from tbsim.configs.eval_config import EvaluationConfig
 import tbsim.utils.tensor_utils as TensorUtils
 from PIL import Image, ImageDraw
@@ -200,6 +203,19 @@ def draw_trajectories(ax, trajectories, raster_from_world, linewidth):
             linewidth=linewidth
         )
 
+def draw_action_samples(ax, action_samples, raster_from_world, world_from_agent, linewidth,alpha=0.5):
+    world_trajs = GeoUtils.batch_nd_transform_points_np(action_samples,world_from_agent[:,np.newaxis])
+    raster_trajs = GeoUtils.batch_nd_transform_points_np(world_trajs, raster_from_world[np.newaxis,np.newaxis])
+    raster_trajs = TensorUtils.join_dimensions(raster_trajs,0,2)
+    for traj in raster_trajs:
+        colorline(
+            ax,
+            traj[..., 0],
+            traj[..., 1],
+            cmap="RdPu",
+            linewidth=linewidth,
+            alpha=alpha,
+        )
 
 def draw_agent_boxes_plt(ax, pos, yaw, extent, raster_from_agent, outline_color, fill_color):
     boxes = get_box_world_coords_np(pos, yaw, extent)
@@ -212,7 +228,7 @@ def draw_agent_boxes_plt(ax, pos, yaw, extent, raster_from_agent, outline_color,
         ax.add_patch(rect_border)
 
 
-def draw_scene_data(ax, scene_name, scene_data, starting_frame, rasterizer, draw_trajectory=True, traj_len=200, ras_pos=None, linewidth=3.0):
+def draw_scene_data(ax, scene_name, scene_data, starting_frame, rasterizer, draw_trajectory=True, draw_action_sample = False, focus_agent_id = None, traj_len=200, ras_pos=None, linewidth=3.0):
     t = starting_frame
     if ras_pos is None:
         ras_pos = scene_data["centroid"][0, t]
@@ -243,6 +259,17 @@ def draw_scene_data(ax, scene_name, scene_data, starting_frame, rasterizer, draw
             raster_from_world=raster_from_world,
             linewidth=linewidth
         )
+    
+    if draw_action_sample==True:
+        if focus_agent_id is not None:
+            draw_action_samples(
+                ax,
+                action_samples=scene_data["action_sample_positions"][focus_agent_id, t],
+                raster_from_world=raster_from_world,
+                world_from_agent = scene_data["world_from_agent"][focus_agent_id,t],
+                linewidth=linewidth*0.3
+            )
+
 
     draw_agent_boxes_plt(
         ax,
@@ -271,7 +298,7 @@ def visualize_scene(rasterizer, h5f, scene_index, starting_frame, output_dir):
         if scene_name not in list(h5f.keys()):
             continue
         scene_data = h5f[scene_name]
-        draw_scene_data(ax, scene_index, scene_data, starting_frame, rasterizer)
+        draw_scene_data(ax, scene_index, scene_data, starting_frame, rasterizer,draw_action_sample=True,focus_agent_id=[0])
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -297,6 +324,7 @@ def scene_to_video(rasterizer, h5f, scene_index, output_dir):
             continue
         scene_data = h5f[scene_name]
         scene_data = preprocess(scene_data)
+        video_dir = os.path.join(output_dir, scene_name)
         for frame_i in range(scene_data["centroid"].shape[1]):
             fig, ax = plt.subplots()
             draw_scene_data(
@@ -306,18 +334,25 @@ def scene_to_video(rasterizer, h5f, scene_index, output_dir):
                 frame_i,
                 rasterizer,
                 draw_trajectory=True,
+                draw_action_sample=True,
+                focus_agent_id=[0],
                 traj_len=20,
                 linewidth=2.0,
-                ras_pos=scene_data["centroid"][0, 0]
+                # ras_pos=scene_data["centroid"][0, 0]
             )
 
-            video_dir = os.path.join(output_dir, scene_name)
             if not os.path.exists(video_dir):
                 os.makedirs(video_dir)
             ffn = os.path.join(video_dir, "{:03d}.png").format(frame_i)
+            
             plt.savefig(ffn, dpi=400, bbox_inches="tight", pad_inches=0)
             plt.close()
             print("Figure written to {}".format(ffn))
+        writer = imageio.get_writer(os.path.join(video_dir, "{}_anim.mp4".format(scene_name)), fps=10)
+        for file in sorted(glob.glob(os.path.join(video_dir,"*.png"))):
+            im = imageio.imread(file)
+            writer.append_data(im)
+        writer.close()
 
 
 def main(hdf5_path, dataset_path, output_dir, env):
@@ -330,14 +365,16 @@ def main(hdf5_path, dataset_path, output_dir, env):
         rasterizer = get_nusc_renderer(dataset_path)
         sids = EvaluationConfig().nusc.eval_scenes
         scene_names = list(rasterizer.scene_info.keys())
-        # sids = [scene_names[si] for si in sids]
-        sids = ["scene-0018", "scene-0095", "scene-0098", "scene-0521", "scene-0523",
-                "scene-0560", "scene-0627", "scene-0638", "scene-0904"]
+        sids = [scene_names[si] for si in sids]
+        # sids = ["scene-0093","scene-0018", "scene-0095", "scene-0098", "scene-0521", "scene-0523",
+        #         "scene-0560", "scene-0627", "scene-0638", "scene-0904"]
+        # sids = [ "scene-0559","scene-0564"]
 
     h5f = h5py.File(hdf5_path, "r")
+
     # sids = [1069]
     for si in sids:
-        # visualize_scene(rasterizer, h5f, si, 0, output_dir=output_dir)
+        visualize_scene(rasterizer, h5f, si, 0, output_dir=output_dir)
         scene_to_video(rasterizer, h5f, si, output_dir=output_dir)
 
 

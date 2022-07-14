@@ -199,17 +199,25 @@ class TreeVAEConfig(BehaviorCloningConfig):
         self.vae.encoder.mlp_layer_dims = (128, 128)
         self.vae.decoder.rnn_hidden_size = 100
         self.vae.decoder.mlp_layer_dims = (128, 128)
-        self.vae.decoder.Gaussian_var = True
-        self.vae.recon_loss_type = "NLL"
+        self.vae.decoder.Gaussian_var = False
+        self.vae.recon_loss_type = "MSE"
         self.vae.logpi_clamp = -6.0
         self.ego_conditioning = True
         self.EC_feat_dim = 64
-        self.loss_weights.EC_coll_loss = 10
+        self.loss_weights.EC_collision_loss = 10
         self.loss_weights.deviation_loss = 0.5
         self.loss_weights.kl_loss = 10
+        self.loss_weights.collision_loss = 5.0
         self.eval.mode = "sum"
-
+        self.scene_centric = True
+        self.shuffle = True
+        self.vectorize_lane = False
         self.min_std = 0.1
+        self.perturb.enabled=True
+        self.perturb.N_pert = 3
+        self.perturb.OU.theta = 0.8
+        self.perturb.OU.sigma = 2.0
+        self.perturb.OU.scale = [1.0,1.0,0.2]
 
 
 class BehaviorCloningECConfig(BehaviorCloningConfig):

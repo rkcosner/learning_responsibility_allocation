@@ -91,6 +91,7 @@ def map_ndarray(x, func):
         x,
         {
             np.ndarray: func,
+            str: lambda x:x,
             type(None): lambda x: x,
         },
     )
@@ -305,6 +306,7 @@ def to_device(x, device, ignore_if_unspecified=False):
         x,
         {
             torch.Tensor: lambda x, d=device: x.to(d),
+            str: lambda x: x,
             type(None): lambda x: x,
         },
         ignore_if_unspecified=ignore_if_unspecified
@@ -328,6 +330,7 @@ def to_tensor(x, ignore_if_unspecified=False):
         x,
         {
             torch.Tensor: lambda x: x,
+            str: lambda x:x,
             np.ndarray: lambda x: torch.from_numpy(x),
             type(None): lambda x: x,
         },
@@ -361,6 +364,7 @@ def to_numpy(x, ignore_if_unspecified=False):
             torch.Tensor: f,
             np.ndarray: lambda x: x,
             type(None): lambda x: x,
+            str: lambda x: x,
         },
         ignore_if_unspecified=ignore_if_unspecified
     )

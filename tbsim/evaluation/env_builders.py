@@ -14,7 +14,7 @@ from tbsim.configs.eval_config import EvaluationConfig
 from tbsim.configs.base import ExperimentConfig
 from tbsim.utils.metrics import OrnsteinUhlenbeckPerturbation
 from tbsim.envs.env_l5kit import EnvL5KitSimulation
-from tbsim.envs.env_trajdata import EnvUnifiedSimulation
+from tbsim.envs.env_trajdata import EnvUnifiedSimulation, EnvSplitUnifiedSimulation
 from tbsim.utils.config_utils import translate_l5kit_cfg, translate_trajdata_cfg
 import tbsim.envs.env_metrics as EnvMetrics
 from tbsim.evaluation.metric_composers import CVAEMetrics, OccupancyMetrics
@@ -66,9 +66,9 @@ class EnvironmentBuilder(object):
         )
 
         metrics = dict(
-            all_cvae_metrics=cvae_metrics.get_metrics(perturbations=perturbations,rolling = self.eval_cfg.cvae.rolling,
+            all_cvae_metrics=cvae_metrics.get_metrics(self.eval_cfg,perturbations=perturbations,rolling = self.eval_cfg.cvae.rolling,
             rolling_horizon = self.eval_cfg.cvae.rolling_horizon,env=self.eval_cfg.env,),
-            all_occu_likelihood=learned_occu_metric.get_metrics(perturbations=perturbations,rolling = self.eval_cfg.occupancy.rolling,
+            all_occu_likelihood=learned_occu_metric.get_metrics(self.eval_cfg,perturbations=perturbations,rolling = self.eval_cfg.occupancy.rolling,
             rolling_horizon = self.eval_cfg.occupancy.rolling_horizon,env=self.eval_cfg.env,)
         )
         return metrics
@@ -125,7 +125,7 @@ class EnvL5Builder(EnvironmentBuilder):
 
 
 class EnvNuscBuilder(EnvironmentBuilder):
-    def get_env(self):
+    def get_env(self,split_ego=False,parse_obs=True):
         exp_cfg = self.exp_cfg.clone()
         exp_cfg.unlock()
         exp_cfg.train.dataset_path = self.eval_cfg.dataset_path
@@ -157,23 +157,36 @@ class EnvNuscBuilder(EnvironmentBuilder):
                 "offset_frac_xy": data_cfg.raster_center
             },
             num_workers=os.cpu_count(),
-            desired_dt=data_cfg.step_time
+            desired_dt=data_cfg.step_time,
+            standardize_data=data_cfg.standardize_data,
         )
-
+        
         env_dataset = UnifiedDataset(**kwargs)
 
         metrics = dict()
         if self.eval_cfg.metrics.compute_analytical_metrics:
             metrics.update(self._get_analytical_metrics())
-        if self.eval_cfg.metrics.compute_learned_metrics:
-            metrics.update(self._get_learned_metrics())
-        env = EnvUnifiedSimulation(
-            exp_cfg.env,
-            dataset=env_dataset,
-            seed=self.eval_cfg.seed,
-            num_scenes=self.eval_cfg.num_scenes_per_batch,
-            prediction_only=False,
-            metrics=metrics
-        )
+        # if self.eval_cfg.metrics.compute_learned_metrics:
+        #     metrics.update(self._get_learned_metrics())
+        if split_ego:
+            env = EnvSplitUnifiedSimulation(
+                exp_cfg.env,
+                dataset=env_dataset,
+                seed=self.eval_cfg.seed,
+                num_scenes=self.eval_cfg.num_scenes_per_batch,
+                prediction_only=False,
+                metrics=metrics,
+                split_ego=split_ego,
+                parse_obs = parse_obs,
+            )
+        else:
+            env = EnvUnifiedSimulation(
+                exp_cfg.env,
+                dataset=env_dataset,
+                seed=self.eval_cfg.seed,
+                num_scenes=self.eval_cfg.num_scenes_per_batch,
+                prediction_only=False,
+                metrics=metrics,
+            )
 
         return env

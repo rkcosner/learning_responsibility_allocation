@@ -33,6 +33,7 @@ class UnifiedDataModule(pl.LightningDataModule):
         neighbor_distance = data_cfg.max_agents_distance
 
         kwargs = dict(
+            centric = data_cfg.centric,
             desired_data=[data_cfg.trajdata_source_train],
             desired_dt=data_cfg.step_time,
             future_sec=(future_sec, future_sec),
@@ -50,6 +51,8 @@ class UnifiedDataModule(pl.LightningDataModule):
                 "offset_frac_xy": data_cfg.raster_center
             },
             verbose=False,
+            max_agent_num = 1+data_cfg.other_agents_num,
+            vectorize_lane = data_cfg.vectorize_lane,
             num_workers=os.cpu_count(),
         )
         print(kwargs)

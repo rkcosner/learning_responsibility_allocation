@@ -1,20 +1,21 @@
+from collections import defaultdict
 import numpy as np
 from copy import deepcopy
 
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.policies.common import RolloutAction
 
-
+from torch.nn.utils.rnn import pad_sequence
 class RolloutLogger(object):
     """Log trajectories and other essential info during rollout for visualization and evaluation"""
     def __init__(self, obs_keys=None):
         if obs_keys is None:
             obs_keys = dict()
         self._obs_keys = obs_keys
-        self._scene_buffer = dict()
-        self._serialized_scene_buffer = None
         self._scene_indices = None
         self._agent_id_per_scene = dict()
+        self._agent_data_by_scene = dict()
+        self._scene_ts = defaultdict(lambda:0)
 
     def _combine_obs(self, obs):
         combined = dict()
@@ -23,42 +24,77 @@ class RolloutLogger(object):
         if "agents" in obs and obs["agents"] is not None:
             for k in obs["agents"].keys():
                 if k in combined:
-                    combined[k] = np.concatenate((combined[k], obs["agents"][k]), axis=0)
+                    if obs["agents"][k] is not None:
+                        if combined[k] is not None:
+                            combined[k] = np.concatenate((combined[k], obs["agents"][k]), axis=0)
+                        else:
+                            combined[k] = obs["agents"][k]
                 else:
                     combined[k] = obs["agents"][k]
         return combined
 
     def _combine_action(self, action: RolloutAction):
         combined = dict(action=dict())
-        if action.has_ego:
+        if action.has_ego and not action.has_agents:
             combined["action"] = action.ego.to_dict()
             if action.ego_info is not None and "action_samples" in action.ego_info:
                 combined["action_samples"] = action.ego_info["action_samples"]
-        if action.has_agents:
-            agents_action = action.agents.to_dict()
-            for k in agents_action:
-                if k in combined["action"]:
-                    combined["action"][k] = np.concatenate((combined["action"][k], agents_action[k]), axis=0)
-                else:
-                    combined["action"][k] = agents_action[k]
+            return combined
+                
+        elif action.has_agents and not action.has_ego:
+            combined["action"] = action.agents.to_dict()
             if action.agents_info is not None and "action_samples" in action.agents_info:
-                if "action_samples" in combined:
-                    samples = action.agents_info["action_samples"]
-                    for k in samples:
-                        if k in combined["action_samples"]:
-                            combined["action_samples"][k] = np.concatenate((combined["action_samples"][k], samples[k]), axis=0)
-                        else:
-                            combined["action_samples"][k] = samples[k]
-
+                combined["action_samples"] = action.agents_info["action_samples"]
+            return combined
+        elif action.has_agents and action.has_ego:
+            Nego = action.ego.positions.shape[0]
+            Nagents = action.agents.positions.shape[0]
+            combined["action"] = dict()
+            agents_action = action.agents.to_dict()
+            ego_action = action.ego.to_dict()
+            for k in agents_action:
+                if k in ego_action:
+                    combined["action"][k] = np.concatenate((ego_action[k], agents_action[k]), axis=0)
+            if action.agents_info is not None and action.ego_info is not None:
+                if "action_samples" in action.ego_info:
+                    ego_samples = action.ego_info["action_samples"]
+                else:
+                    ego_samples = None
+                if "action_samples" in action.agents_info:
+                    agents_samples = action.agents_info["action_samples"]
+                else:
+                    agents_samples = None
+                if ego_samples is not None and agents_samples is None:
+                    combined["action_samples"] = dict()
+                    for k in ego_samples:
+                        pad_k = np.zeros([Nagents,*ego_samples[k].shape[1:]])
+                        combined["action_samples"][k]=np.concatenate((ego_samples[k],pad_k),0)
+                elif ego_samples is None and agents_samples is not None:
+                    combined["action_samples"] = dict()
+                    for k in agents_samples:
+                        pad_k = np.zeros([Nego,*agents_samples[k].shape[1:]])
+                        combined["action_samples"][k]=np.concatenate((pad_k,agents_samples[k]),0)
+                elif ego_samples is not None and agents_samples is not None:
+                    combined["action_samples"] = dict()
+                    for k in ego_samples:
+                        if k in agents_samples:
+                            if ego_samples[k].shape[1]>agents_samples[k].shape[1]:
+                                pad_k = np.zeros([Nagents,ego_samples[k].shape[1]-agents_samples[k].shape[1],*agents_samples[k].shape[2:]])
+                                agents_samples[k]=np.concatenate((agents_samples[k],pad_k),1)
+                            elif ego_samples[k].shape[1]<agents_samples[k].shape[1]:
+                                pad_k = np.zeros([Nego,agents_samples[k].shape[1]-ego_samples[k].shape[1],*ego_samples[k].shape[2:]])
+                                ego_samples[k]=np.concatenate((ego_samples[k],pad_k),1)
+                            combined["action_samples"][k] = np.concatenate((ego_samples[k],agents_samples[k]),0)
         return combined
 
     def _maybe_initialize(self, obs):
         if self._scene_indices is None:
             self._scene_indices = np.unique(obs["scene_index"])
+            self._scene_ts = defaultdict(lambda:0)
             for si in self._scene_indices:
                 self._agent_id_per_scene[si] = obs["track_id"][obs["scene_index"] == si]
             for si in self._scene_indices:
-                self._scene_buffer[si] = dict()
+                self._agent_data_by_scene[si] = defaultdict(lambda:defaultdict(lambda:dict()))
 
     def _append_buffer(self, obs, action):
         """
@@ -77,31 +113,23 @@ class RolloutLogger(object):
         state["action_positions"] = action["action"]["positions"][:, [0]]
         state["action_yaws"] = action["action"]["yaws"][:, [0]]
         if "action_samples" in action:
-            # only collect up to 10 samples to save space
-            state["action_sample_positions"] = action["action_samples"]["positions"][:, :10]
-            state["action_sample_yaws"] = action["action_samples"]["yaws"][:, :10]
+            # only collect up to 20 samples to save space
+            # state["action_sample_positions"] = action["action_samples"]["positions"][:, :20]
+            # state["action_sample_yaws"] = action["action_samples"]["yaws"][:, :20]
 
+            state["action_sample_positions"] = action["action_samples"]["positions"]
+            state["action_sample_yaws"] = action["action_samples"]["yaws"]
+        
         for si in self._scene_indices:
-
+            self._agent_id_per_scene[si] = obs["track_id"][obs["scene_index"] == si]
             scene_mask = np.where(si == obs["scene_index"])[0]
             scene_state = TensorUtils.map_ndarray(state, lambda x: x[scene_mask])
-
-            reassignment_index = np.zeros(len(scene_mask), dtype=np.int64)
+            ts = self._scene_ts[si]
             scene_track_id = scene_state["track_id"]
             for i, ti in enumerate(scene_track_id):
-                reassignment_index[i] = np.where(ti == self._agent_id_per_scene[si])[0]
-            for k in scene_state:
-                if k not in self._scene_buffer[si]:
-                    # don't need to do anything special for the initial step
-                    assert scene_state[k].shape[0] == self._agent_id_per_scene[si].shape[0]
-                    self._scene_buffer[si][k] = []
-                    self._scene_buffer[si][k].append(scene_state[k])
-                else:
-                    # otherwise, use the previous state as a template and only assign values for agents
-                    # in the current state (i.e., use the previous value for missing agents)
-                    prev_state = np.copy(self._scene_buffer[si][k][-1])
-                    prev_state[reassignment_index] = scene_state[k]
-                    self._scene_buffer[si][k].append(prev_state)
+                for k in scene_state:
+                    self._agent_data_by_scene[si][k][ti][ts] = scene_state[k][i:i+1]
+            
 
     def get_serialized_scene_buffer(self):
         """
@@ -117,16 +145,53 @@ class RolloutLogger(object):
         if self._serialized_scene_buffer is not None:
             return self._serialized_scene_buffer
 
-        buffer_len = None
         serialized = dict()
-        for si in self._scene_buffer:
+        for si in self._agent_data_by_scene:
             serialized[si] = dict()
-            for k in self._scene_buffer[si]:
-                bf = [e[:, None] for e in self._scene_buffer[si][k]]
-                serialized[si][k] = np.concatenate(bf, axis=1)
-                if buffer_len is None:
-                    buffer_len = serialized[si][k].shape[1]
-                assert serialized[si][k].shape[1] == buffer_len
+            for k in self._agent_data_by_scene[si]:
+                serialized[si][k]=list()
+                for ti in self._agent_data_by_scene[si][k]:
+                    if len(self._agent_data_by_scene[si][k][ti])>0:
+                        default_val = list(self._agent_data_by_scene[si][k][ti].values())[0]
+                        ti_k = list()
+                        for ts in range(self._scene_ts[si]):
+                            ti_k.append(self._agent_data_by_scene[si][k][ti][ts] if ts in self._agent_data_by_scene[si][k][ti] else np.ones_like(default_val)*np.nan)
+                            default_val = ti_k[-1]
+                        if not all(elem.shape==ti_k[0].shape for elem in ti_k):
+                            # requires padding
+                            if np.issubdtype(ti_k[0].dtype,np.floating):
+                                padding_value = np.nan
+                            else:
+                                padding_value = 0
+                            ti_k = [x[0] for x in ti_k]
+                            ti_k_torch = TensorUtils.to_tensor(ti_k)
+
+                            ti_k_padded = pad_sequence(ti_k_torch,padding_value=padding_value,batch_first=True)
+                            serialized[si][k].append(TensorUtils.to_numpy(ti_k_padded)[np.newaxis,:])
+                        else:
+                            if ti_k[0].ndim==0:
+                                serialized[si][k].append(np.array(ti_k)[np.newaxis,:])
+                            else:
+                                serialized[si][k].append(np.concatenate(ti_k,axis=0)[np.newaxis,:])
+                    else:
+                        serialized[si][k].append(np.zeros_like(serialized[si][k][-1]))
+                if not all(elem.shape==serialized[si][k][0].shape for elem in serialized[si][k]):
+                    # requires padding
+                    if np.issubdtype(serialized[si][k][0][0].dtype,np.floating):
+                        padding_value = np.nan
+                    else:
+                        padding_value = 0
+                    axes=[1,0]+np.arange(2,serialized[si][k][0].ndim-1).tolist()
+                    mk_transpose = [np.transpose(x[0],axes) for x in serialized[si][k]]
+                    mk_torch = TensorUtils.to_tensor(mk_transpose)
+                    mk_padded = pad_sequence(mk_torch,padding_value=padding_value)
+                    mk = TensorUtils.to_numpy(mk_padded)
+                    axes=[1,2,0]+np.arange(3,mk.ndim).tolist()
+                    serialized[si][k]=np.transpose(mk,axes)
+                else:
+                    serialized[si][k] = np.concatenate(serialized[si][k],axis=0)
+
+                
 
         self._serialized_scene_buffer = serialized
         return deepcopy(self._serialized_scene_buffer)
@@ -138,7 +203,7 @@ class RolloutLogger(object):
         for si in buffer:
             traj[si] = dict(
                 positions=buffer[si]["centroid"],
-                yaws=buffer[si]["yaw"][..., None]
+                yaws=buffer[si]["yaw"]
             )
         return traj
 
@@ -155,3 +220,5 @@ class RolloutLogger(object):
         assert combined_obs["scene_index"].shape[0] == combined_action["action"]["positions"].shape[0]
         self._maybe_initialize(combined_obs)
         self._append_buffer(combined_obs, combined_action)
+        for si in np.unique(combined_obs["scene_index"]):
+            self._scene_ts[si]+=1

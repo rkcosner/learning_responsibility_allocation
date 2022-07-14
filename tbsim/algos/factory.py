@@ -13,6 +13,7 @@ from tbsim.algos.algos import (
     GANTrafficModel,
     BehaviorCloningEC,
     TreeVAETrafficModel,
+    SceneTreeTrafficModel
 )
 
 from tbsim.algos.multiagent_algos import (
@@ -47,7 +48,10 @@ def algo_factory(config: ExperimentConfig, modality_shapes: dict):
     elif algo_name == "discrete_vae":
         algo = DiscreteVAETrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "tree_vae":
-        algo = TreeVAETrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
+        if algo_config.scene_centric:
+            algo = SceneTreeTrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
+        else:
+            algo = TreeVAETrafficModel(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "bc_ec":
         algo = BehaviorCloningEC(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "spatial_planner":
