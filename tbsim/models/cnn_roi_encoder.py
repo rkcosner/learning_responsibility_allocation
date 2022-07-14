@@ -459,7 +459,7 @@ def Indexing_ROI_result(CNN_out, index, emb_size):
     return map_emb
 
 
-def obtain_lane_flag(
+def rasterized_ROI_align(
         lane_mask, pos, yaw, raster_from_agent, mask, patch_size, out_dim
 ):
     if pos.ndim == 4:

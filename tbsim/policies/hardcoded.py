@@ -2,13 +2,15 @@ from os import device_encoding
 import numpy as np
 import pytorch_lightning as pl
 import torch
+from torch.nn.utils.rnn import pad_sequence
 from typing import Tuple, Dict
 from copy import deepcopy
 
 from tbsim.envs.base import BatchedEnv, BaseEnv
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.dynamics as dynamics
-from tbsim.utils.l5_utils import get_current_states, get_drivable_region_map
+from tbsim.utils.l5_utils import get_current_states
+from tbsim.utils.batch_utils import batch_utils
 from tbsim.algos.algo_utils import optimize_trajectories
 from tbsim.utils.geometry_utils import transform_points_tensor, calc_distance_map
 from l5kit.geometry import transform_points
@@ -17,7 +19,7 @@ from tbsim.utils.planning_utils import ego_sample_planning
 from tbsim.policies.common import Action, Plan
 from tbsim.policies.base import Policy
 from tbsim.utils.ftocp import FTOCP
-
+import matplotlib.pyplot as plt
 
 try:
     from Pplan.Sampling.spline_planner import SplinePlanner
@@ -183,10 +185,8 @@ class EC_sampling_controller(Policy):
         ego_trajs = list()
         #TODO: paralellize this process
         for i in range(bs):
-            pos = obs["history_positions"][i,0]
             vel = obs["curr_speed"][i]
-            yaw = obs["history_yaws"][i,0]
-            traj0 = torch.tensor([[pos[0], pos[1], vel, 0, yaw, 0., 0.]]).to(pos.device)
+            traj0 = torch.tensor([[0., 0., vel, 0, 0., 0., 0.]]).to(vel.device)
             lanes = TensorUtils.to_numpy(obs["ego_lanes"][i])
             lanes = np.concatenate((lanes[...,:2],np.arctan2(lanes[...,3:],lanes[...,2:3])),-1)
             lanes = np.split(lanes,obs["ego_lanes"].shape[1])
@@ -224,7 +224,10 @@ class EC_sampling_controller(Policy):
         EC_pred = self.EC_model.get_EC_pred(agent_obs,cond_traj,agent_plan)
         self.timer.toc("prediction")
         self.timer.tic("planning")
-        drivable_map = get_drivable_region_map(obs["image"]).float()
+        if "drivable_map" in obs:
+            drivable_map = obs["drivable_map"].float()
+        else:
+            drivable_map = batch_utils().get_drivable_region_map(obs["image"]).float()
         dis_map = calc_distance_map(drivable_map)
         
         opt_traj = list()
@@ -269,51 +272,154 @@ class ContingencyPlanner(Policy):
         self.num_frames_per_stage = config.num_frames_per_stage
         self.step_time = config.step_time
         self.tf = self.stage*self.num_frames_per_stage*self.step_time
-
         self.timer = Timers()
     
     def eval(self):
         self.predictor.eval()
         if self.agent_planner is not None:
             self.agent_planner.eval()
-    
-    def get_action(self,obs,**kwargs)-> Tuple[Action, Dict]:
-        assert "agent_obs" in kwargs
-        agent_obs = kwargs["agent_obs"]
-        if self.agent_planner is not None:
-            agent_plan,_ = self.agent_planner.get_plan(agent_obs)
-            agent_plan = torch.cat((agent_plan.positions,agent_plan.yaws),-1)
-            agent_plan = agent_plan[...,-1,:]
+
+    @staticmethod
+    def get_scene_obs(ego_obs,agent_obs,goal=None):
+        # turn the observations into scene-centric form
+
+        centered_raster_from_agent = ego_obs["raster_from_agent"][0]
+        centered_agent_from_raster,_ = torch.linalg.inv_ex(centered_raster_from_agent)
+        num_agents = [sum(agent_obs["scene_index"]==i)+1 for i in ego_obs["scene_index"]]
+        num_agents = torch.tensor(num_agents,device=ego_obs["scene_index"].device)
+        hist_pos_b = list()
+        hist_yaw_b=list()
+        hist_avail_b = list()
+        fut_pos_b = list()
+        fut_yaw_b = list()
+        fut_avail_b = list()
+        agent_from_center_b = list()
+        center_from_agent_b = list()
+        raster_from_center_b = list()
+        center_from_raster_b = list()
+        raster_from_world_b = list()
+        maps_b = list()
+        curr_speed_b = list()
+        type_b = list()
+        extents_b = list()
+        scene_goal_b = list()
+
+
+        for i,scene_idx in enumerate(ego_obs["scene_index"]):
+            agent_idx = torch.where(agent_obs["scene_index"]==scene_idx)[0]
+            if goal is not None:
+                scene_goal_b.append(torch.cat((torch.zeros_like(goal[0:1]),goal[agent_idx]),0))
+            center_from_agent = ego_obs["agent_from_world"][i].unsqueeze(0) @ agent_obs["world_from_agent"][agent_idx]
+            center_from_agents = torch.cat((torch.eye(3,device=center_from_agent.device).unsqueeze(0),center_from_agent),0)
+
+            hist_pos_raw = torch.cat((ego_obs["history_positions"][i:i+1],agent_obs["history_positions"][agent_idx]),0)
+            hist_yaw_raw = torch.cat((ego_obs["history_yaws"][i:i+1],agent_obs["history_yaws"][agent_idx]),0)
+            
+            agents_hist_avail = torch.cat((ego_obs["history_availabilities"][i:i+1],agent_obs["history_availabilities"][agent_idx]),0)
+            agents_hist_pos = GeoUtils.transform_points_tensor(hist_pos_raw,center_from_agents)*agents_hist_avail.unsqueeze(-1)
+            agents_hist_yaw = (hist_yaw_raw+torch.cat((ego_obs["yaw"][i:i+1],agent_obs["yaw"][agent_idx]),0)[:,None,None]-ego_obs["yaw"][i])*agents_hist_avail.unsqueeze(-1)
+
+            hist_pos_b.append(agents_hist_pos)
+            hist_yaw_b.append(agents_hist_yaw)
+            hist_avail_b.append(agents_hist_avail)
+            if agent_obs["target_availabilities"].shape[1]<ego_obs["target_availabilities"].shape[1]:
+                pad_shape=(agent_obs["target_availabilities"].shape[0],ego_obs["target_availabilities"].shape[1]-agent_obs["target_availabilities"].shape[1])
+                agent_obs["target_availabilities"] = torch.cat((agent_obs["target_availabilities"],torch.zeros(pad_shape,device=agent_obs["target_availabilities"].device)),1)
+            agents_fut_avail = torch.cat((ego_obs["target_availabilities"][i:i+1],agent_obs["target_availabilities"][agent_idx]),0)
+            if agent_obs["target_positions"].shape[1]<ego_obs["target_positions"].shape[1]:
+                pad_shape=(agent_obs["target_positions"].shape[0],ego_obs["target_positions"].shape[1]-agent_obs["target_positions"].shape[1],*agent_obs["target_positions"].shape[2:])
+                agent_obs["target_positions"] = torch.cat((agent_obs["target_positions"],torch.zeros(pad_shape,device=agent_obs["target_positions"].device)),1)
+                pad_shape=(agent_obs["target_yaws"].shape[0],ego_obs["target_yaws"].shape[1]-agent_obs["target_yaws"].shape[1],*agent_obs["target_yaws"].shape[2:])
+                agent_obs["target_yaws"] = torch.cat((agent_obs["target_yaws"],torch.zeros(pad_shape,device=agent_obs["target_yaws"].device)),1)
+            fut_pos_raw = torch.cat((ego_obs["target_positions"][i:i+1],agent_obs["target_positions"][agent_idx]),0)
+            fut_yaw_raw = torch.cat((ego_obs["target_yaws"][i:i+1],agent_obs["target_yaws"][agent_idx]),0)
+            agents_fut_pos = GeoUtils.transform_points_tensor(fut_pos_raw,center_from_agents)*agents_fut_avail.unsqueeze(-1)
+            agents_fut_yaw = (fut_yaw_raw+torch.cat((ego_obs["yaw"][i:i+1],agent_obs["yaw"][agent_idx]),0)[:,None,None]-ego_obs["yaw"][i])*agents_fut_avail.unsqueeze(-1)
+            fut_pos_b.append(agents_fut_pos)
+            fut_yaw_b.append(agents_fut_yaw)
+            fut_avail_b.append(agents_fut_avail)
+
+            curr_yaw = agents_hist_yaw[:,-1]
+            curr_pos = agents_hist_pos[:,-1]
+            agents_from_center = GeoUtils.transform_matrices(-curr_yaw.flatten(),torch.zeros_like(curr_pos))@GeoUtils.transform_matrices(torch.zeros_like(curr_yaw).flatten(),-curr_pos)
+                                 
+            # raster_from_center = centered_raster_from_agent @ agents_from_center
+            center_from_raster = center_from_agents @ centered_agent_from_raster
+
+            # raster_from_world = torch.cat((ego_obs["raster_from_world"][i:i+1],agent_obs["raster_from_world"][agent_idx]),0)
+
+
+            agent_from_center_b.append(agents_from_center)
+            center_from_agent_b.append(center_from_agents)
+            # raster_from_center_b.append(raster_from_center)
+            center_from_raster_b.append(center_from_raster)
+            # raster_from_world_b.append(raster_from_world)
+
+            maps = torch.cat((ego_obs["image"][i:i+1],agent_obs["image"][agent_idx]),0)
+            curr_speed = torch.cat((ego_obs["curr_speed"][i:i+1],agent_obs["curr_speed"][agent_idx]),0)
+            agents_type = torch.cat((ego_obs["type"][i:i+1],agent_obs["type"][agent_idx]),0)
+            agents_extent = torch.cat((ego_obs["extent"][i:i+1],agent_obs["extent"][agent_idx]),0)
+            maps_b.append(maps)
+            curr_speed_b.append(curr_speed)
+            type_b.append(agents_type)
+            extents_b.append(agents_extent)
+        if goal is not None:
+            scene_goal = pad_sequence(scene_goal_b,batch_first=True,padding_value=0)
         else:
-            agent_plan=None
+            scene_goal = None
         
+        scene_obs = dict(
+        num_agents=num_agents,
+        image=pad_sequence(maps_b,batch_first=True,padding_value=0),
+        target_positions=pad_sequence(fut_pos_b,batch_first=True,padding_value=0),
+        target_yaws=pad_sequence(fut_yaw_b,batch_first=True,padding_value=0),
+        target_availabilities=pad_sequence(fut_avail_b,batch_first=True,padding_value=0),
+        history_positions=pad_sequence(hist_pos_b,batch_first=True,padding_value=0),
+        history_yaws=pad_sequence(hist_yaw_b,batch_first=True,padding_value=0),
+        history_availabilities=pad_sequence(hist_avail_b,batch_first=True,padding_value=0),
+        curr_speed=pad_sequence(curr_speed_b,batch_first=True,padding_value=0),
+        centroid=ego_obs["centroid"],
+        yaw=ego_obs["yaw"],
+        agent_type=pad_sequence(type_b,batch_first=True,padding_value=0),
+        extent=pad_sequence(extents_b,batch_first=True,padding_value=0),
+        raster_from_agent=ego_obs["raster_from_agent"],
+        agent_from_raster=centered_agent_from_raster,
+        # raster_from_center=pad_sequence(raster_from_center_b,batch_first=True,padding_value=0),
+        # center_from_raster=pad_sequence(center_from_raster_b,batch_first=True,padding_value=0),
+        agents_from_center=pad_sequence(agent_from_center_b,batch_first=True,padding_value=0),
+        center_from_agents=pad_sequence(center_from_agent_b,batch_first=True,padding_value=0),
+        # raster_from_world=pad_sequence(raster_from_world_b,batch_first=True,padding_value=0),
+        agent_from_world=ego_obs["agent_from_world"],
+        world_from_agent=ego_obs["world_from_agent"],
+        )
+        return scene_obs, scene_goal
+        
+    def get_ego_samples(self,obs):
         self.timer.tic("sampling")
-        T = self.stage*self.num_frames_per_stage
         bs = obs["history_positions"].shape[0]
-        agent_size = agent_obs["image"].shape[0]
         ego_trajs = list()
         #TODO: paralellize this process
-        ego_trees = list()
         ego_nodes_by_stage = list()
         for i in range(bs):
-            pos = obs["history_positions"][i,0]
             vel = obs["curr_speed"][i]
-            yaw = obs["history_yaws"][i,0]
-            traj0 = torch.tensor([[pos[0], pos[1], vel, 0, yaw, 0., 0.]]).to(pos.device)
+            traj0 = torch.tensor([[0.0, 0.0, vel, 0, 0.0, 0., 0.]]).to(vel.device)
             lanes = TensorUtils.to_numpy(obs["ego_lanes"][i])
-            lanes = np.concatenate((lanes[...,:2],np.arctan2(lanes[...,3:],lanes[...,2:3])),-1)
-            lanes = np.split(lanes,obs["ego_lanes"].shape[1])
-            lanes = [lane[0] for lane in lanes if not (lane==0).all()]
+            if lanes.shape[-1]==4:
+                lanes = np.concatenate((lanes[...,:2],np.arctan2(lanes[...,3:],lanes[...,2:3])),-1)
+
+            lanes = [lanes[i] for i,lane in enumerate(lanes) if lane.any()]
             
             def expand_func(x): return self.ego_sampler.gen_trajectory_batch(
-                    x, self.step_time*self.num_frames_per_stage, lanes,N=self.num_frames_per_stage+1)
+                    x, self.step_time*self.num_frames_per_stage, lanes,N=self.num_frames_per_stage+1,max_children=20)
             
             x0 = TrajTree(traj0, None, 0)
             x0.grow_tree(expand_func, self.stage)
             
-            ego_trees.append(x0)
             nodes,_ = TrajTree.get_nodes_by_level(x0,depth=self.stage)
-            ego_nodes_by_stage.append(nodes)
+            if len(nodes[0])==0:
+                ego_nodes_by_stage.append(None)
+            else:
+                ego_nodes_by_stage.append(nodes)
 
             if len(nodes[self.stage]) > 0:
                 ego_trajs_i = torch.stack([leaf.total_traj for leaf in nodes[self.stage]], 0).float()
@@ -323,76 +429,101 @@ class ContingencyPlanner(Policy):
             ego_trajs.append(ego_trajs_i)
         
         self.timer.toc("sampling")
+        return ego_trajs,ego_nodes_by_stage
+    def get_prediction(self,obs,scene_obs,scene_goal,ego_trajs):
+        bs = obs["history_positions"].shape[0]
         self.timer.tic("prediction")
         Ns = max(ego_trajs_i.shape[0] for ego_trajs_i in ego_trajs)
-        cond_traj = torch.zeros([agent_size,Ns,T,3],dtype=torch.float32,device=obs["speed"].device)
-        ego_traj_samples = torch.zeros([bs,Ns,T,3],dtype=torch.float32)
+        T = self.stage*self.num_frames_per_stage
+        ego_traj_samples = torch.zeros([bs,Ns,T,3],dtype=torch.float32,device=obs["curr_speed"].device)
+        cond_idx = list()
         for i in range(bs):
+            cond_idx.append(0)
             ego_traj_samples[i,:ego_trajs[i].shape[0]] = ego_trajs[i]
-            agent_idx = torch.where(agent_obs["scene_index"]==obs["scene_index"][i])[0]
-            ego_pos_world = GeoUtils.batch_nd_transform_points(ego_trajs[i][...,:2],obs["world_from_agent"][i].unsqueeze(0).float())
-            ego_pos_agent = GeoUtils.batch_nd_transform_points(
-                ego_pos_world.tile(agent_idx.shape[0],1,1,1),agent_obs["agent_from_world"][agent_idx,None,None].float()
-                )
-
-            ego_yaw_agent = (ego_trajs[i][...,2:]+obs["yaw"][i].float()).tile(agent_idx.shape[0],1,1,1)-agent_obs["yaw"][agent_idx].float().reshape(-1,1,1,1)
-            cond_traj[agent_idx,:ego_trajs[i].shape[0]] = torch.cat((ego_pos_agent,ego_yaw_agent),-1)
         
-        EC_pred = self.predictor.get_EC_pred(agent_obs,cond_traj,agent_plan)["EC_pred"]
+        agent_pred = self.predictor.predict(scene_obs,cond_traj=ego_traj_samples,cond_idx=cond_idx,goal=scene_goal)
         
         self.timer.toc("prediction")
+        return agent_pred, ego_traj_samples
+    
+    def get_action(self,obs,**kwargs)-> Tuple[Action, Dict]:
+        assert "agent_obs" in kwargs
+        agent_obs = kwargs["agent_obs"]
+        T = self.stage*self.num_frames_per_stage
+        bs = obs["history_positions"].shape[0]
+        if self.agent_planner is not None:
+            obs_keys = ["image","drivable_map","agent_from_raster"]
+            combined_obs={k:torch.cat((obs[k],agent_obs[k]),0) for k in obs_keys}
+            combined_plan,info = self.agent_planner.get_plan(combined_obs)
+            ego_likelihood = info["location_map"][:bs]
+
+            
+            agent_plan = torch.cat((combined_plan.positions[bs:],combined_plan.yaws[bs:]),-1)
+            agent_plan = agent_plan[...,-1,:]
+
+        else:
+            agent_plan=None
+            ego_likelihood = None
+        scene_obs,scene_goal = self.get_scene_obs(obs,agent_obs,agent_plan)
+        ego_trajs,ego_nodes_by_stage = self.get_ego_samples(obs)
+        agent_pred, ego_traj_samples = self.get_prediction(obs,scene_obs,scene_goal,ego_trajs)
         self.timer.tic("planning")
-        drivable_map = get_drivable_region_map(obs["image"]).float()
+        if "drivable_map" in obs:
+            drivable_map = obs["drivable_map"].float()
+        else:
+            drivable_map = batch_utils().get_drivable_region_map(obs["image"]).float()
         dis_map = calc_distance_map(drivable_map)
         
         opt_traj = list()
         for i in range(bs):
-            
-            agent_idx = torch.where(agent_obs["scene_index"]==obs["scene_index"][i])[0]
-            agent_obs_i = TensorUtils.slice_tensor(agent_obs,0,agent_idx[0],agent_idx[-1]+1)
             N_i = ego_trajs[i].shape[0]
-            agent_traj_local = EC_pred["trajectories"][agent_idx,:N_i].float()
-            prob = EC_pred["p"][agent_idx,:N_i]
+            Na_i = scene_obs["num_agents"][i]
+            agent_traj_local = agent_pred["trajectories"][i,:N_i,:,1:Na_i].float()
+            prob = agent_pred["p"][i,:N_i]
+            if ego_nodes_by_stage[i] is not None:
 
-            agent_pos_world = GeoUtils.batch_nd_transform_points(
-                                                                 TensorUtils.join_dimensions(agent_traj_local[...,:2],1,3),
-                                                                 agent_obs["world_from_agent"][agent_idx,None,None].float()
-                                                                 )
-            agent_pos_world = TensorUtils.reshape_dimensions(agent_pos_world,1,2,agent_traj_local.shape[1:3])
-            agent_pos_ego = GeoUtils.batch_nd_transform_points(agent_pos_world,obs["agent_from_world"][i].unsqueeze(0).float())
-            agent_yaw_ego = agent_traj_local[...,2:]+agent_obs["yaw"][agent_idx].reshape(-1,1,1,1,1)-obs["yaw"][i]
-            agent_traj = torch.cat((agent_pos_ego,agent_yaw_ego),-1)
-
-            motion_policy = PlanUtils.contingency_planning(ego_nodes_by_stage[i],
-                                                           obs["extent"][i,:2],
-                                                           agent_traj,
-                                                           prob,
-                                                           agent_obs_i["extent"][...,:2],
-                                                           agent_obs_i["type"],
-                                                           obs["raster_from_agent"][i],
-                                                           dis_map[i],
-                                                           {"coll": 1.0, "lane": 1.0},
-                                                           self.num_frames_per_stage,
-                                                           self.predictor.algo_config.vae.latent_dim,
-                                                           )
-                                
-
+                motion_policy = PlanUtils.contingency_planning(ego_nodes_by_stage[i],
+                                                            obs["extent"][i,:2],
+                                                            agent_traj_local,
+                                                            prob,
+                                                            scene_obs["extent"][i,1:Na_i,:2],
+                                                            scene_obs["agent_type"][i,1:Na_i],
+                                                            obs["raster_from_agent"][i],
+                                                            dis_map[i],
+                                                            {"collision_weight": 10.0, "lane_weight": 1.0, "progress_weight": 0.02,"likelihood_weight": 0.15},
+                                                            self.num_frames_per_stage,
+                                                            self.predictor.algo_config.vae.latent_dim,
+                                                            self.config.step_time,
+                                                            log_likelihood=ego_likelihood[i],
+                                                            pert_std = 0.2
+                                                            )
+                
+            else:
+                raise ValueError("ego plan is empty!")
+                            
             opt_traj.append(motion_policy.get_plan(None,self.stage*self.num_frames_per_stage))
+
         self.timer.toc("planning")
         print(self.timer)
         opt_traj = torch.stack(opt_traj,0)
         action = Action(positions=opt_traj[...,:2],yaws=opt_traj[...,2:])
         action_info = dict()
+        for i in range(bs):
+            perm = torch.randperm(ego_trajs[i].shape[0],device=ego_traj_samples.device)
+            ego_traj_samples[i,:ego_trajs[i].shape[0]] = ego_traj_samples[i,perm]
+
         action_info["action_samples"] = {"positions":ego_traj_samples[...,:2],"yaws":ego_traj_samples[...,2:]}
         return action, action_info
 
 
 class ModelPredictiveController(Policy):
-    def __init__(self, device, step_time, predictor, *args, **kwargs):
+    def __init__(self, device, step_time, predictor, solver="casadi", *args, **kwargs):
         super().__init__(device, *args, **kwargs)
         self.device = device
         self.step_time = step_time
         self.predictor = predictor
+        self.solver=solver
+
 
     def eval(self):
         self.predictor.eval()
@@ -405,25 +536,49 @@ class ModelPredictiveController(Policy):
         agent_preds = TensorUtils.to_numpy(agent_preds.to_dict())
         obs_np = TensorUtils.to_numpy(obs_dict)
         plan = list()
+
+        if "coarse_plan" in kwargs:
+            coarse_plan = kwargs["coarse_plan"]
+            
+            ref_positions = TensorUtils.to_numpy(coarse_plan.positions)
+            ref_yaws = TensorUtils.to_numpy(coarse_plan.yaws)
+            mask = np.ones_like(ref_positions[...,0],dtype=np.bool)
+            ref_vel = dynamics.Unicycle.calculate_vel(ref_positions,ref_yaws,self.step_time,mask)
+            xref = np.concatenate((ref_positions,ref_vel,ref_yaws),-1)
+        else:
+            xref = None
+        x0 = batch_utils().get_current_states(obs_dict,dyn_type=dynamics.Unicycle)
+        x0 = TensorUtils.to_numpy(x0)
         for i in range(bs):
             planner = FTOCP(horizon, 1, self.step_time, obs_dict["extent"][i,1].item(), obs_dict["extent"][i,0].item())
             
-            x0 = torch.cat((obs_dict["history_positions"][i,0],obs_dict["curr_speed"][i:i+1],obs_dict["history_yaws"][i,0]))
-            x0 = TensorUtils.to_numpy(x0)
-            vdes = np.clip(x0[2],2.0,25.0)
-            if "ego_lanes" in obs_dict and not (obs_dict["ego_lanes"][i,0]==0).all():
-                lane = TensorUtils.to_numpy(obs_dict["ego_lanes"][i,0])
-                lane = np.concatenate([lane[:,:2],np.arctan2(lane[:,3],lane[:,2])[:,np.newaxis]],-1)
-                xref = PlanUtils.obtain_ref(lane, x0[0:2], vdes, horizon, self.step_time)
+            
+            x0_i = x0_i=x0[i]
+            if xref is not None:
+                xref_i = xref[i]
+                xref_extended = np.concatenate((x0_i[None,:],xref_i))
+                uref_i = dynamics.Unicycle.inverse_dyn(xref_extended[:-1],xref_extended[1:],self.step_time)
+                xref_i = np.clip(xref_i,planner.x_lb,planner.x_ub)
+                uref_i = np.clip(uref_i,planner.u_lb,planner.u_ub)
+                x0_guess = np.concatenate((x0_i[np.newaxis,:],xref_i.repeat(planner.M,axis=0)),0).flatten()
+                u0_guess = uref_i.repeat(planner.M,axis=0).flatten()
+                planner.xGuessTot = np.concatenate((x0_guess,u0_guess,np.zeros(planner.N*planner.M)))
+
             else:
-                s1 = (vdes * np.arange(1, horizon + 1) * self.step_time).reshape(-1,1)
-                xref = np.concatenate((np.cos(x0[3])*s1,np.sin(x0[3])*s1,np.zeros([s1.shape[0],2])),-1)
-                xref = xref+x0[np.newaxis,:]
+                vdes = np.clip(x0_i[2],2.0,25.0)
+                if "ego_lanes" in obs_dict and not (obs_dict["ego_lanes"][i,0]==0).all():
+                    lane = TensorUtils.to_numpy(obs_dict["ego_lanes"][i,0])
+                    lane = np.concatenate([lane[:,:2],np.arctan2(lane[:,3],lane[:,2])[:,np.newaxis]],-1)
+                    xref_i = PlanUtils.obtain_ref(lane, x0_i[0:2], vdes, horizon, self.step_time)
+                else:
+                    s1 = (vdes * np.arange(1, horizon + 1) * self.step_time).reshape(-1,1)
+                    xref_i = np.concatenate((np.cos(x0_i[3])*s1,np.sin(x0_i[3])*s1,np.zeros([s1.shape[0],2])),-1)
+                    xref_i = xref+x0_i[np.newaxis,:]
 
             agent_idx = np.where(obs_np["all_other_agents_types"][i]>0)[0]
             ypreds = agent_preds["positions"][i,agent_idx,np.newaxis]
             agent_extent = np.max(obs_np["all_other_agents_history_extents"][i,agent_idx,:,:2],axis=-2)
-            planner.buildandsolve(x0, ypreds, agent_extent, xref, np.ones(1))
+            planner.buildandsolve(x0_i, ypreds, agent_extent, xref_i, np.ones(1))
             xplan = planner.xSol[1:].reshape((horizon, 4))
             plan.append(TensorUtils.to_torch(xplan,device=self.device))
         plan = torch.stack(plan,0)
@@ -456,10 +611,9 @@ class HierSplineSamplingPolicy(Policy):
         ego_trajs = list()
         #TODO: paralellize this process
         for i in range(bs):
-            pos = obs_dict["history_positions"][i,0]
             vel = obs_dict["curr_speed"][i]
-            yaw = obs_dict["history_yaws"][i,0]
-            traj0 = torch.tensor([[pos[0], pos[1], vel, 0, yaw, 0., 0.]]).to(pos.device)
+
+            traj0 = torch.tensor([[0., 0., vel, 0, 0., 0., 0.]]).to(vel.device)
             lanes = TensorUtils.to_numpy(obs_dict["ego_lanes"][i])
             lanes = np.concatenate((lanes[...,:2],np.arctan2(lanes[...,3:],lanes[...,2:3])),-1)
             lanes = np.split(lanes,obs_dict["ego_lanes"].shape[1])
@@ -478,12 +632,13 @@ class HierSplineSamplingPolicy(Policy):
             else:
                 ego_trajs_i = torch.cat((obs_dict["target_positions"][i],obs_dict["target_yaws"][i]),-1).unsqueeze(0)
             ego_trajs.append(ego_trajs_i)
-        drivable_map = get_drivable_region_map(obs_dict["image"]).float()
+        if "drivable_map" in obs_dict:
+            drivable_map = obs_dict["drivable_map"].float()
+        else:    
+            drivable_map = batch_utils().get_drivable_region_map(obs_dict["image"]).float()
         dis_map = calc_distance_map(drivable_map)
         plan = list()
         for i in range(bs):
-            # import pdb
-            # pdb.set_trace()
             
             agent_idx = torch.where(obs_dict["all_other_agents_types"][i]>0)[0]
             agent_extent = torch.max(obs_dict["all_other_agents_history_extents"][i,agent_idx,:,:2],axis=-2)[0]
@@ -502,3 +657,5 @@ class HierSplineSamplingPolicy(Policy):
         plan = torch.stack(plan,0)
         action = Action(positions=plan[...,:2],yaws=plan[...,2:])
         return action, {}
+
+

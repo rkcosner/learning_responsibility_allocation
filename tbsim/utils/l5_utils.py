@@ -695,7 +695,10 @@ def get_current_states(batch: dict, dyn_type: dynamics.DynType) -> torch.Tensor:
 
 
 def get_current_states_all_agents(batch: dict, step_time, dyn_type: dynamics.DynType) -> torch.Tensor:
-    state_all = batch_to_raw_all_agents(batch, step_time)
+    if batch["history_positions"].ndim==3:
+        state_all = batch_to_raw_all_agents(batch, step_time)
+    else:
+        state_all = batch
     bs, na = state_all["curr_speed"].shape[:2]
     if dyn_type == dynamics.DynType.BICYCLE:
         current_states = torch.zeros(bs, na, 6).to(state_all["curr_speed"].device)  # [x, y, yaw, vel, dh, veh_len]
@@ -707,6 +710,7 @@ def get_current_states_all_agents(batch: dict, step_time, dyn_type: dynamics.Dyn
         current_states = torch.zeros(bs, na, 4).to(state_all["curr_speed"].device)  # [x, y, vel, yaw]
         current_states[:, :, :2] = state_all["history_positions"][:, :, -1]
         current_states[:, :, 2] = state_all["curr_speed"]
+        current_states[:,:,3:] = state_all["history_yaws"][:,:,-1]
     return current_states
 
 

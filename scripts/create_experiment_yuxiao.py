@@ -7,12 +7,24 @@ from tbsim.utils.experiment_utils import create_configs, ParamSearchPlan, ParamR
 def configs_to_search_nusc(base_cfg):
     """Override this with your hyperparameter search plan"""
     plan = ParamSearchPlan()
-    base_cfg.train.training.num_data_workers = 24
-    base_cfg.train.validation.num_data_workers = 8
+    base_cfg.train.training.num_data_workers = 1
+    base_cfg.train.validation.num_data_workers = 1
 
+    plan.add_const_param(Param("algo.history_num_frames", alias="ht", value=10))
+    plan.add_const_param(Param("algo.future_num_frames", alias="ft", value=20))
+    plan.add_const_param(Param("algo.step_time", alias="dt", value=0.1))
+    plan.add_const_param(Param("algo.loss_weights.yaw_reg_loss", alias="yrl", value=0.01))
+    # plan.add_const_param(Param("algo.dynamics.type", alias="dyn", value=None))
+    plan.add_const_param(Param("train.rollout.enabled", alias="rl", value=False))
+
+    # plan.extend(plan.compose_cartesian([
+    #     ParamRange("algo.vae.latent_dim", alias="vae_dim", range=[10,15,20]),
+    #     ParamRange("algo.model_architecture", alias="arch", range=["resnet50"]),
+    # ]))
     plan.extend(plan.compose_cartesian([
-        ParamRange("algo.vae.latent_dim", alias="vae_dim", range=[10,15,20]),
-        ParamRange("algo.model_architecture", alias="arch", range=["resnet50"]),
+        ParamRange("algo.perturb.OU.sigma", alias="sigma", range=[1.0,2.0,4.0]),
+        ParamRange("algo.loss_weights.EC_collision_loss", alias="EC_loss", range=[10.0,20.0,40.0]),
+        ParamRange("algo.dynamics.type", alias="dyn", range=[None,"Unicycle"]),
     ]))
 
     return plan.generate_configs(base_cfg=base_cfg)

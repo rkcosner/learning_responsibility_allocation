@@ -170,10 +170,13 @@ class Unicycle(Dynamics):
             mask_l[..., -1] = False
             mask_l = mask_l & mask
             vel = (
-                (mask_l & mask_r).unsqueeze(-1) * (vel_r + vel_l) / 2
-                + (mask_l & (~mask_r)).unsqueeze(-1) * vel_l
-                + (mask_r & (~mask_l)).unsqueeze(-1) * vel_r
+                np.expand_dims(mask_l & mask_r,-1) * (vel_r + vel_l) / 2
+                + np.expand_dims(mask_l & (~mask_r),-1) * vel_l
+                + np.expand_dims(mask_r & (~mask_l),-1) * vel_r
             )
         else:
             raise NotImplementedError
         return vel
+    @staticmethod
+    def inverse_dyn(x,xp,dt):
+        return (xp[...,2:]-x[...,2:])/dt

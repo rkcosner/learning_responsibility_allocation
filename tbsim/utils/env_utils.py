@@ -183,7 +183,7 @@ def rollout_episodes(
                     frames.extend(ims)
                 counter += n_step_action
             timers.toc("step")
-            print(timers)
+            # print(timers)
 
             done = env.is_done()
             
@@ -329,6 +329,7 @@ class RolloutCallback(pl.Callback):
                 for ei, episode_rendering in enumerate(renderings):
                     for i, scene_images in enumerate(episode_rendering):
                         video_fn = "{}_{}_{}.mp4".format(global_step, info["scene_index"][i], ei)
+                        
                         writer = get_writer(os.path.join(self._video_dir, video_fn), fps=10)
                         print("video to {}".format(os.path.join(self._video_dir, video_fn)))
                         for im in scene_images:

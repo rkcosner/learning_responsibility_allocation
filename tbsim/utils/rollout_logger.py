@@ -4,6 +4,8 @@ from copy import deepcopy
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.policies.common import RolloutAction
 
+from torch.nn.utils.rnn import pad_sequence
+
 
 class RolloutLogger(object):
     """Log trajectories and other essential info during rollout for visualization and evaluation"""
@@ -23,7 +25,11 @@ class RolloutLogger(object):
         if "agents" in obs and obs["agents"] is not None:
             for k in obs["agents"].keys():
                 if k in combined:
-                    combined[k] = np.concatenate((combined[k], obs["agents"][k]), axis=0)
+                    if obs["agents"][k] is not None:
+                        if combined[k] is not None:
+                            combined[k] = np.concatenate((combined[k], obs["agents"][k]), axis=0)
+                        else:
+                            combined[k] = obs["agents"][k]
                 else:
                     combined[k] = obs["agents"][k]
         return combined
@@ -46,10 +52,18 @@ class RolloutLogger(object):
                     samples = action.agents_info["action_samples"]
                     for k in samples:
                         if k in combined["action_samples"]:
+                            n = combined["action_samples"][k].shape[1]
+                            if samples[k].shape[1]>n:
+                                pad_size=list(combined["action_samples"][k].shape)
+                                pad_size[1] = samples[k].shape[1]-n
+                                combined["action_samples"][k] = np.concatenate((combined["action_samples"][k],np.zeros(pad_size)),1)
+                            elif samples[k].shape[1]<n:
+                                pad_size=list(samples[k].shape)
+                                pad_size[1] = n-samples[k].shape[1]
+                                samples[k] = np.concatenate((samples[k],np.zeros(pad_size)),1)
                             combined["action_samples"][k] = np.concatenate((combined["action_samples"][k], samples[k]), axis=0)
                         else:
                             combined["action_samples"][k] = samples[k]
-
         return combined
 
     def _maybe_initialize(self, obs):
@@ -77,9 +91,12 @@ class RolloutLogger(object):
         state["action_positions"] = action["action"]["positions"][:, [0]]
         state["action_yaws"] = action["action"]["yaws"][:, [0]]
         if "action_samples" in action:
-            # only collect up to 10 samples to save space
-            state["action_sample_positions"] = action["action_samples"]["positions"][:, :10]
-            state["action_sample_yaws"] = action["action_samples"]["yaws"][:, :10]
+            # only collect up to 20 samples to save space
+            # state["action_sample_positions"] = action["action_samples"]["positions"][:, :20]
+            # state["action_sample_yaws"] = action["action_samples"]["yaws"][:, :20]
+
+            state["action_sample_positions"] = action["action_samples"]["positions"]
+            state["action_sample_yaws"] = action["action_samples"]["yaws"]
 
         for si in self._scene_indices:
 
@@ -100,7 +117,14 @@ class RolloutLogger(object):
                     # otherwise, use the previous state as a template and only assign values for agents
                     # in the current state (i.e., use the previous value for missing agents)
                     prev_state = np.copy(self._scene_buffer[si][k][-1])
-                    prev_state[reassignment_index] = scene_state[k]
+                    if prev_state.ndim>1:
+                        if prev_state.shape[1]>scene_state[k].shape[1]:
+                            prev_state[reassignment_index,:scene_state[k].shape[1]] = scene_state[k]
+                        else:
+                            prev_state[reassignment_index] = scene_state[k][:,:prev_state.shape[1]]
+
+                    else:
+                        prev_state[reassignment_index] = scene_state[k]
                     self._scene_buffer[si][k].append(prev_state)
 
     def get_serialized_scene_buffer(self):
@@ -123,10 +147,19 @@ class RolloutLogger(object):
             serialized[si] = dict()
             for k in self._scene_buffer[si]:
                 bf = [e[:, None] for e in self._scene_buffer[si][k]]
-                serialized[si][k] = np.concatenate(bf, axis=1)
+
+                if not all(elem.shape==bf[0].shape for elem in bf):
+                    import pdb
+                    pdb.set_trace()
+                    bf_torch = TensorUtils.to_tensor(TensorUtils.join_dimensions(bf,0,2))
+                    bf_padded = pad_sequence(bf_torch,padding_value=0.0)
+                    serialized[si][k] = TensorUtils.to_numpy(bf_padded)
+                else:
+                    serialized[si][k] = np.concatenate(bf, axis=1)
                 if buffer_len is None:
                     buffer_len = serialized[si][k].shape[1]
                 assert serialized[si][k].shape[1] == buffer_len
+
 
         self._serialized_scene_buffer = serialized
         return deepcopy(self._serialized_scene_buffer)

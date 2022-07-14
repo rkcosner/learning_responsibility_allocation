@@ -2,7 +2,12 @@ wandb/
 videos/
 figures/
 checkpoints
+experiments/
+visualizations/
 results/
+.vscode
+scripts/create_experiment_yuxiao.py
+scripts/launch_experiments.py
 ## config files
 #*.yaml
 
@@ -56,3 +61,18 @@ coverage.xml
 
 # Sphinx documentation
 docs/_build/
+scripts/create_evaluation.py
+scripts/evaluate.py
+tbsim/configs/eval_configs.py
+
+l5_rasterized_tree_vae_trained_models/test/run0/logs/log.txt
+scripts/create_evaluation.py
+scripts/create_evaluation.py
+tbsim/configs/eval_configs.py
+generate_all_evaluations.sh
+generate_all_evaluations_l5kit.sh
+generate_all_evaluations_nusc.sh
+plot_result_l5kit.ipynb
+plot_result_nusc.ipynb
+plot_result.ipynb
+test.py

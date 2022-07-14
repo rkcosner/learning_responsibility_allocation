@@ -10,7 +10,16 @@ from tbsim.utils.loss_utils import goal_reaching_loss, trajectory_loss, collisio
 
 
 def generate_proxy_mask(orig_loc, radius,mode="L1"):
-    # TODO (@yuxiao): comments
+    """ mask out area near the existing samples to boost diversity
+
+    Args:
+        orig_loc (torch.tensor): original sample location, 1 for sample, 0 for background
+        radius (int): radius in pixel space
+        mode (str, optional): Defaults to "L1".
+
+    Returns:
+        torch.tensor[dtype=torch.bool]: mask for generating new samples
+    """
     dis_map = calc_distance_map(orig_loc,max_dis = radius+1,mode=mode)
     return dis_map<=radius
 

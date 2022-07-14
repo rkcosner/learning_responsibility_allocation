@@ -10,7 +10,7 @@ class FTOCP(object):
 		- buildNonlinearProgram: builds the nonlinear program solved by the above solve methos
 		- model: given x_t and u_t computes x_{t+1} = Ax_t + Bu_t
 	"""
-	def __init__(self, N, M, dt,W,L):
+	def __init__(self, N, M, dt,W,L,max_steer=0.5, max_yawvel=8, acce_bound=[-6,4],vbound=[-5.,40.]):
 		# Define variables
 		self.N    = N
 		self.dt   = dt
@@ -20,14 +20,16 @@ class FTOCP(object):
 		self.xRef = None
 		self.W    = W
 		self.L    = L
-
+		self.max_steer = max_steer
+		self.max_yawvel = max_yawvel
+		self.acce_bound = acce_bound
 		self.obs  = list()
-		self.x_lb = [-np.inf,-np.inf,0,-2*np.pi]
-		self.x_ub = [np.inf,np.inf,40,2*np.pi]
 
-		self.u_lb = [-5.0,-0.1]
-		self.u_ub = [5.0,0.1]
+		self.x_lb = [-np.inf,-np.inf,vbound[0],-2*np.pi]
+		self.x_ub = [np.inf,np.inf,vbound[1],2*np.pi]
 
+		self.u_lb = [self.acce_bound[0],-self.max_steer*vbound[1]]
+		self.u_ub = [self.acce_bound[1],self.max_steer*vbound[1]]
 
 
 		self.feasible = 0
@@ -74,8 +76,21 @@ class FTOCP(object):
 				constraint = vertcat(constraint,xbr[i][j+1,1]-xbr[i][j,1]-self.dt*xbr[i][j,2]*casadi.sin(xbr[i][j,3]))
 				constraint = vertcat(constraint,xbr[i][j+1,2]-xbr[i][j,2]-self.dt*ubr[i][j,0])
 				constraint = vertcat(constraint,xbr[i][j+1,3]-xbr[i][j,3]-self.dt*ubr[i][j,1])
-		eq_count = constraint.shape[0]
+		dyn_constr_count = constraint.shape[0]
 
+		for i in range(M):
+
+			constraint = vertcat(constraint,ubr[i][0,1]-softmax(x0[2],1.)*self.max_steer)
+			constraint = vertcat(constraint,-ubr[i][0,1]-softmax(x0[2],1.)*self.max_steer)
+			constraint = vertcat(constraint,ubr[i][0,1]*x0[2]-self.max_yawvel)
+			constraint = vertcat(constraint,-ubr[i][0,1]*x0[2]-self.max_yawvel)
+			for j in range(N-1):
+				constraint = vertcat(constraint,ubr[i][j,1]-softmax(xbr[i][j+1,2],1.)*self.max_steer)
+				constraint = vertcat(constraint,-ubr[i][j,1]-softmax(xbr[i][j+1,2],1.)*self.max_steer)
+				constraint = vertcat(constraint,ubr[i][j,1]*xbr[i][j+1,2]-self.max_yawvel)
+				constraint = vertcat(constraint,-ubr[i][j,1]*xbr[i][j+1,2]-self.max_yawvel)
+
+		ubound_constr_count = constraint.shape[0]-dyn_constr_count
 		# Obstacle constraints
 
 		if Nnodes>0:
@@ -85,24 +100,25 @@ class FTOCP(object):
 						constraint = vertcat(constraint, ( ( xbr[i][k,0] - ypreds[j][i][k,0] )**2/(self.L/1.414+agent_extent[j,0]/1.414)**2 +
 														   ( xbr[i][k,1] - ypreds[j][i][k,1] )**2/(self.W/1.414+agent_extent[j,1]/1.414)**2 + slack[i,k] ) )
 
-		ineq_count = constraint.shape[0]-eq_count
+		collision_count = constraint.shape[0]-dyn_constr_count-ubound_constr_count
 
 		# Defining Cost
 		cost = 0
 		cost_x   = 1.
 		cost_y   = 5.
-		cost_acc = 5.0
-		cost_ste = 20.0
+		cost_v   = 1.
+		cost_acc = 0.5
+		cost_ste = 2.0
 		cost_slack = 1e6
 		cost_R = DM([cost_acc,cost_ste])
-		cost_Q = DM([cost_x,cost_y])
+		cost_Q = DM([cost_x,cost_y,cost_v])
 		cost = sum1(u0**2*cost_R)
 		for i in range(M):
 			for k in range(N-1):
 
-				cost+=(sum1((xbr[i][k,:2].T-xdes[k][:2])**2*cost_Q)+sum1(ubr[i][k,:].T**2*cost_R)+slack[i,k]*cost_slack)*w[i]
+				cost+=(sum1((xbr[i][k,:3].T-xdes[k][:3])**2*cost_Q)+sum1(ubr[i][k,:].T**2*cost_R)+slack[i,k]*cost_slack)*w[i]
 
-			cost+= (sum1((xbr[i][N-1,:2].T-xdes[N-1][:2])**2*cost_Q)+slack[i,N-1]*cost_slack)*w[i]
+			cost+= (sum1((xbr[i][N-1,:3].T-xdes[N-1][:3])**2*cost_Q)+slack[i,N-1]*cost_slack)*w[i]
 
 
 
@@ -114,12 +130,11 @@ class FTOCP(object):
 		self.solver = nlpsol('solver', 'ipopt', nlp, opts)
 
 		# Set lower bound of inequality constraint to zero to force: 1) n*N state dynamics and 2) inequality constraints (set to zero as we have slack)
-		self.lbg_dyanmics = [0]*eq_count + [1]*ineq_count
-		self.ubg_dyanmics = [0]*eq_count + [10000]*ineq_count
+		self.lbg_dyanmics = [0]*dyn_constr_count + [-10000]*ubound_constr_count + [1]*collision_count
+		self.ubg_dyanmics = [0]*dyn_constr_count + [0]*ubound_constr_count + [10000]*collision_count
 
 		self.lbx = x0_val.tolist() + self.x_lb*(N*M) + self.u_lb*(M*(N-1)+1) + [0]*(N*M)
 		self.ubx = x0_val.tolist() + self.x_ub*(N*M) + self.u_ub*(M*(N-1)+1) + [np.inf]*(N*M)
-		
 		if self.xGuessTot is not None and self.xGuessTot.shape[0]==nlp['x'].shape[0]:
 			sol = self.solver(lbx=self.lbx, ubx=self.ubx, lbg=self.lbg_dyanmics, ubg=self.ubg_dyanmics, x0 = self.xGuessTot)
 
@@ -141,7 +156,6 @@ class FTOCP(object):
 		self.slack = x[n*(M*N+1)+d*(M*(N-1)+1):]
 
 		self.xGuessTot = x
-
 		# Check solution flag
 		if (self.solver.stats()['success']):
 			self.feasible = 1
@@ -149,3 +163,5 @@ class FTOCP(object):
 			self.feasible = 0
 
 
+def softmax(x,y,gamma=10):
+	return (exp(x*gamma)*x+exp(y*gamma)*y)/(exp(x*gamma)+exp(y*gamma))

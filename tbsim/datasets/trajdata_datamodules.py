@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 from tbsim.configs.base import TrainConfig
 
-from avdata import AgentBatch, AgentType, UnifiedDataset
+from trajdata import AgentBatch, AgentType, UnifiedDataset
 
 
 class UnifiedDataModule(pl.LightningDataModule):
@@ -33,16 +33,18 @@ class UnifiedDataModule(pl.LightningDataModule):
         neighbor_distance = data_cfg.max_agents_distance
 
         kwargs = dict(
-            desired_data=[data_cfg.avdata_source_train],
+            centric = data_cfg.centric,
+            desired_data=[data_cfg.trajdata_source_train],
             desired_dt=data_cfg.step_time,
             future_sec=(future_sec, future_sec),
             history_sec=(history_sec, history_sec),
             data_dirs={
-                data_cfg.avdata_source_root: data_cfg.dataset_path,
+                data_cfg.trajdata_source_root: data_cfg.dataset_path,
             },
             only_types=[AgentType.VEHICLE],
             agent_interaction_distances=defaultdict(lambda: neighbor_distance),
             incl_map=True,
+            incl_neighbor_map = self._data_config.incl_neighbor_map,
             map_params={
                 "px_per_m": int(1 / data_cfg.pixel_size),
                 "map_size_px": data_cfg.raster_size,
@@ -50,12 +52,14 @@ class UnifiedDataModule(pl.LightningDataModule):
                 "offset_frac_xy": data_cfg.raster_center
             },
             verbose=False,
+            max_agent_num = 1+data_cfg.other_agents_num,
+            vectorize_lane = data_cfg.vectorize_lane,
             num_workers=os.cpu_count(),
         )
         print(kwargs)
         self.train_dataset = UnifiedDataset(**kwargs)
 
-        kwargs["desired_data"] = [data_cfg.avdata_source_valid]
+        kwargs["desired_data"] = [data_cfg.trajdata_source_valid]
         kwargs["rebuild_cache"] = self._train_config.on_ngc
         self.valid_dataset = UnifiedDataset(**kwargs)
 

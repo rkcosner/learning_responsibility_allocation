@@ -528,7 +528,8 @@ def GMM_loglikelihood(x, m, v, pi, avails=None, mode="mean"):
 
 
 class DistanceBuffer(object):
-    """TODO (@yuxiao): add comments"""
+    """ class that stores the distance given x,y location
+    """
     def __init__(self):
         self._buffer = dict()
 
@@ -546,12 +547,22 @@ class DistanceBuffer(object):
 
 
 class RandomPerturbation(object):
-    """TODO (@yuxiao): add comments"""
+    """
+    Add Gaussian noise to the trajectory
+    """
     def __init__(self, std: np.ndarray):
         assert std.shape == (3,) and np.all(std >= 0)
         self.std = std
 
     def perturb(self, obs):
+        """Given the observation object, add Gaussian noise to positions and yaws
+
+        Args:
+            obs(Dict[torch.tensor]): observation dict
+
+        Returns:
+            obs(Dict[torch.tensor]): perturbed observation
+        """
         obs = dict(obs)
         target_traj = np.concatenate((obs["target_positions"], obs["target_yaws"]), axis=-1)
         std = np.ones_like(target_traj) * self.std[None, :]
@@ -563,27 +574,60 @@ class RandomPerturbation(object):
 
 
 class OrnsteinUhlenbeckPerturbation(object):
-    """TODO (@yuxiao): add comments"""
+    """
+    Add Ornstein-Uhlenbeck noise to the trajectory
+    """
     def __init__(self,theta,sigma):
+        """
+        Args:
+            theta (np.ndarray): converging factor of the OU process
+            sigma (np.ndarray): magnitude of the Gaussian noise added at each step
+        """
         assert theta.shape == (3,) and sigma.shape == (3,)
         self.theta = theta
         self.sigma = sigma
         self.buffers = dict()
 
     def perturb(self,obs):
-        target_traj = np.concatenate((obs["target_positions"], obs["target_yaws"]), axis=-1)
-        bs = target_traj.shape[0]
-        T = target_traj.shape[-2]
-        if bs in self.buffers:
-            buffer = self.buffers[bs]
-        else:
-            buffer = [np.zeros([bs,3])]
-            self.buffers[bs]=buffer
-        while len(buffer)<T:
-            buffer.append(buffer[-1]-self.theta*buffer[-1]+np.random.randn(bs,3)*self.sigma)
-        noise = np.stack(buffer,axis=1)
-        target_traj += noise[...,:T,:]
-        obs["target_positions"] = target_traj[..., :2].astype(np.float32)
-        obs["target_yaws"] = target_traj[..., 2:].astype(np.float32)
-        buffer.pop(0)
+        """Given the observation object, add Gaussian noise to positions and yaws
+
+        Args:
+            obs(Dict[torch.tensor]): observation dict
+
+        Returns:
+            obs(Dict[torch.tensor]): perturbed observation
+        """
+        if isinstance(obs["target_positions"],np.ndarray):
+            target_traj = np.concatenate((obs["target_positions"], obs["target_yaws"]), axis=-1)
+            bs = target_traj.shape[0]
+            T = target_traj.shape[-2]
+            if bs in self.buffers:
+                buffer = self.buffers[bs]
+            else:
+                buffer = [np.zeros([bs,3])]
+                self.buffers[bs]=buffer
+            while len(buffer)<T:
+                buffer.append(buffer[-1]-self.theta*buffer[-1]+np.random.randn(bs,3)*self.sigma)
+            noise = np.stack(buffer,axis=1)
+            target_traj += noise[...,:T,:]
+            obs["target_positions"] = target_traj[..., :2].astype(np.float32)
+            obs["target_yaws"] = target_traj[..., 2:].astype(np.float32)
+            buffer.pop(0)
+        elif isinstance(obs["target_positions"],torch.Tensor):
+
+            target_traj = torch.cat((obs["target_positions"], obs["target_yaws"]), dim=-1)
+            bs = target_traj.shape[0]
+            T = target_traj.shape[-2]
+            if bs in self.buffers:
+                buffer = self.buffers[bs]
+            else:
+                buffer = [torch.zeros([bs,3])]
+                self.buffers[bs]=buffer
+            while len(buffer)<T:
+                buffer.append(buffer[-1]-self.theta*buffer[-1]+torch.randn(bs,3)*self.sigma)
+            noise = torch.stack(buffer,dim=1)
+            target_traj += noise[...,:T,:].to(target_traj.device)
+            obs["target_positions"] = target_traj[..., :2].type(torch.float32)
+            obs["target_yaws"] = target_traj[..., 2:].type(torch.float32)
+            buffer.pop(0)
         return obs

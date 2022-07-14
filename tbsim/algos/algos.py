@@ -16,6 +16,7 @@ from tbsim.models.rasterized_models import (
     RasterizedDiscreteVAEModel,
     RasterizedECModel,
     RasterizedTreeVAEModel,
+    RasterizedSceneTreeModel,
 )
 from tbsim.models.base_models import (
     MLPTrajectoryDecoder,
@@ -1314,6 +1315,7 @@ class TreeVAETrafficModel(pl.LightningModule):
             info (dict): dictionary of relevant inputs, outputs, and losses
                 that might be relevant for logging
         """
+        batch = batch_utils().parse_batch(batch)
         pout = self.nets["policy"](batch)
         losses = self.nets["policy"].compute_losses(pout, batch)
         # take samples to measure trajectory diversity
@@ -1392,6 +1394,179 @@ class TreeVAETrafficModel(pl.LightningModule):
         
         metrics["mode_max"] = prob.max(1).mean()-1/prob.shape[1]
 
+        return metrics
+
+    def get_action(self, obs_dict, sample=True, num_action_samples=1, plan_samples=None, **kwargs):
+        obs_dict = dict(obs_dict)
+        if plan_samples is not None and self.algo_config.goal_conditional:
+            assert isinstance(plan_samples, Plan)
+            obs_dict["target_positions"] = plan_samples.positions
+            obs_dict["target_yaws"] = plan_samples.yaws
+            obs_dict["target_availabilities"] = plan_samples.availabilities
+
+        if sample:
+            preds = self.nets["policy"].sample(obs_dict, n=num_action_samples)["predictions"]  # [B, N, T, 3]
+            action_preds = TensorUtils.map_tensor(preds, lambda x: x[:, 0])  # use the first sample as the action
+            info = dict(
+                action_samples=Action(
+                    positions=preds["positions"],
+                    yaws=preds["yaws"]
+                )
+            )
+        else:
+            # otherwise, sample action from posterior
+            action_preds = self.nets["policy"].predict(obs_dict)["predictions"]
+            info = dict()
+
+        action = Action(
+            positions=action_preds["positions"],
+            yaws=action_preds["yaws"]
+        )
+        return action, info
+
+
+
+class SceneTreeTrafficModel(pl.LightningModule):
+    def __init__(self, algo_config, modality_shapes):
+        super(SceneTreeTrafficModel, self).__init__()
+        # assert modality_shapes["image"][0] == 15
+
+        self.algo_config = algo_config
+        self.nets = nn.ModuleDict()
+        self.nets["policy"] = RasterizedSceneTreeModel(
+            algo_config=algo_config,
+            modality_shapes=modality_shapes,
+            weights_scaling=[1.0, 1.0, 1.0],
+        )
+    @property
+    def checkpoint_monitor_keys(self):
+        return {"valLoss": "val/losses_prediction_loss"}
+
+    def forward(self, obs_dict):
+        return self.nets["policy"](obs_dict)["predictions"]
+
+    def predict(self,obs,**kwargs):
+        return TensorUtils.detach(self.nets["policy"](obs,predict=True,**kwargs))
+
+
+
+    def training_step(self, batch, batch_idx):
+        """
+        Training on a single batch of data.
+
+        Args:
+            batch (dict): dictionary with torch.Tensors sampled
+                from a data loader and filtered by @process_batch_for_training
+
+            batch_idx (int): training step number - required by some Algos that need
+                to perform staged training and early stopping
+
+        Returns:
+            info (dict): dictionary of relevant inputs, outputs, and losses
+                that might be relevant for logging
+        """
+        batch = batch_utils().parse_batch(batch)
+        pout = self.nets["policy"](batch)
+        losses = self.nets["policy"].compute_losses(pout, batch)
+        # take samples to measure trajectory diversity
+        with torch.no_grad():
+            samples = self.nets["policy"].sample(batch, n=self.algo_config.vae.num_eval_samples)
+        total_loss = 0.0
+        for lk, l in losses.items():
+            loss = l * self.algo_config.loss_weights[lk]
+            self.log("train/losses_" + lk, loss)
+            total_loss += loss
+
+        metrics = self._compute_metrics(pout, samples, batch)
+        for mk, m in metrics.items():
+            self.log("train/metrics_" + mk, m)
+
+        return total_loss
+
+    def validation_step(self, batch, batch_idx):
+        batch = batch_utils().parse_batch(batch)
+        pout = self.nets["policy"](batch)
+        losses = TensorUtils.detach(self.nets["policy"].compute_losses(pout, batch))
+        with torch.no_grad():
+            samples = self.nets["policy"].sample(batch, n=self.algo_config.vae.num_eval_samples)
+        metrics = self._compute_metrics(pout, samples, batch)
+        return {"losses": losses, "metrics": metrics}
+
+    def validation_epoch_end(self, outputs) -> None:
+        for k in outputs[0]["losses"]:
+            m = torch.stack([o["losses"][k] for o in outputs]).mean()
+            self.log("val/losses_" + k, m)
+
+        for k in outputs[0]["metrics"]:
+            m = np.stack([o["metrics"][k] for o in outputs]).mean()
+            self.log("val/metrics_" + k, m)
+
+    def configure_optimizers(self):
+        optim_params = self.algo_config.optim_params["policy"]
+        return optim.Adam(
+            params=self.parameters(),
+            lr=optim_params["learning_rate"]["initial"],
+            weight_decay=optim_params["regularization"]["L2"],
+        )
+
+    def _compute_metrics(self, pred_batch, sample_batch, data_batch):
+        metrics = {}
+        
+        total_horizon = self.nets["policy"].stage*self.nets["policy"].num_frames_per_stage
+        if data_batch["target_positions"].ndim==3:
+            gt = torch.cat((data_batch["target_positions"].unsqueeze(1),data_batch["all_other_agents_future_positions"]),1)
+            avail = torch.cat((data_batch["target_availabilities"].unsqueeze(1),data_batch["all_other_agents_future_availability"]),1)*pred_batch["agent_avail"].unsqueeze(-1)
+        elif data_batch["target_positions"].ndim==4:
+            gt = data_batch["target_positions"]
+            avail = data_batch["target_availabilities"]
+        gt = TensorUtils.to_numpy(gt)
+        gt = gt[...,:total_horizon,:]
+        
+        avail = TensorUtils.to_numpy(avail)
+        avail = avail[...,:total_horizon]
+        
+        # compute ADE & FDE based on posterior params
+        
+        sample_preds = TensorUtils.to_numpy(sample_batch["predictions"]["positions"])
+        preds = TensorUtils.to_numpy(pred_batch["predictions"]["positions"])
+        z = TensorUtils.to_numpy(torch.argmax(pred_batch["p"],-1))
+        bs,M= preds.shape[:2]
+        idx = np.tile(z[:,0].reshape(bs,1,1,1,1),(1,1,*preds.shape[-3:]))
+        pred_selected = np.take_along_axis(preds[:,0],idx,1)
+
+        prob = TensorUtils.to_numpy(sample_batch["p"])
+        pred_prob = TensorUtils.to_numpy(pred_batch["p"])
+        
+        metrics["ego_ADE"] = Metrics.single_mode_metrics(
+            Metrics.batch_average_displacement_error, 
+            gt.reshape(-1,total_horizon,2), pred_selected.reshape(-1,total_horizon,2), avail.reshape(-1,total_horizon)
+        ).mean()
+        metrics["ego_FDE"] = Metrics.single_mode_metrics(
+            Metrics.batch_final_displacement_error, 
+            gt.reshape(-1,total_horizon,2), pred_selected.reshape(-1,total_horizon,2), avail.reshape(-1,total_horizon)
+        ).mean()
+        
+        # compute ADE & FDE based on trajectory samples
+        
+        fake_prob = prob/prob.sum(-1,keepdims=True)
+        n = prob.shape[-1]
+        Na = preds.shape[-3]
+        gt_tiled = np.tile(gt,(M,1,1,1)).reshape(-1,total_horizon,2)
+        fake_prob = np.tile(fake_prob.reshape(-1,n),(Na,1))
+        sample_pred_tiled = TensorUtils.join_dimensions(sample_preds.swapaxes(2,3),0,3) 
+        avail_tiled = np.tile(avail,(M,1,1)).reshape(-1,avail.shape[-1])
+        metrics["ego_avg_ADE"] = Metrics.batch_average_displacement_error(gt_tiled, sample_pred_tiled, fake_prob, avail_tiled, "mean").mean()
+        metrics["ego_min_ADE"] = Metrics.batch_average_displacement_error(gt_tiled, sample_pred_tiled, fake_prob, avail_tiled, "oracle").mean()
+        metrics["ego_avg_FDE"] = Metrics.batch_final_displacement_error(gt_tiled, sample_pred_tiled, fake_prob, avail_tiled, "mean").mean()
+        metrics["ego_min_FDE"] = Metrics.batch_final_displacement_error(gt_tiled, sample_pred_tiled, fake_prob, avail_tiled, "oracle").mean()
+
+        # compute diversity scores based on trajectory samples
+        metrics["ego_avg_ATD"] = Metrics.batch_average_diversity(gt_tiled, sample_pred_tiled, fake_prob, avail_tiled, "mean").mean()
+        metrics["ego_max_ATD"] = Metrics.batch_average_diversity(gt_tiled, sample_pred_tiled, fake_prob, avail_tiled, "max").mean()
+        metrics["ego_avg_FTD"] = Metrics.batch_final_diversity(gt_tiled, sample_pred_tiled, fake_prob, avail_tiled, "mean").mean()
+        metrics["ego_max_FTD"] = Metrics.batch_final_diversity(gt_tiled, sample_pred_tiled, fake_prob, avail_tiled, "max").mean()
+        
+        metrics["mode_max"] = pred_prob.max(-1).mean()-1/pred_prob.shape[-1]
         return metrics
 
     def get_action(self, obs_dict, sample=True, num_action_samples=1, plan_samples=None, **kwargs):

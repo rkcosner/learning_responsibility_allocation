@@ -886,6 +886,49 @@ class PosteriorEncoder(nn.Module):
         feat = torch.cat((traj_feat, condition_features), dim=-1)
         return self.mlp(feat)
 
+class ScenePosteriorEncoder(nn.Module):
+    """Scene Posterior Encoder (x, x_c -> q) for CVAE"""
+
+    def __init__(
+            self,
+            condition_dim: int,
+            trajectory_shape: tuple,  # [T, D]
+            output_shapes: OrderedDict,
+            aggregate_func="max",
+            mlp_layer_dims: tuple = (128, 128),
+            rnn_hidden_size: int = 100
+    ) -> None:
+        super(ScenePosteriorEncoder, self).__init__()
+        self.trajectory_shape = trajectory_shape
+        self.transformer = SimpleTransformer(src_dim=rnn_hidden_size + condition_dim)
+        self.aggregate_func = aggregate_func
+
+        # TODO: history encoder
+        self.traj_encoder = RNNTrajectoryEncoder(
+            trajectory_dim=trajectory_shape[-1],
+            rnn_hidden_size=rnn_hidden_size
+        )
+        self.mlp = SplitMLP(
+            input_dim=(rnn_hidden_size + condition_dim),
+            output_shapes=output_shapes,
+            layer_dims=mlp_layer_dims,
+            output_activation=nn.ReLU
+        )
+
+    def forward(self, inputs, condition_features, mask, pos) -> Dict[str, torch.Tensor]:
+        bs,Na,T = inputs["trajectories"].shape[:3]
+
+        traj_feat = self.traj_encoder(TensorUtils.join_dimensions(inputs["trajectories"],0,2))
+        feat = torch.cat((traj_feat, TensorUtils.join_dimensions(condition_features,0,2)), dim=-1).reshape(bs,Na,-1)
+
+        feat = self.transformer(feat,mask,pos)+feat
+        if self.aggregate_func=="max":
+            feat = feat.max(1)[0]
+        elif self.aggregate_func=="mean":
+            feat = feat.mean(1)
+
+        return self.mlp(feat)
+
 
 class ConditionEncoder(nn.Module):
     """Condition Encoder (x -> c) for CVAE"""
@@ -970,9 +1013,14 @@ class ECEncoder(nn.Module):
             goal_feat = self.goal_encoder(condition_inputs["goal"])
             c_feat = torch.cat([c_feat, goal_feat], dim=-1)
         if "cond_traj" in condition_inputs and condition_inputs["cond_traj"] is not None:
-            bs,Na,T,D = condition_inputs["cond_traj"].shape
-            EC_feat = self.traj_encoder(condition_inputs["cond_traj"].reshape(-1,T,D)).reshape(bs,Na,-1)
-            EC_feat = torch.cat((EC_feat,torch.zeros([bs,1,self.EC_dim]).to(EC_feat.device)),1)
+            if condition_inputs["cond_traj"].ndim==3:
+                EC_feat = self.traj_encoder(condition_inputs["cond_traj"]).unsqueeze(1)
+            elif condition_inputs["cond_traj"].ndim==4:
+                bs,M,T,D = condition_inputs["cond_traj"].shape
+                EC_feat = self.traj_encoder(condition_inputs["cond_traj"].reshape(-1,T,D)).reshape(bs,M,-1)
+                
+                EC_feat = EC_feat*(condition_inputs["cond_traj"][...,0]!=0).any(-1).unsqueeze(-1)
+                EC_feat = torch.cat((EC_feat,torch.zeros([bs,1,self.EC_dim]).to(EC_feat.device)),1)
         else:
             bs = c_feat.shape[0]
             EC_feat = torch.zeros([bs,1,self.EC_dim]).to(c_feat.device)
@@ -1008,8 +1056,8 @@ class AgentTrajEncoder(nn.Module):
             self.transformer = None
 
     def forward(self, agent_trajs):
-        bs,Na,T,D = agent_trajs.shape
-        feat = self.traj_encoder(agent_trajs.reshape(-1,T,D)).reshape(bs,Na,-1)
+        bs,M,T,D = agent_trajs.shape
+        feat = self.traj_encoder(agent_trajs.reshape(-1,T,D)).reshape(bs,M,-1)
         if self.transformer is not None:
             agent_pos = agent_trajs[:,:,0,:2]
             avails = (agent_pos!=0).any(-1)
@@ -1293,10 +1341,10 @@ class MLPECTrajectoryDecoder(TrajectoryDecoder):
             
             preds = self.mlp(inputs)
             if EC_feat is not None:
-                bs,Na = EC_feat.shape[:2]
+                bs,M = EC_feat.shape[:2]
 
-                # EC_feat = self.traj_encoder(cond_traj.reshape(-1,T,D)).reshape(bs,Na,-1)
-                inputs_tile = inputs.unsqueeze(1).tile(1,Na,1)
+                # EC_feat = self.traj_encoder(cond_traj.reshape(-1,T,D)).reshape(bs,M,-1)
+                inputs_tile = inputs.unsqueeze(1).tile(1,M,1)
                 EC_feat = torch.cat((inputs_tile,EC_feat),dim=-1)
                 EC_preds = TensorUtils.time_distributed(EC_feat, self.offsetmlp)
                 EC_preds["trajectories"] = EC_preds["trajectories"] + preds["trajectories"].unsqueeze(1)
@@ -1308,12 +1356,12 @@ class MLPECTrajectoryDecoder(TrajectoryDecoder):
             preds = TensorUtils.time_distributed(inputs, self.mlp)
             if EC_feat is not None:
                 assert EC_feat.ndim==4
-                bs,A,Na= EC_feat.shape[:3]
-                # EC_feat = self.traj_encoder(cond_traj.reshape(-1,T,D)).reshape(bs,Na,-1)
-                inputs_tile = inputs.tile(1,Na,1)
+                bs,A,M= EC_feat.shape[:3]
+                # EC_feat = self.traj_encoder(cond_traj.reshape(-1,T,D)).reshape(bs,M,-1)
+                inputs_tile = inputs.tile(1,M,1)
                 EC_feat = torch.cat((inputs_tile,EC_feat),dim=-1)
                 EC_preds = TensorUtils.time_distributed(EC_feat, self.offsetmlp)
-                EC_preds = reshape_dimensions(EC_preds,1,2,(A,Na))
+                EC_preds = reshape_dimensions(EC_preds,1,2,(A,M))
                 EC_preds["trajectories"] = EC_preds["trajectories"] + preds["trajectories"].unsqueeze(2)
             else:
                 EC_preds = None

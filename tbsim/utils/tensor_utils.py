@@ -361,6 +361,7 @@ def to_numpy(x, ignore_if_unspecified=False):
             torch.Tensor: f,
             np.ndarray: lambda x: x,
             type(None): lambda x: x,
+            str: lambda x: x,
         },
         ignore_if_unspecified=ignore_if_unspecified
     )

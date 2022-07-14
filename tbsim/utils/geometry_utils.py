@@ -401,3 +401,28 @@ def calc_distance_map(road_flag,max_dis = 10,mode="L1"):
             out[...,:-1,1:] = torch.min(out[...,:-1,1:],out[...,1:,:-1]+1)
 
     return out
+
+
+def transform_matrices(angles: torch.Tensor, translations: torch.Tensor) -> torch.Tensor:
+    """Creates a 3x3 transformation matrix for each angle and translation in the input.
+
+    Args:
+        angles (Tensor): The (N,)-shaped angles tensor to rotate points by.
+        translations (Tensor): The (N,2)-shaped translations to shift points by.
+
+    Returns:
+        Tensor: The Nx3x3 transformation matrices.
+    """
+    cos_vals = torch.cos(angles)
+    sin_vals = torch.sin(angles)
+    last_rows = torch.tensor(
+        [[0.0, 0.0, 1.0]], dtype=angles.dtype, device=angles.device
+    ).expand((angles.shape[0], -1))
+    return torch.stack(
+        [
+            torch.stack([cos_vals, -sin_vals, translations[:, 0]], dim=-1),
+            torch.stack([sin_vals, cos_vals, translations[:, 1]], dim=-1),
+            last_rows,
+        ],
+        dim=-2,
+    )

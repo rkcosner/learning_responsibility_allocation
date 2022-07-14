@@ -1,7 +1,7 @@
 import torch
 
 import tbsim.utils.l5_utils as l5_utils
-import tbsim.utils.avdata_utils as av_utils
+import tbsim.utils.trajdata_utils as av_utils
 from tbsim import dynamics as dynamics
 from tbsim.configs.base import ExperimentConfig
 
@@ -11,17 +11,17 @@ BATCH_TYPE = None
 
 def set_global_batch_type(batch_type):
     global BATCH_TYPE
-    assert batch_type in ["avdata", "l5kit"]
+    assert batch_type in ["trajdata", "l5kit"]
     BATCH_TYPE = batch_type
 
 
 def batch_utils():
-    if BATCH_TYPE == "avdata":
-        return AVDataBatchUtils()
+    if BATCH_TYPE == "trajdata":
+        return trajdataBatchUtils()
     elif BATCH_TYPE == "l5kit":
         return L5BatchUtils()
     else:
-        raise NotImplementedError("Please set BATCH_TYPE in batch_utils.py to {avdata, l5kit}")
+        raise NotImplementedError("Please set BATCH_TYPE in batch_utils.py to {trajdata, l5kit}")
 
 
 class BatchUtils(object):
@@ -57,19 +57,7 @@ class BatchUtils(object):
 
     @classmethod
     def get_current_states_all_agents(cls, batch: dict, step_time, dyn_type: dynamics.DynType) -> torch.Tensor:
-        state_all = cls.batch_to_raw_all_agents(batch, step_time)
-        bs, na = state_all["curr_speed"].shape[:2]
-        if dyn_type == dynamics.DynType.BICYCLE:
-            current_states = torch.zeros(bs, na, 6).to(state_all["curr_speed"].device)  # [x, y, yaw, vel, dh, veh_len]
-            current_states[:, :, :2] = state_all["history_positions"][:, :, -1]
-            current_states[:, :, 3] = state_all["curr_speed"].abs()
-            current_states[:, :, [4]] = (state_all["history_yaws"][:, :, 0] - state_all["history_yaws"][:, :, 1]).abs()
-            current_states[:, :, 5] = state_all["extent"][:, :, 0]  # [veh_len]
-        else:
-            current_states = torch.zeros(bs, na, 4).to(state_all["curr_speed"].device)  # [x, y, vel, yaw]
-            current_states[:, :, :2] = state_all["history_positions"][:, :, -1]
-            current_states[:, :, 2] = state_all["curr_speed"]
-        return current_states
+        raise NotImplementedError
 
     @staticmethod
     def parse_batch(data_batch):
@@ -117,6 +105,10 @@ class L5BatchUtils(BatchUtils):
     @staticmethod
     def batch_to_raw_all_agents(data_batch, step_time):
         return l5_utils.batch_to_raw_all_agents(data_batch, step_time)
+    
+    @staticmethod
+    def get_current_states_all_agents(batch, step_time, dyn_type):
+        return l5_utils.get_current_states_all_agents(batch,step_time,dyn_type)
 
     @staticmethod
     def batch_to_target_all_agents(data_batch):
@@ -147,11 +139,11 @@ class L5BatchUtils(BatchUtils):
         return l5_utils.get_modality_shapes(cfg)
 
 
-class AVDataBatchUtils(BatchUtils):
-    """Batch utils for AVData"""
+class trajdataBatchUtils(BatchUtils):
+    """Batch utils for trajdata"""
     @staticmethod
     def parse_batch(data_batch):
-        return av_utils.parse_avdata_batch(data_batch)
+        return av_utils.parse_trajdata_batch(data_batch)
 
     @staticmethod
     def batch_to_raw_all_agents(data_batch, step_time):
@@ -252,15 +244,15 @@ class AVDataBatchUtils(BatchUtils):
 
     @staticmethod
     def generate_edges(raw_type, extents, pos_pred, yaw_pred):
-        raise NotImplementedError
+        return l5_utils.generate_edges(raw_type, extents, pos_pred, yaw_pred)
 
     @staticmethod
     def gen_ego_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types):
-        raise NotImplementedError
+        return l5_utils.gen_ego_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types)
 
     @staticmethod
-    def gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types):
-        raise NotImplementedError
+    def gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types, mask=None):
+        return l5_utils.gen_EC_edges(ego_trajectories, agent_trajectories, ego_extents, agent_extents, raw_types, mask)
 
     @staticmethod
     def get_drivable_region_map(rasterized_map):

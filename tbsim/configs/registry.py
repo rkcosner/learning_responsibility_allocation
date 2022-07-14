@@ -25,7 +25,8 @@ from tbsim.configs.algo_config import (
     GANConfig,
     DiscreteVAEConfig,
     TreeVAEConfig,
-    OccupancyMetricConfig
+    OccupancyMetricConfig,
+    TreeVAEConfig
 )
 
 
@@ -156,6 +157,21 @@ EXP_CONFIG_REGISTRY["nusc_discrete_vae"] = ExperimentConfig(
     algo_config=DiscreteVAEConfig(),
     registered_name="nusc_discrete_vae"
 )
+
+EXP_CONFIG_REGISTRY["nusc_tree_vae"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=TreeVAEConfig(),
+    registered_name="nusc_tree_vae"
+)
+
+EXP_CONFIG_REGISTRY["nusc_diff_stack"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=BehaviorCloningConfig(),
+    registered_name="nusc_diff_stack"
+)
+
 
 EXP_CONFIG_REGISTRY["nusc_agent_predictor"] = ExperimentConfig(
     train_config=NuscTrainConfig(),

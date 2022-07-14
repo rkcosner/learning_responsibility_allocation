@@ -14,12 +14,20 @@ cd tbsim
 pip install -e .
 ```
 
-Install `avdata`
+Install `trajdata`
 ```
 cd ..
-git clone ssh://git@gitlab-master.nvidia.com:12051/nvr-av/unified-av-data-loader.git avdata
-cd avdata
-# replace requirements.txt with avdata_requirements.txt included in tbsim
+git clone ssh://git@gitlab-master.nvidia.com:12051/nvr-av/unified-av-data-loader.git trajdata
+cd trajdata
+# replace requirements.txt with trajdata_requirements.txt included in tbsim
+pip install -e .
+```
+
+Install `Pplan`
+```
+cd ..
+git clone ssh://git@gitlab-master.nvidia.com:12051/nvr-av/Pplan.git Pplan
+cd Pplan
 pip install -e .
 ```
 

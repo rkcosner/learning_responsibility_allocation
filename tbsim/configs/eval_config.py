@@ -12,7 +12,7 @@ class EvaluationConfig(Dict):
         self.dataset_path = None
         self.eval_class = ""
         self.seed = 0
-        self.num_scenes_per_batch = 2
+        self.num_scenes_per_batch = 1
         self.num_scenes_to_evaluate = 100
 
         self.num_episode_repeats = 1
@@ -54,6 +54,7 @@ class EvaluationConfig(Dict):
         self.policy.diversification_clearance = None
         self.policy.sample = True
 
+
         self.policy.cost_weights.collision_weight = 10.0
         self.policy.cost_weights.lane_weight = 1.0
         self.policy.cost_weights.likelihood_weight = 0.0  # 0.1
@@ -64,7 +65,7 @@ class EvaluationConfig(Dict):
 
         self.perturb.enabled = False
         self.perturb.OU.theta = 0.8
-        self.perturb.OU.sigma = [0.1,0.2,0.5,1.0,2.0,4.0]
+        self.perturb.OU.sigma = [0.0, 0.1,0.2,0.5,1.0,2.0,4.0]
         self.perturb.OU.scale = [1.0,1.0,0.2]
 
         self.rolling_perturb.enabled = False
