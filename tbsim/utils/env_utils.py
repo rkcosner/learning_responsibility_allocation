@@ -14,9 +14,93 @@ from l5kit.simulation.unroll import ClosedLoopSimulator
 import tbsim.utils.geometry_utils as GeoUtils
 from tbsim.policies.wrappers import Pos2YawWrapper
 from tbsim.evaluation.env_builders import EnvNuscBuilder, EnvL5Builder
+from tbsim.utils.trajdata_utils import parse_trajdata_batch
+from tbsim.utils.geometry_utils import VEH_VEH_collision
+from trajdata.simulation import SimulationScene
+import random
 
+def collision_check(agents_posyaw,new_posyaw,agents_extent,new_extent):
+    new_posyaw_tiled=new_posyaw[np.newaxis,:].repeat(agents_posyaw.shape[0],0)
+    new_extent_tiled=new_extent[np.newaxis,:].repeat(agents_posyaw.shape[0],0)
+    dis = VEH_VEH_collision(new_posyaw_tiled,agents_posyaw,new_extent_tiled,agents_extent,return_dis=True)
+    return dis
+def random_placing_neighbors(simscene,num_neighbors,coll_check=True):
+    init_modes = [0,1,2,3,4]
+    random.shuffle(init_modes)
+    init_modes = init_modes[:num_neighbors]
+    offset_x = 12.0
+    offset_y = 4.0
+    T = 10
+    v_sigma=0.3
+    dt = simscene.scene_info.dt
+    obs = simscene.get_obs()
+    if isinstance(simscene,SimulationScene):
+        obs = parse_trajdata_batch(obs)
+    obs = TensorUtils.to_numpy(obs)
+    num_new_agent = 0
+    agent_names = [agent.name for agent in simscene.agents]
+    while "agent"+str(num_new_agent) in agent_names:
+        num_new_agent+=1
+    ego_vel = obs["curr_speed"][0]
+    agent_plan = list()
+    for i in range(num_neighbors):
+        newagent_name="agent"+str(num_new_agent+i)
+        newagent_type = 1
+        newagent_extent=np.array([4.,2.5,2.])
+        if init_modes[i] == 0:
+            # in front of the ego vehicle
+            newagent_state = np.array([[offset_x,0,0]]).repeat(T,0)
+        elif init_modes[i] == 1:
+            # behind of the ego vehicle
+            newagent_state = np.array([[-offset_x,0,0]]).repeat(T,0)
+        elif init_modes[i] == 2:
+            # left of the ego vehicle
+            newagent_state = np.array([[0,-offset_y,0]]).repeat(T,0)
+        elif init_modes[i] == 3:
+            # right of the ego vehicle
+            newagent_state = np.array([[0,offset_y,0]]).repeat(T,0)
+        elif init_modes[i] == 4:
+            # two vehicle length ahead of the ego vehicle
+            newagent_state = np.array([[2*offset_x,0,0]]).repeat(T,0)
+        vel = np.clip(ego_vel+np.random.randn()*v_sigma,0.,40.)
+        newagent_state[:,0]+=np.arange(-T+1,1)*dt*vel
 
-def set_initial_states(env, obs, adjustment_plan, device):
+        add_flag = True
+        new_pos_global = GeoUtils.batch_nd_transform_points_np(newagent_state[:,:2],obs["world_from_agent"][0])
+        new_yaw_global = newagent_state[:,2:]+obs["yaw"][0]
+        newagent_state_global = np.hstack((new_pos_global,new_yaw_global))
+        if coll_check:
+            
+            if "curr_agent_state" in obs:
+                agents_pos_global = obs["curr_agent_state"][:,[0,1]]
+            else:
+                agents_pos_global = GeoUtils.batch_nd_transform_points_np(obs["history_positions"][:,-1],obs["world_from_agent"])
+            agents_yaw_global = obs["yaw"]
+            agents_posyaw = np.hstack((agents_pos_global,agents_yaw_global[:,np.newaxis]))
+            new_posyaw = np.hstack((new_pos_global[0],new_yaw_global[0]))
+
+            dis = collision_check(agents_posyaw,new_posyaw,obs["extent"],newagent_extent)
+            if dis.min()<2.0:
+                add_flag = False
+
+        if add_flag:
+            agent_plan.append(dict(name=newagent_name,
+                                agent_state=newagent_state_global.tolist(),
+                                initial_timestep=simscene.scene_ts-T+1,
+                                agent_type=newagent_type,
+                                extent=newagent_extent.tolist(),
+                                executed=False))
+    return agent_plan
+
+def random_initial_adjust_plan(env,adjust_recipe):
+    adjust_plan = dict()
+    for simscene in env._current_scenes:
+        adjust_plan[simscene.scene_info.name] = dict(remove_existing_neighbors=dict(flag=adjust_recipe["remove_existing_neighbors"],executed=False),
+                                              agents=random_placing_neighbors(simscene,adjust_recipe["initial_num_neighbors"]))
+
+    return adjust_plan
+
+def set_initial_states(env, obs, adjust_plan, device):
     """A function that sets initial states of an env based on an observation dictionary (TODO: clean up)"""
     obs = TensorUtils.to_torch(obs, device)
     bs, T = obs["ego"]["target_positions"].shape[:2]
@@ -33,8 +117,8 @@ def set_initial_states(env, obs, adjustment_plan, device):
     yaws = []
     for i in range(bs):
         scene_idx = obs["ego"]["scene_index"][i].item()
-        if scene_idx in adjustment_plan:
-            for agent_id in adjustment_plan[scene_idx]:
+        if scene_idx in adjust_plan:
+            for agent_id in adjust_plan[scene_idx]:
                 agent_idx = torch.where(
                     (obs["agents"]["scene_index"] == scene_idx) &
                     (obs["agents"]["track_id"] == agent_id)
@@ -45,23 +129,23 @@ def set_initial_states(env, obs, adjustment_plan, device):
                     continue
                 agent_indices.append(agent_idx)
                 
-                if adjustment_plan[scene_idx][agent_id] == 0:
+                if adjust_plan[scene_idx][agent_id] == 0:
                     # in front of the ego vehicle
                     agent_pos = ego_global[i]+torch.tensor(
                         [offset_x*torch.cos(ego_yaw[i]), offset_x*torch.sin(ego_yaw[i])]).to(device)
-                elif adjustment_plan[scene_idx][agent_id] == 1:
+                elif adjust_plan[scene_idx][agent_id] == 1:
                     # behind of the ego vehicle
                     agent_pos = ego_global[i]+torch.tensor(
                         [-offset_x*torch.cos(ego_yaw[i]), -offset_x*torch.sin(ego_yaw[i])]).to(device)
-                elif adjustment_plan[scene_idx][agent_id] == 2:
+                elif adjust_plan[scene_idx][agent_id] == 2:
                     # left of the ego vehicle
                     agent_pos = ego_global[i]+torch.tensor(
                         [-offset_y*torch.sin(ego_yaw[i]), offset_y*torch.cos(ego_yaw[i])]).to(device)
-                elif adjustment_plan[scene_idx][agent_id] == 3:
+                elif adjust_plan[scene_idx][agent_id] == 3:
                     # right of the ego vehicle
                     agent_pos = ego_global[i]+torch.tensor(
                         [offset_y*torch.sin(ego_yaw[i]), -offset_y*torch.cos(ego_yaw[i])]).to(device)
-                elif adjustment_plan[scene_idx][agent_id] == 4:
+                elif adjust_plan[scene_idx][agent_id] == 4:
                     # two vehicle length ahead of the ego vehicle
                     agent_pos = ego_global[i]+torch.tensor(
                         [2*offset_x*torch.cos(ego_yaw[i]), 2*offset_x*torch.sin(ego_yaw[i])]).to(device)
@@ -98,9 +182,10 @@ def rollout_episodes(
     start_frame_index_each_episode=None,
     device=None,
     obs_to_torch=True,
-    adjustment_plan=None,
+    adjust_plan_recipe=None,
     horizon=None,
     seed_each_episode=None,
+
 ):
     """
     Rollout an environment for a number of episodes
@@ -115,7 +200,7 @@ def rollout_episodes(
         start_frame_index_each_episode (List): (Optional) which frame to start each simulation episode from,
         device: device to cast observation to
         obs_to_torch: whether to cast observation to torch
-        adjustment_plan (dict): (Optional) initialization condition
+        adjust_plan_recipe (dict): (Optional) initialization condition, either a fixed plan or a recipe for random generation
         horizon (int): (Optional) override horizon of the simulation
         seed_each_episode (List): (Optional) a list of seeds, one for each episode
 
@@ -140,20 +225,47 @@ def rollout_episodes(
             start_frame_index = start_frame_index_each_episode[ei]
         else:
             start_frame_index = None
-
+        
         env.reset(scene_indices=scene_indices, start_frame_index=start_frame_index)
+        if adjust_plan_recipe is not None:
+            if "random_init_plan" in adjust_plan_recipe:
+                # recipe provided
+                if adjust_plan_recipe["random_init_plan"]:
+                    adjust_recipe = adjust_plan_recipe
+                    adjust_plan = random_initial_adjust_plan(env,adjust_recipe)
+                    
+                else:
+                    adjust_plan = None
+                    adjust_recipe = None
+                
+            else:
+                # explicit plan provided
+                adjust_plan = adjust_plan_recipe
+        else:
+            adjust_plan = None
+            adjust_recipe = None
+        if adjust_plan is not None:
+            env.adjust_scene(adjust_plan)
 
         if seed_each_episode is not None:
             env.update_random_seed(seed_each_episode[ei])
 
         done = env.is_done()
         counter = 0
-        frames = []
+        step_since_last_update = 0
+        frames = []  
         while not done:
+            if adjust_recipe is not None:
+                if step_since_last_update>adjust_recipe["num_frame_per_new_agent"]:
+                    for simscene in env._current_scenes:
+                        if simscene.scene_ts<simscene.scene_info.length_timesteps-10:
+                            extra_agent = random_placing_neighbors(simscene,1)
+                            adjust_plan[simscene.scene_info.name]["agents"]+=extra_agent
+                    env.adjust_scene(adjust_plan)
+                    step_since_last_update=0
             timers.tic("step")
             with timers.timed("obs"):
                 obs = env.get_observation()
-
             with timers.timed("to_torch"):
                 if obs_to_torch:
                     device = policy.device if device is None else device
@@ -171,9 +283,8 @@ def rollout_episodes(
                 action.ego = gt_action.ego
                 action.agents = gt_action.agents
                 env.step(action, num_steps_to_take=1, render=False)
-                if adjustment_plan is not None:
-                    set_initial_states(env, obs, adjustment_plan ,device)
                 counter += 1
+                step_since_last_update+=1
             else:
                 with timers.timed("env_step"):
                     ims = env.step(
@@ -182,6 +293,7 @@ def rollout_episodes(
                 if render:
                     frames.extend(ims)
                 counter += n_step_action
+                step_since_last_update += n_step_action
             timers.toc("step")
             # print(timers)
 
