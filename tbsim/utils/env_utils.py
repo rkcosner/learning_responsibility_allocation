@@ -214,7 +214,7 @@ def rollout_episodes(
     renderings = []
     is_batched_env = isinstance(env, BatchedEnv)
     timers = Timers()
-
+    adjust_plans = list()
     if seed_each_episode is not None:
         assert len(seed_each_episode) == num_episodes
     if start_frame_index_each_episode is not None:
@@ -326,12 +326,15 @@ def rollout_episodes(
                 # [step, scene] -> [scene, step]
                 frames = frames.transpose((1, 0, 2, 3, 4))
             renderings.append(frames)
+        if adjust_plan is not None:
+            adjust_plans.append(adjust_plan)
+
 
     multi_episodes_metrics = env.get_multi_episode_metrics()
     stats.update(multi_episodes_metrics)
     env.reset_multi_episodes_metrics()
 
-    return stats, info, renderings
+    return stats, info, renderings, adjust_plans
 
 
 class RolloutCallback(pl.Callback):

@@ -126,12 +126,12 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
     result_stats = None
     scene_i = 0
     eval_scenes = eval_cfg.eval_scenes
-    
+    total_adjust_plan = dict()
     while scene_i < eval_cfg.num_scenes_to_evaluate:
         scene_indices = eval_scenes[scene_i: scene_i + eval_cfg.num_scenes_per_batch]
         scene_i += eval_cfg.num_scenes_per_batch
 
-        stats, info, renderings = rollout_episodes(
+        stats, info, renderings, adjust_plans = rollout_episodes(
             env,
             rollout_policy,
             num_episodes=eval_cfg.num_episode_repeats,
@@ -142,8 +142,17 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
             obs_to_torch=obs_to_torch,
             start_frame_index_each_episode=eval_cfg.start_frame_index_each_episode,
             seed_each_episode=eval_cfg.seed_each_episode,
-            horizon=eval_cfg.num_simulation_steps
+            horizon=eval_cfg.num_simulation_steps,
+            adjust_plan_recipe=eval_cfg.adjustment.to_dict(),
         )
+        for ei,adjust_plan in enumerate(adjust_plans):
+            for k,v in adjust_plan.items():
+                total_adjust_plan["{}_{}".format(k,ei)]=v 
+
+    if len(total_adjust_plan)>0:
+        with open(os.path.join(eval_cfg.results_dir, "adjust_plan.json"),"w+") as fp:
+            json.dump(total_adjust_plan,fp)
+            print("adjust plan to {}".format(os.path.join(eval_cfg.results_dir, "adjust_plan.json")))
 
         print(info["scene_index"])
         pprint(stats)
@@ -373,7 +382,7 @@ if __name__ == "__main__":
             ckpt_info = yaml.safe_load(f)
             cfg.ckpt.update(**ckpt_info)
     if args.metric_ckpt_yaml is not None:
-        with open(args.ckpt_yaml, "r") as f:
+        with open(args.metric_ckpt_yaml, "r") as f:
             ckpt_info = yaml.safe_load(f)
             cfg.ckpt.update(**ckpt_info)
     

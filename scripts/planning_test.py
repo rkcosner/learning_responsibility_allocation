@@ -166,7 +166,7 @@ def run_checkpoint(ckpt_dir="checkpoints/", video_dir="videos/"):
         skimp_rollout=False
     )
 
-    stats, info, renderings = rollout_episodes(
+    stats, info, renderings, _ = rollout_episodes(
         env,
         policy,
         num_episodes=1,
