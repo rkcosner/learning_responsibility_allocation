@@ -90,7 +90,7 @@ class EvaluationConfig(Dict):
         self.l5kit.skip_first_n = 1
         self.l5kit.skimp_rollout = False
 
-        self.adjustment.random_init_plan=True
+        self.adjustment.random_init_plan=False
         self.adjustment.remove_existing_neighbors = False
         self.adjustment.initial_num_neighbors = 4
         self.adjustment.num_frame_per_new_agent = 20
