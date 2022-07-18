@@ -696,8 +696,8 @@ class OccupancyGrid():
     def obtain_lane_flag(self,grid_points,raster_from_world,lane_map):
         raster_points = GeoUtils.batch_nd_transform_points_np(grid_points,raster_from_world)
         raster_points = raster_points.astype(np.int)
-        raster_points[...,0] = raster_points[...,0].clip(0,lane_map.shape[-2])
-        raster_points[...,1] = raster_points[...,1].clip(0,lane_map.shape[-1])
+        raster_points[...,0] = raster_points[...,0].clip(0,lane_map.shape[-2]-1)
+        raster_points[...,1] = raster_points[...,1].clip(0,lane_map.shape[-1]-1)
         lane_flag = list()
         
         for k in range(raster_points.shape[0]):
