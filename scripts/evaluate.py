@@ -149,10 +149,7 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
             for k,v in adjust_plan.items():
                 total_adjust_plan["{}_{}".format(k,ei)]=v 
 
-    if len(total_adjust_plan)>0:
-        with open(os.path.join(eval_cfg.results_dir, "adjust_plan.json"),"w+") as fp:
-            json.dump(total_adjust_plan,fp)
-            print("adjust plan to {}".format(os.path.join(eval_cfg.results_dir, "adjust_plan.json")))
+    
 
         print(info["scene_index"])
         pprint(stats)
@@ -190,6 +187,10 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
                 h5_path=eval_cfg.experience_hdf5_path
             )
         torch.cuda.empty_cache()
+    if len(total_adjust_plan)>0:
+        with open(os.path.join(eval_cfg.results_dir, "adjust_plan.json"),"w+") as fp:
+            json.dump(total_adjust_plan,fp)
+            print("adjust plan to {}".format(os.path.join(eval_cfg.results_dir, "adjust_plan.json")))
 
 
 def dump_episode_buffer(buffer, scene_index, h5_path):
