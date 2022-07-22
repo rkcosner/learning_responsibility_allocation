@@ -22,7 +22,7 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
 
     if cfg.env.name == "l5kit":
         set_global_batch_type("l5kit")
-    elif cfg.env.name == "nusc":
+    elif cfg.env.name in ["nusc_mini", "nusc_trainval", "nusc_test"] :
         set_global_batch_type("trajdata")
     else:
         raise NotImplementedError("Env {} is not supported".format(cfg.env.name))

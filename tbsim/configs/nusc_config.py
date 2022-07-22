@@ -9,9 +9,9 @@ class NuscTrainConfig(TrainConfig):
     def __init__(self):
         super(NuscTrainConfig, self).__init__()
 
-        self.trajdata_source_train = "nusc-train"
-        self.trajdata_source_valid = "nusc-val"
-        self.trajdata_source_root = "nusc"
+        self.trajdata_source_train = "train"
+        self.trajdata_source_valid = "val"
+        self.trajdata_source_root = "nusc_trainval"
 
         self.dataset_path = "SET-THIS-THROUGH-TRAIN-SCRIPT-ARGS"
         self.datamodule_class = "UnifiedDataModule"
@@ -40,7 +40,7 @@ class NuscEnvConfig(EnvConfig):
     def __init__(self):
         super(NuscEnvConfig, self).__init__()
 
-        self.name = "nusc"
+        self.name = "nusc_trainval"
 
         # raster image size [pixels]
         self.rasterizer.raster_size = 224
