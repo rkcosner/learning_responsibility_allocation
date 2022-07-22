@@ -86,52 +86,9 @@ class Responsibility(pl.LightningModule):
 
     def _compute_metrics(self, gammas):
         metrics = {}
-
-        ## Old Code
-        # metrics = {}
-        # predictions = pred_batch["predictions"]
-        # preds = TensorUtils.to_numpy(predictions["positions"])
-        # gt = TensorUtils.to_numpy(data_batch["target_positions"])
-        # avail = TensorUtils.to_numpy(data_batch["target_availabilities"])
-
-        # ade = Metrics.single_mode_metrics(
-        #     Metrics.batch_average_displacement_error, gt, preds, avail
-        # )
-        # fde = Metrics.single_mode_metrics(
-        #     Metrics.batch_final_displacement_error, gt, preds, avail
-        # )
-
-        # metrics["ego_ADE"] = np.mean(ade)
-        # metrics["ego_FDE"] = np.mean(fde)
-
         return metrics
 
     def training_step(self, batch, batch_idx):
-        """
-        Training on a single batch of data.
-        Args:
-            batch (dict): dictionary with torch.Tensors sampled
-                from a data loader and filtered by @process_batch_for_training
-                RYAN: 
-                    Important Dictionary Keys (According to Yuxiao):
-                        - dt                    = time step 
-                        - agent_type            = 1 (car), ? (bike), ? (pedestrian), ? (etc)
-                        - centroids             = (N_agents, 2) current position of N_agents
-                        - history_positions     = (N_agents, N_steps, 2) 1 second of relative (x,y) data for N_agents from current position
-                        - yaw                   = (N_agents, 1) current yaw of N_agents
-                        - history_yaws          = (N_agents, N_steps, 1) 1 second of relative yaw data for N_agents from current yaw
-                        - maps                  = ?
-                        - "from:"s              = rotation/translation matrices between spaces
-                        - "targets"             = predicts forward 2 seconds
-
-                        ['data_idx', 'dt', 'agent_type', 'curr_agent_state', 'agent_hist', 'agent_hist_extent', 'agent_hist_len', 'agent_fut', 'agent_fut_extent', 'agent_fut_len', 'num_neigh', 'neigh_types', 'neigh_hist', 'neigh_hist_extents', 'neigh_hist_len', 'neigh_fut', 'neigh_fut_extents', 'neigh_fut_len', 'robot_fut_len', 'maps', 'maps_resolution', 'rasters_from_world_tf', 'agents_from_world_tf', 'scene_ids', 'extras', 'image', 'drivable_map', 'target_positions', 'target_yaws', 'target_availabilities', 'history_positions', 'history_yaws', 'history_availabilities', 'curr_speed', 'centroid', 'yaw', 'type', 'extent', 'raster_from_agent', 'agent_from_raster', 'raster_from_world', 'agent_from_world', 'world_from_agent', 'all_other_agents_history_positions', 'all_other_agents_history_yaws', 'all_other_agents_history_availabilities', 'all_other_agents_history_availability', 'all_other_agents_curr_speed', 'all_other_agents_future_positions', 'all_other_agents_future_yaws', 'all_other_agents_future_availability', 'all_other_agents_types', 'all_other_agents_extents', 'all_other_agents_history_extents']
-            batch_idx (int): training step number - required by some Algos that need
-                to perform staged training and early stopping
-
-        Returns:
-            info (dict): dictionary of relevant inputs, outputs, and losses
-                that might be relevant for logging
-        """     
         
         # Parse trajdata to get information relevant to tbsim
         batch = batch_utils().parse_batch(batch)
@@ -162,34 +119,6 @@ class Responsibility(pl.LightningModule):
             "all_losses": losses, 
             "all_metrics: metrics
         }
-
-        """
-        Predict trajectories
-          pout contains : 
-              trajectories (N_agents, N_steps_forward, 3), the position and yaw predictions for 2 seconds foward for all of the agents
-              predictions, dictionary containing (positions, yaws) from trajectories, these values are the same
-              controls, unicycle controls for the cars
-              current state, of each vehicle (the position is set to zero, yaw is nonzero, and for some reason there's a 4th state? )
-        """      
-        # pout = self.nets["policy"](batch)
-        # losses = self.nets["policy"].compute_losses(pout, batch)
-        # total_loss = 0.0
-        # for lk, l in losses.items():
-        #     losses[lk] = l * self.algo_config.loss_weights[lk]
-        #     total_loss += losses[lk]
-
-        # metrics = self._compute_metrics(pout, batch)
-
-        # for lk, l in losses.items():
-        #     self.log("train/losses_" + lk, l)
-        # for mk, m in metrics.items():
-        #     self.log("train/metrics_" + mk, m)
-
-        # return {
-        #     "loss": total_loss,
-        #     "all_losses": losses,
-        #     "all_metrics": metrics
-        # }
 
     def validation_step(self, batch, batch_idx):
         batch = batch_utils().parse_batch(batch)

@@ -3,6 +3,7 @@ from pytorch_lightning import LightningDataModule
 from tbsim.configs.base import ExperimentConfig
 
 from tbsim.algos.algos import (
+    Responsibility,
     BehaviorCloning,
     TransformerTrafficModel,
     TransformerGANTrafficModel,
@@ -39,7 +40,9 @@ def algo_factory(config: ExperimentConfig, modality_shapes: dict):
     algo_config = config.algo
     algo_name = algo_config.name
 
-    if algo_name == "bc":
+    if algo_name == "resp": 
+        algo = Responsibility(algo_config=algo_config, modality_shapes=modality_shapes)
+    elif algo_name == "bc":
         algo = BehaviorCloning(algo_config=algo_config, modality_shapes=modality_shapes)
     elif algo_name == "bc_gc":
         algo = BehaviorCloningGC(algo_config=algo_config, modality_shapes=modality_shapes)
