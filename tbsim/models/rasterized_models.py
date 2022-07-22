@@ -76,6 +76,11 @@ class RasterizedPlanningModel(nn.Module):
         return out_dict
 
     def compute_losses(self, pred_batch, data_batch):
+        """
+            RYAN : Behavioral Cloning Loss
+                args: 
+                    - data_batch : provides target_positions and target_yaws 
+        """ 
         target_traj = torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=2)
         pred_loss = trajectory_loss(
             predictions=pred_batch["trajectories"],

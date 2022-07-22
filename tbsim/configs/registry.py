@@ -13,6 +13,7 @@ from tbsim.configs.nusc_config import (
 )
 
 from tbsim.configs.algo_config import (
+    ResponsibilityConfig,
     BehaviorCloningConfig,
     BehaviorCloningECConfig,
     SpatialPlannerConfig,
@@ -121,6 +122,13 @@ EXP_CONFIG_REGISTRY["l5_occupancy"] = ExperimentConfig(
     env_config=L5KitMixedSemanticMapEnvConfig(),
     algo_config=OccupancyMetricConfig(),
     registered_name="l5_occupancy"
+)
+
+EXP_CONFIG_REGISTRY["nusc_resp"] = ExperimentConfig(
+    train_config=NuscTrainConfig(),
+    env_config=NuscEnvConfig(),
+    algo_config=ResponsibilityConfig(),
+    registered_name="nusc_resp"
 )
 
 EXP_CONFIG_REGISTRY["nusc_bc"] = ExperimentConfig(

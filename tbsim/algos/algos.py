@@ -32,6 +32,252 @@ import tbsim.algos.algo_utils as AlgoUtils
 from tbsim.utils.geometry_utils import transform_points_tensor
 
 
+from tbsim.safety_funcs.cbfs import (
+    NormBallCBF, 
+    RssCBF
+)
+
+class Responsibility(pl.LightningModule):
+    def __init__(self, algo_config, modality_shapes, do_log=True):
+        """
+        Creates networks and places them into @self.nets.
+        """
+        super(Responsibility, self).__init__()
+        self.algo_config = algo_config
+        self.nets = nn.ModuleDict()
+        self._do_log = do_log
+        # RYAN: Traj Decover is the Decoder portion of a train VAE
+        traj_decoder = MLPTrajectoryDecoder(
+            feature_dim=algo_config.map_feature_dim,
+            state_dim=3,
+            num_steps=algo_config.future_num_frames,
+            dynamics_type=algo_config.dynamics.type,
+            dynamics_kwargs=algo_config.dynamics,
+            step_time=algo_config.step_time,
+            network_kwargs=algo_config.decoder,
+        )
+
+        # RYAN: I think that this the policy that plans the vehicles future states (?) 
+        self.nets["policy"] = RasterizedPlanningModel(
+            model_arch=algo_config.model_architecture,
+            input_image_shape=modality_shapes["image"],  # [C, H, W]
+            trajectory_decoder=traj_decoder,
+            map_feature_dim=algo_config.map_feature_dim,
+            weights_scaling=[1.0, 1.0, 1.0],
+            use_spatial_softmax=algo_config.spatial_softmax.enabled,
+            spatial_softmax_kwargs=algo_config.spatial_softmax.kwargs,
+        )
+        # TODO : create loss discount parameters
+        if   algo_config.cbf == "rss_cbf": 
+            self.cbf = RssCBF()
+        elif algo_config.cbf == "norm_ball_cbf": 
+            self.cbf = NormBallCBF()
+        else: 
+            raise Exception("Config Error: algo_config.cbf is not properly defined")
+        
+
+    @property
+    def checkpoint_monitor_keys(self):
+        return {"valLoss": "val/losses_prediction_loss"}
+
+    def forward(self, obs_dict):
+        # RYAN: This isn't called during training??? 
+        return self.nets["policy"](obs_dict)["predictions"]
+
+    def _compute_metrics(self, gammas):
+        metrics = {}
+
+        ## Old Code
+        # metrics = {}
+        # predictions = pred_batch["predictions"]
+        # preds = TensorUtils.to_numpy(predictions["positions"])
+        # gt = TensorUtils.to_numpy(data_batch["target_positions"])
+        # avail = TensorUtils.to_numpy(data_batch["target_availabilities"])
+
+        # ade = Metrics.single_mode_metrics(
+        #     Metrics.batch_average_displacement_error, gt, preds, avail
+        # )
+        # fde = Metrics.single_mode_metrics(
+        #     Metrics.batch_final_displacement_error, gt, preds, avail
+        # )
+
+        # metrics["ego_ADE"] = np.mean(ade)
+        # metrics["ego_FDE"] = np.mean(fde)
+
+        return metrics
+
+    def training_step(self, batch, batch_idx):
+        """
+        Training on a single batch of data.
+        Args:
+            batch (dict): dictionary with torch.Tensors sampled
+                from a data loader and filtered by @process_batch_for_training
+                RYAN: 
+                    Important Dictionary Keys (According to Yuxiao):
+                        - dt                    = time step 
+                        - agent_type            = 1 (car), ? (bike), ? (pedestrian), ? (etc)
+                        - centroids             = (N_agents, 2) current position of N_agents
+                        - history_positions     = (N_agents, N_steps, 2) 1 second of relative (x,y) data for N_agents from current position
+                        - yaw                   = (N_agents, 1) current yaw of N_agents
+                        - history_yaws          = (N_agents, N_steps, 1) 1 second of relative yaw data for N_agents from current yaw
+                        - maps                  = ?
+                        - "from:"s              = rotation/translation matrices between spaces
+                        - "targets"             = predicts forward 2 seconds
+
+                        ['data_idx', 'dt', 'agent_type', 'curr_agent_state', 'agent_hist', 'agent_hist_extent', 'agent_hist_len', 'agent_fut', 'agent_fut_extent', 'agent_fut_len', 'num_neigh', 'neigh_types', 'neigh_hist', 'neigh_hist_extents', 'neigh_hist_len', 'neigh_fut', 'neigh_fut_extents', 'neigh_fut_len', 'robot_fut_len', 'maps', 'maps_resolution', 'rasters_from_world_tf', 'agents_from_world_tf', 'scene_ids', 'extras', 'image', 'drivable_map', 'target_positions', 'target_yaws', 'target_availabilities', 'history_positions', 'history_yaws', 'history_availabilities', 'curr_speed', 'centroid', 'yaw', 'type', 'extent', 'raster_from_agent', 'agent_from_raster', 'raster_from_world', 'agent_from_world', 'world_from_agent', 'all_other_agents_history_positions', 'all_other_agents_history_yaws', 'all_other_agents_history_availabilities', 'all_other_agents_history_availability', 'all_other_agents_curr_speed', 'all_other_agents_future_positions', 'all_other_agents_future_yaws', 'all_other_agents_future_availability', 'all_other_agents_types', 'all_other_agents_extents', 'all_other_agents_history_extents']
+            batch_idx (int): training step number - required by some Algos that need
+                to perform staged training and early stopping
+
+        Returns:
+            info (dict): dictionary of relevant inputs, outputs, and losses
+                that might be relevant for logging
+        """     
+        
+        # Parse trajdata to get information relevant to tbsim
+        batch = batch_utils().parse_batch(batch)
+        
+        raise Exception("Need to parse the data first")
+        relevant_data= compute_relevant_data(batch )
+        hs = self.cbf(relevant_data)
+        
+        gamma_preds = self.nets(relevant_data)
+        states, inputs = get_states_and_inputs(relevant_data)
+
+        losses = self.compute_losses(hs, gamma_preds, states, inputs)
+        total_loss = 0.0
+        for lk, l in losses.items(): 
+            loss_contribution  = l * self.algo_config.loss_weights[lk]
+            total_loss += loss_contribution
+
+        metrics = self._compute_metrics(hs, gammas, losses)  
+
+        for lk, l in losses.items(): 
+            self.log("train/losses_"+lk, l)
+        
+        for mk, m in metrics.items(): 
+            self.log("train/metrics_" + mk, m)
+
+        return {
+            "loss": total_loss, 
+            "all_losses": losses, 
+            "all_metrics: metrics
+        }
+
+        """
+        Predict trajectories
+          pout contains : 
+              trajectories (N_agents, N_steps_forward, 3), the position and yaw predictions for 2 seconds foward for all of the agents
+              predictions, dictionary containing (positions, yaws) from trajectories, these values are the same
+              controls, unicycle controls for the cars
+              current state, of each vehicle (the position is set to zero, yaw is nonzero, and for some reason there's a 4th state? )
+        """      
+        # pout = self.nets["policy"](batch)
+        # losses = self.nets["policy"].compute_losses(pout, batch)
+        # total_loss = 0.0
+        # for lk, l in losses.items():
+        #     losses[lk] = l * self.algo_config.loss_weights[lk]
+        #     total_loss += losses[lk]
+
+        # metrics = self._compute_metrics(pout, batch)
+
+        # for lk, l in losses.items():
+        #     self.log("train/losses_" + lk, l)
+        # for mk, m in metrics.items():
+        #     self.log("train/metrics_" + mk, m)
+
+        # return {
+        #     "loss": total_loss,
+        #     "all_losses": losses,
+        #     "all_metrics": metrics
+        # }
+
+    def validation_step(self, batch, batch_idx):
+        batch = batch_utils().parse_batch(batch)
+        pout = self.nets["policy"](batch)
+        losses = TensorUtils.detach(self.nets["policy"].compute_losses(pout, batch))
+        metrics = self._compute_metrics(pout, batch)
+        return {"losses": losses, "metrics": metrics}
+
+    def validation_epoch_end(self, outputs) -> None:
+        for k in outputs[0]["losses"]:
+            m = torch.stack([o["losses"][k] for o in outputs]).mean()
+            self.log("val/losses_" + k, m)
+
+        for k in outputs[0]["metrics"]:
+            m = np.stack([o["metrics"][k] for o in outputs]).mean()
+            self.log("val/metrics_" + k, m)
+
+    def configure_optimizers(self):
+        optim_params = self.algo_config.optim_params["policy"]
+        return optim.Adam(
+            params=self.parameters(),
+            lr=optim_params["learning_rate"]["initial"],
+            weight_decay=optim_params["regularization"]["L2"],
+        )
+
+    def get_plan(self, obs_dict, **kwargs):
+        raise Exception("Responsibility isn't built for forward plan prediction yet.")
+        preds = self(obs_dict)
+        plan = Plan(
+            positions=preds["positions"],
+            yaws=preds["yaws"],
+            availabilities=torch.ones(preds["positions"].shape[:-1]).to(
+                preds["positions"].device
+            ),  # [B, T]
+        )
+        return plan, {}
+
+    def get_action(self, obs_dict, **kwargs):
+        raise Exception("Responsibility isn't built for forward action prediction yet.")
+        preds = self(obs_dict)
+        action = Action(
+            positions=preds["positions"],
+            yaws=preds["yaws"]
+        )
+        return action, {}
+
+    def compute_losses(self, hs, gamma_pred, states): 
+        loss_constraint = self.compute_cbf_constraint_loss(hs, gamma_preds, states)
+        loss_maxlikely  = self.compute_max_likelihood_loss(gammas_preds)
+        losses = OrderedDict(
+            cosntraint_loss = loss_constraint, 
+            max_likelihood_loss = loss_maxlikely 
+        )
+        return losses
+
+    def compute_constraint_loss(self, hs, gamma_preds, data): 
+        N_agents_per_cbf = 2
+
+        raise Exception("Data Usage Undefined, please figure out what the data and states should be!")
+        state 
+        input 
+
+        dhdx, = torch.autograd(outputs = h, inputs = states, grad_ouputs=torch.ones_like(h), create_graph=True)
+        f, gs = dynamics(states) 
+        Lfh = torch.bmm(dhdx, f)
+
+        # For now only account for the ego agent's perspective
+        Lgh = torch.bmm(dhdx, g[0])
+        
+        # The ego's effect on dt 
+        dhdt = 1.0 / N_agents_per_cbf * Lfh + torch.bmm(Lgh, input)
+        constraint = dhdt + self.algo_config.alpha * h / N_agents_per_cbf - gamma_preds
+
+        loss_constraint = torch.sum(torch.nn.functional.leaky_relu(-constraint - self.algo_config.constraint_eps)) / (1e-5 + constraint.shape[0])
+
+        return loss_constraint
+
+    @staticmethod
+    def compute_max_likelihood_loss(gamma_pred): 
+        
+        loss_maxlikely = torch.sum(-gammas) / (1e-5 + gammas.shape[0])
+
+        return loss_maxlikely
+        
+
+    
+
+
 class BehaviorCloning(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes, do_log=True):
         """

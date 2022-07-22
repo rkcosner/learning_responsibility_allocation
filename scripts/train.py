@@ -133,6 +133,7 @@ def main(cfg, auto_remove_exp_dir=False, debug=False):
         train_callbacks.append(ckpt_rollout_callback)
 
     # a ckpt monitor to save at fixed interval
+
     ckpt_fixed_callback = pl.callbacks.ModelCheckpoint(
         dirpath=ckpt_dir,
         filename="iter{step}",
