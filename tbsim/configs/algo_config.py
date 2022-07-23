@@ -46,7 +46,7 @@ class ResponsibilityConfig(AlgoConfig):
         )  # epochs where LR decay occurs
         self.optim_params.policy.regularization.L2 = 0.00  # L2 regularization strength
 
-
+        self.cbf = "norm_ball_cbf"
 
 class BehaviorCloningConfig(AlgoConfig):
     def __init__(self):

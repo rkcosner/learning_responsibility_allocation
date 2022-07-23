@@ -84,15 +84,38 @@ class Responsibility(pl.LightningModule):
         # RYAN: This isn't called during training??? 
         return self.nets["policy"](obs_dict)["predictions"]
 
-    def _compute_metrics(self, gammas):
+    def _compute_metrics(self, hs, gammas):
         metrics = {}
         return metrics
+
+    def get_states_and_inputs(self, batch): 
+        # Let the "current state" be time step (k-1) and then calculate the current input as (x_k - x_{k-1})/dt 
+
+        
+        if self.algo_config.dynamics != "Unicycle": 
+            raise Expection("Using dynamics that have not been implemented yet. Please use unicycle or add new dynamics and state parsing")
+
+        yaws = batch["yaw"][:,None] # expand dims by 1 to match centroids
+        state = torch.cat([batch["centroid"], yaws], dim=1)
+        history_states = torch.cat([batch["history_positions"], batch["history_yaws"]], dim=2)
+
+        # Get state {k-1} using the history_state_diffs
+        state_curr = state + history_states[:,1,:]
+        input = -history_states_states[:,1,:]*batch["dt"]
+
+        return state_curr, inputs
 
     def training_step(self, batch, batch_idx):
         
         # Parse trajdata to get information relevant to tbsim
         batch = batch_utils().parse_batch(batch)
         
+        import pdb
+        pdb.set_trace()
+
+        current_positions = batch["centroid"]
+
+
         raise Exception("Need to parse the data first")
         relevant_data= compute_relevant_data(batch )
         hs = self.cbf(relevant_data)
@@ -117,10 +140,11 @@ class Responsibility(pl.LightningModule):
         return {
             "loss": total_loss, 
             "all_losses": losses, 
-            "all_metrics: metrics
+            "all_metrics": metrics
         }
 
     def validation_step(self, batch, batch_idx):
+        # TODO: Modify this, this runs first to validate the dataset
         batch = batch_utils().parse_batch(batch)
         pout = self.nets["policy"](batch)
         losses = TensorUtils.detach(self.nets["policy"].compute_losses(pout, batch))
@@ -314,8 +338,8 @@ class BehaviorCloning(pl.LightningModule):
 
         return {
             "loss": total_loss,
-            "all_losses": losses,
-            "all_metrics": metrics
+            "all_losses" : losses,
+            "all_metrics" : metrics
         }
 
     def validation_step(self, batch, batch_idx):
