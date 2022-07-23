@@ -100,8 +100,12 @@ class Responsibility(pl.LightningModule):
         history_states = torch.cat([batch["history_positions"], batch["history_yaws"]], dim=2)
 
         # Get state {k-1} using the history_state_diffs
-        state_curr = state + history_states[:,1,:]
-        input = -history_states_states[:,1,:]*batch["dt"]
+        state_curr = state + history_states[:,-2,:]
+
+        # TODO!!! Everything below here isn't working yet
+        velocity = torch.linalg.norm(history_states[:,-2,0:2]) / batch["dt"][-2]
+        forward_vec = torch.tensor([torch.cos(state_curr[:,2], torch.sin(state_curr[:,2])])
+        yaw_rate = -history_states[:,-2,2] / batch["dt"][-2]
 
         return state_curr, inputs
 
