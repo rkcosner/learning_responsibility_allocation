@@ -1,5 +1,6 @@
 from collections import OrderedDict
 import numpy as np
+from tbsim.utils import l5_utils
 
 import torch
 import torch.nn as nn
@@ -31,7 +32,7 @@ from tbsim.policies.common import Plan, Action
 import tbsim.algos.algo_utils as AlgoUtils
 from tbsim.utils.geometry_utils import transform_points_tensor
 
-
+from tbsim.safety_funcs.utils import batch_to_raw_all_agents
 from tbsim.safety_funcs.cbfs import (
     NormBallCBF, 
     RssCBF
@@ -92,8 +93,24 @@ class Responsibility(pl.LightningModule):
         # Let the "current state" be time step (k-1) and then calculate the current input as (x_k - x_{k-1})/dt 
 
         
-        if self.algo_config.dynamics != "Unicycle": 
-            raise Expection("Using dynamics that have not been implemented yet. Please use unicycle or add new dynamics and state parsing")
+        if self.algo_config.dynamics.type != "Unicycle": 
+            raise Exception("Using dynamics: '" +self.algo_config.dynamics +"'that have not been implemented yet. Please use unicycle or add new dynamics and state parsing")
+
+        all_agents = batch_to_raw_all_agents(batch, batch["dt"][0])
+        # States [B, A, T, D] where D is [x pose, y pose, velocity, yaws] and increasing T goes backwards in time
+        states = torch.cat((
+                    all_agents["history_positions"], 
+                    all_agents["history_vel"], 
+                    all_agents["history_yaws"]), 
+                    axis =-1
+                )
+
+        # Get acceleration and angle rate inputs [B, A, T, D] (acceleration, angle rae)
+        inputs = (states[:,:,:-1,2:] - states[:,:,1:,2:])/batch["dt"][0]
+
+        safety_vals = cbf(states, inputs)
+
+        import pdb; pdb.set_trace()
 
         yaws = batch["yaw"][:,None] # expand dims by 1 to match centroids
         state = torch.cat([batch["centroid"], yaws], dim=1)
@@ -101,10 +118,18 @@ class Responsibility(pl.LightningModule):
 
         # Get state {k-1} using the history_state_diffs
         state_curr = state + history_states[:,-2,:]
-
+        states_all_agents = torch.cat((all_agents["history_positions"], all_agents["history_yaws"]), dim = -1)
+        
         # TODO!!! Everything below here isn't working yet
+                
+
+
         velocity = torch.linalg.norm(history_states[:,-2,0:2]) / batch["dt"][-2]
-        forward_vec = torch.tensor([torch.cos(state_curr[:,2], torch.sin(state_curr[:,2])])
+        dir_vec = torch.stack([torch.cos(state_curr[:,2]), torch.sin(state_curr[:,2])], axis=1)
+
+        norms = torch.linalg.norm(history_states[:,-2,0:2], axis=1)
+        norms = torch.stack([norms, norms], axis=1)
+        forward_vec = history_states[:,-2,0:2] / torch.linalg.norm(history_states[:,-2,0:2], axis = 1) 
         yaw_rate = -history_states[:,-2,2] / batch["dt"][-2]
 
         return state_curr, inputs
@@ -113,12 +138,10 @@ class Responsibility(pl.LightningModule):
         
         # Parse trajdata to get information relevant to tbsim
         batch = batch_utils().parse_batch(batch)
-        
-        import pdb
-        pdb.set_trace()
 
         current_positions = batch["centroid"]
 
+        self.get_states_and_inputs(batch)
 
         raise Exception("Need to parse the data first")
         relevant_data= compute_relevant_data(batch )

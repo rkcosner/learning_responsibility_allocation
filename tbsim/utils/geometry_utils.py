@@ -165,6 +165,7 @@ def PED_PED_collision(p1, p2, S1, S2):
 
 
 def batch_rotate_2D(xy, theta):
+    # RYAN : Rotate positions by theta
     if isinstance(xy, torch.Tensor):
         x1 = xy[..., 0] * torch.cos(theta) - xy[..., 1] * torch.sin(theta)
         y1 = xy[..., 1] * torch.cos(theta) + xy[..., 0] * torch.sin(theta)
@@ -178,19 +179,44 @@ def batch_rotate_2D(xy, theta):
 def VEH_VEH_collision(
     p1, p2, S1, S2, alpha=5, return_dis=False, offsetX=1.0, offsetY=0.3
 ):
+    """
+        RYAN: vehicle collision calculator README collision_calculator reference
+            args: 
+                - pose 1 [x,y,yaw]
+                - pose 2 [x,y,yaw]
+                - extent 1
+                - extent 2
+    """
     if isinstance(p1, torch.Tensor):
         cornersX = torch.kron(
+            # RYAN: get the center of the agents and then use a kronecker product to generate the x positions for corners of a box +/-0.5 meters
             S1[..., 0] + offsetX, torch.tensor([0.5, 0.5, -0.5, -0.5]).to(p1.device)
         )
         cornersY = torch.kron(
+            # RYAN: get the center of the agents and then use a kronecker product to generate the y positions for corners of a box +/-0.5 meters
             S1[..., 1] + offsetY, torch.tensor([0.5, -0.5, 0.5, -0.5]).to(p1.device)
         )
+
+        # RYAN : corners for a box +/-0.5m around a box centered at (extent_0, extent_1) around vehicle 1 
         corners = torch.stack([cornersX, cornersY], dim=-1)
+
+        # RYAN : position difference
+        dx = (p1[..., 0:2] - p2[..., 0:2]).repeat_interleave(4, dim=-2)
+
+        # RYAN : Get thetas 
         theta1 = p1[..., 2]
         theta2 = p2[..., 2]
-        dx = (p1[..., 0:2] - p2[..., 0:2]).repeat_interleave(4, dim=-2)
+
+        # ego is always at (0,0,0) and all non-ego vehicles are relative to the ego in all 3 states (so ignore the centroid and yaw information because that gives absolute position which we never actually care about)
+        #           first rotate from vehicle 2 angle to vehicle 1 angle, then shift to vehicle 1 center, then rotate to world angle (which is always ego vehicle's)
+        # RYAN : corners, rotate vehicle 1 to world and translate from vehicle 2 to vehicle 1
         delta_x1 = batch_rotate_2D(corners, theta1.repeat_interleave(4, dim=-1)) + dx
+        # RYAN : ok, now we have the bounding boxes around vehicle 1 in the world/ego reference frame 
+
+        # RYAN : rotate bounding box from world to vehicle 2 
         delta_x2 = batch_rotate_2D(delta_x1, -theta2.repeat_interleave(4, dim=-1))
+        
+        # RYAN : find the maximum distance betwee the edges of the boxes in vehicle 2's reference frame
         dis = torch.maximum(
             torch.abs(delta_x2[..., 0]) - 0.5 * S2[..., 0].repeat_interleave(4, dim=-1),
             torch.abs(delta_x2[..., 1]) - 0.5 * S2[..., 1].repeat_interleave(4, dim=-1),

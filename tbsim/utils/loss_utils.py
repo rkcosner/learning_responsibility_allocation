@@ -533,10 +533,10 @@ def collision_loss(pred_edges: Dict[str, torch.Tensor], col_funcs=None):
         if edges.shape[0] == 0:
             continue
         dis = fun(
-            edges[..., 0:3],
-            edges[..., 3:6],
-            edges[..., 6:8],
-            edges[..., 8:],
+            edges[..., 0:3], # (pos, yaw) A
+            edges[..., 3:6], # (pos, yaw) B
+            edges[..., 6:8], # (extent) A
+            edges[..., 8:],  # (extent) B
         ).min(dim=-1)[
             0
         ]  # take min distance across time steps

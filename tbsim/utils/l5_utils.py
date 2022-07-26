@@ -395,6 +395,12 @@ def obtain_goal_state(tgt_pos_yaw,tgt_mask):
 
 
 def batch_to_raw_all_agents(data_batch, step_time):
+    """
+        RYAN: 
+            stacks ego with other agents history
+    """
+
+
     raw_type = torch.cat(
         (data_batch["type"].unsqueeze(1), data_batch["all_other_agents_types"]),
         dim=1,
@@ -503,6 +509,8 @@ def generate_edges(
     for i in range(agent_mask.shape[0]):
         agent_idx = torch.where(agent_mask[i] != 0)[0]
         edge_idx = torch.combinations(agent_idx, r=2)
+
+        ## RYAN: Get indeces for each type of interaction
         VV_idx = torch.where(
             veh_mask[i, edge_idx[:, 0]] & veh_mask[i, edge_idx[:, 1]]
         )[0]
@@ -515,6 +523,8 @@ def generate_edges(
         PP_idx = torch.where(
             ped_mask[i, edge_idx[:, 0]] & ped_mask[i, edge_idx[:, 1]]
         )[0]
+
+        # RYAN: Pos is only based on pose, but sometimes there are more than (x,y,yaw), in which case vel doesn't matter for collision (?) 
         if pos_pred.ndim == 4:
             edges_of_all_types = torch.cat(
                 (
@@ -647,7 +657,6 @@ def get_edges_from_batch(data_batch, ego_predictions=None, all_predictions=None)
     ).type(torch.int64)
 
     # Use predicted ego position to compute future box edges
-
     targets_all = batch_to_target_all_agents(data_batch)
     if ego_predictions is not None:
         targets_all["target_positions"] [:, 0, :, :] = ego_predictions["positions"]

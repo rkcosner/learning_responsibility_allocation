@@ -63,6 +63,10 @@ class Unicycle(Dynamics):
                 u = torch.clip(u, lb, ub)
 
             theta = x[..., 3:4]
+
+            """
+                RYAN: This is a 1st degree euler approximation of a unicycle model extended in the position integration so that the state is [x, y, v, theta]
+            """
             dxdt = torch.cat(
                 (
                     torch.cos(theta) * (x[..., 2:3] + u[..., 0:1] * dt * 0.5),
@@ -133,6 +137,12 @@ class Unicycle(Dynamics):
 
     @staticmethod
     def calculate_vel(pos, yaw, dt, mask):
+        """
+            RYAN: 
+            arg: 
+                - pos [B, A, T, D] where, for T, 0 is the oldest time step and -1 is the newest
+                - yaw [B, A, T, D] where, for T, 0 is the oldest time step and -1 is the newest
+        """
         if isinstance(pos, torch.Tensor):
             vel = (pos[..., 1:, 0:1] - pos[..., :-1, 0:1]) / dt * torch.cos(
                 yaw[..., 1:, :]
