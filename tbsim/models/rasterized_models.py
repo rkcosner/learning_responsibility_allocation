@@ -98,14 +98,14 @@ class RasterizedPlanningModel(nn.Module):
         """
             collision loss was previously commented out vvv
         """
-        # compute collision loss
-        # pred edges_states are [pos_a, yaw_a, extent_a, pos_b, yaw_b, extent_b]
-        pred_edges = batch_utils().get_edges_from_batch(
-            data_batch=data_batch,
-            ego_predictions=pred_batch["predictions"]
-        )
+        # # compute collision loss
+        # # pred edges_states are [pos_a, yaw_a, extent_a, pos_b, yaw_b, extent_b]
+        # pred_edges = batch_utils().get_edges_from_batch(
+        #     data_batch=data_batch,
+        #     ego_predictions=pred_batch["predictions"]
+        # )
         
-        coll_loss = collision_loss(pred_edges=pred_edges)
+        # coll_loss = collision_loss(pred_edges=pred_edges)
 
 
         losses = OrderedDict(

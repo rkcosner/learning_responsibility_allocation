@@ -104,12 +104,14 @@ class Responsibility(pl.LightningModule):
                     all_agents["history_yaws"]), 
                     axis =-1
                 )
+        availability_masks = all_agents["history_availabilities"]
 
         # Get acceleration and angle rate inputs [B, A, T, D] (acceleration, angle rae)
         inputs = (states[:,:,:-1,2:] - states[:,:,1:,2:])/batch["dt"][0]
 
-        safety_vals = cbf(states, inputs)
 
+        ## TODO need to calculate cbf values. Let's just do it between the ego car and every other car so there are 2*availability cars, instead of a combinatoric number, and then we can still implement the gammas sum to >= 0 loss. We should decide on a CBF for the cars, but let's build the infrastructure first and then ask Karen and Yuxiao on Wednesday. For now we can assume the structure that the CBF returns.. 
+        safety_vals = self.cbf(states)
         import pdb; pdb.set_trace()
 
         yaws = batch["yaw"][:,None] # expand dims by 1 to match centroids
@@ -121,17 +123,6 @@ class Responsibility(pl.LightningModule):
         states_all_agents = torch.cat((all_agents["history_positions"], all_agents["history_yaws"]), dim = -1)
         
         # TODO!!! Everything below here isn't working yet
-                
-
-
-        velocity = torch.linalg.norm(history_states[:,-2,0:2]) / batch["dt"][-2]
-        dir_vec = torch.stack([torch.cos(state_curr[:,2]), torch.sin(state_curr[:,2])], axis=1)
-
-        norms = torch.linalg.norm(history_states[:,-2,0:2], axis=1)
-        norms = torch.stack([norms, norms], axis=1)
-        forward_vec = history_states[:,-2,0:2] / torch.linalg.norm(history_states[:,-2,0:2], axis = 1) 
-        yaw_rate = -history_states[:,-2,2] / batch["dt"][-2]
-
         return state_curr, inputs
 
     def training_step(self, batch, batch_idx):
