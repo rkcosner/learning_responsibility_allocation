@@ -15,6 +15,7 @@ import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.utils.geometry_utils as GeoUtils
 from tbsim.utils.batch_utils import batch_utils
 from tbsim.utils.loss_utils import (
+    likelihood_loss,
     trajectory_loss,
     MultiModal_trajectory_loss,
     goal_reaching_loss,
@@ -24,6 +25,178 @@ from tbsim.utils.loss_utils import (
     NLL_GMM_loss,
     compute_pred_loss
 )
+
+class RasterizedResponsibilityModel(nn.Module):
+    """Raster-based model for responsibility estimation.
+    """
+
+    def __init__(
+            self,
+            model_arch: str,
+            input_image_shape,
+            map_feature_dim: int,
+            weights_scaling: List[float],
+            trajectory_decoder: nn.Module,
+            use_spatial_softmax=False,
+            spatial_softmax_kwargs=None,
+    ) -> None:
+
+        super().__init__()
+
+        # RYAN: Encoder is built here
+        self.map_encoder = base_models.RasterizedMapEncoder(
+            model_arch=model_arch,
+            input_image_shape=input_image_shape,
+            feature_dim=map_feature_dim,
+            use_spatial_softmax=use_spatial_softmax,
+            spatial_softmax_kwargs=spatial_softmax_kwargs,
+            output_activation=nn.ReLU
+        )
+
+        # RYAN: Decoder is passed in ahead of time 
+        self.traj_decoder = trajectory_decoder
+        self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
+
+    def forward(self, states, image_batch) -> Dict[str, torch.Tensor]:
+        # RYAN: Image in 
+        # image_batch = data_batch["image"]
+        # RYAN: Features from map
+        map_feat = self.map_encoder(image_batch)
+
+        # RYAN: Use decoder to generate trajectories
+        if self.traj_decoder.dyn is not None:
+            curr_states = batch_utils().get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
+        else:
+            curr_states = None
+
+        A = states.shape[1]-1 # number of other agents recorded
+
+        gamma_preds = []
+        for other_agent_idx in range(A):
+            #for time_idx in range(T): 
+            # only use most resent time with input, T_idx = 1
+            time_idx = 1 
+            state_A = states[:,0,time_idx,:]
+            state_B = states[:,other_agent_idx+1,time_idx,:]
+            network_input_A = torch.cat([state_A, state_B, map_feat], axis =1 )
+            network_input_B = torch.cat([state_B, state_A, map_feat], axis =1 )
+            decoder_output_A = self.traj_decoder.forward(network_input_A)
+            decoder_output_B = self.traj_decoder.forward(network_input_B)
+            decoder_output = torch.cat([decoder_output_A, decoder_output_B], axis = 1)[:,:,None]
+            gamma_preds.append(decoder_output)
+        gamma_preds = torch.cat(gamma_preds, axis=-1)
+        gamma_preds = gamma_preds.permute(0, 2, 1)
+
+        out_dict = {
+            "gammas_A" : gamma_preds[:,:,0:1,None].permute(0,1,3,2), # [B, A, T, D]
+            "gammas_B" : gamma_preds[:,:,1:,None].permute(0,1,3,2) 
+        }
+
+        return out_dict
+
+    def compute_losses(self, h_vals, gamma_preds, states, inputs, masks):
+        """
+            RYAN : Behavioral Cloning Loss
+                args: 
+                    - data_batch : provides target_positions and target_yaws 
+        """
+
+        # ii, jj = torch.where(masks[0]) # First index is in A, second in T 
+        # for i in ii: 
+        #     for j in jj: 
+
+        T_idx = 1
+        A = masks.shape[1]-1
+        gamma_A = gamma_preds["gammas_A"]
+        gamma_B = gamma_preds["gammas_B"]
+        # Select only the states where the other agents are available
+        ii, jj = torch.where(masks[:,1:,T_idx]) # First index is in A, second in T 
+        gamma_A_masked = torch.squeeze(gamma_A[ii,jj,:,:])
+        gamma_B_masked = torch.squeeze(gamma_B[ii,jj,:,:])
+        gamma_preds["gammas_A"] = gamma_A_masked
+        gamma_preds["gammas_B"] = gamma_B_masked
+
+        loss_constraint = self.compute_cbf_constraint_loss(h_vals, gamma_preds, states, inputs, masks)
+        loss_max_likelihood = self.compute_max_likelihood_loss(gamma_preds)
+        loss_resp_sum = self.compute_resp_sum_loss(gamma_preds)
+
+        losses = OrderedDict(
+            contraint_loss  = loss_constraint,
+            max_likelihood_loss = loss_max_likelihood,
+            sum__resp_loss =loss_resp_sum
+        )
+
+        return losses
+
+    def compute_max_likelihood_loss(self, gamma_preds):
+        gammas_A = gamma_preds["gammas_A"]
+        gammas_B = gamma_preds["gammas_B"]
+        loss_max_likelihood = torch.sum(-gammas_A -gammas_B) / (1e-5 + gammas_A.shape[0] + gammas_B.shape[0])
+        return loss_max_likelihood
+
+
+    def compute_resp_sum_loss(self, gamma_preds): 
+        # Penalize whenever the gammas sum up to be less than 0 (which would indicate unsafe actions)
+        gammas_A = gamma_preds["gammas_A"]
+        gammas_B = gamma_preds["gammas_B"]
+        gamma_sums = gammas_A + gammas_B  
+        loss_resp_sum = torch.sum(torch.nn.functional.relu(-gamma_sums)) / (1e-5 + gamma_sums.shape[0])
+        return loss_resp_sum 
+
+    def compute_cbf_constraint_loss(self, h_vals, gamma_preds, states, inputs, masks):
+        dhdx, = torch.autograd.grad(outputs = h_vals, inputs = states, grad_outputs = torch.ones_like(h_vals), create_graph=True)
+        T_idx = 1 
+        alpha = 1 
+        eps = 1e-3
+
+        ii, jj = torch.where(masks[:,1:,T_idx]) # First index is in A, second in T 
+        dhdxA_masked = dhdx[ii,jj*0,T_idx,:] # dhdx wrt ego agent
+        dhdxB_masked = dhdx[ii,jj+1,T_idx,:] # dhdx wrt other agent
+        h_masked = h_vals[ii,jj,T_idx]
+        inputA_masked = inputs[ii,jj*0,T_idx,:]
+        inputB_masked = inputs[ii,jj+1,T_idx,:]
+        stateA_masked = states[ii,jj*0,T_idx,:]
+        stateB_masked = states[ii,jj+1,T_idx,:]
+        
+
+        (fA,fB,gA,gB) = self.unicycle_dynamics(stateA_masked, stateB_masked)
+        LfhA = torch.bmm(dhdxA_masked[:,None,:], fA).squeeze() 
+        LfhB = torch.bmm(dhdxB_masked[:,None,:], fB).squeeze()
+        LghA = torch.bmm(dhdxA_masked[:,None,:], gA)
+        LghB = torch.bmm(dhdxB_masked[:,None,:], gB) 
+
+        natural_dynamics  = LfhA + LfhB + alpha * h_masked
+        natural_dynamics /= 2.0
+        LghAuA = torch.bmm(LghA, inputA_masked[:,:,None])
+        LghBuB = torch.bmm(LghB, inputB_masked[:,:,None])
+
+        constraint_A = natural_dynamics + LghAuA - gamma_preds["gammas_A"] 
+        constraint_B = natural_dynamics + LghBuB - gamma_preds["gammas_B"] 
+
+        loss_constraint  = torch.sum(torch.nn.functional.relu(-constraint_A-eps)) / (1e-5 + constraint_A.shape[0])
+        loss_constraint += torch.sum(torch.nn.functional.relu(-constraint_B-eps)) / (1e-5 + constraint_B.shape[0])
+        
+        return loss_constraint
+
+    def unicycle_dynamics(self, stateA, stateB):
+        # states are [x, y, v, yaw]
+        N_datapoints = stateA.shape[0]
+        fA = torch.zeros(N_datapoints, 4,1, device = stateA.device)
+        fA[:,0] = (stateA[:,2] * torch.cos(stateA[:,3]))[:,None]
+        fA[:,1] = (stateA[:,2] * torch.sin(stateA[:,3]))[:,None]
+        fB = torch.zeros(N_datapoints, 4,1, device = stateA.device)
+        fB[:,0] = (stateB[:,2] * torch.cos(stateB[:,3]))[:,None]
+        fB[:,1] = (stateB[:,2] * torch.sin(stateB[:,3]))[:,None]
+        
+        gA = torch.zeros(N_datapoints, 4,2, device = stateA.device)
+        gA[:,2,0] = torch.ones(N_datapoints)
+        gA[:,3,1] = torch.ones(N_datapoints)
+
+        gB = torch.zeros(N_datapoints, 4,2, device = stateA.device)
+        gB[:,2,0] = torch.ones(N_datapoints)
+        gB[:,3,1] = torch.ones(N_datapoints)
+        return fA, fB, gA, gB
+        
 
 
 class RasterizedPlanningModel(nn.Module):
@@ -42,6 +215,8 @@ class RasterizedPlanningModel(nn.Module):
     ) -> None:
 
         super().__init__()
+
+        # RYAN: Encoder is built here
         self.map_encoder = base_models.RasterizedMapEncoder(
             model_arch=model_arch,
             input_image_shape=input_image_shape,
@@ -50,13 +225,18 @@ class RasterizedPlanningModel(nn.Module):
             spatial_softmax_kwargs=spatial_softmax_kwargs,
             output_activation=nn.ReLU
         )
+
+        # RYAN: Decoder is passed in ahead of time 
         self.traj_decoder = trajectory_decoder
         self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
 
     def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        # RYAN: Image in 
         image_batch = data_batch["image"]
+        # RYAN: Features from map
         map_feat = self.map_encoder(image_batch)
 
+        # RYAN: Use decoder to generate trajectories
         if self.traj_decoder.dyn is not None:
             curr_states = batch_utils().get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
         else:
@@ -64,6 +244,7 @@ class RasterizedPlanningModel(nn.Module):
         dec_output = self.traj_decoder.forward(inputs=map_feat, current_states=curr_states)
         traj = dec_output["trajectories"]
 
+        # RYAN: Separate out the predicted positions and yaws to match batch data
         pred_positions = traj[:, :, :2]
         pred_yaws = traj[:, :, 2:3]
         out_dict = {

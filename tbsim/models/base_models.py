@@ -1208,6 +1208,71 @@ class TrajectoryDecoder(nn.Module):
         return preds
 
 
+class ResponsibilityDecoder(TrajectoryDecoder):
+    def _create_networks(self):
+        net_kwargs = dict() if self._network_kwargs is None else dict(self._network_kwargs)
+        if self._network_kwargs is None:
+            net_kwargs = dict()
+        
+        assert isinstance(self.num_steps, int)
+        if self.dyn is None:
+            pred_shapes = OrderedDict(
+                trajectories=(self.num_steps, self.state_dim))
+        else:
+            pred_shapes = OrderedDict(
+                trajectories=(self.num_steps, self.dyn.udim))
+        if self.Gaussian_var:
+            pred_shapes["logvar"] = (self.num_steps, self.state_dim)
+
+        state_as_input = net_kwargs.pop("state_as_input")
+        if self.dyn is not None:
+            assert state_as_input   # TODO: deprecated, set default to True and remove from configs
+
+        if state_as_input and self.dyn is not None:
+            feature_dim = self.feature_dim + self.dyn.xdim
+        else:
+            feature_dim = self.feature_dim
+        
+        responsibility_dim = self.state_dim
+
+        self.mlp = MLP(
+            input_dim=feature_dim, 
+            output_dim=responsibility_dim,
+            output_activation=None,
+            **net_kwargs
+        )
+
+
+    def forward(self, inputs):
+        outs = self.mlp(inputs)
+        # outs = super(SplitMLP, self).forward(inputs)
+        # out_dict = dict()
+        # ind = 0
+        # for k, v in self._output_shapes.items():
+        #     v_dim = int(np.prod(v))
+        #     out_dict[k] = reshape_dimensions(
+        #         outs[:, ind: ind + v_dim], begin_axis=1, end_axis=2, target_dims=v)
+        #     ind += v_dim
+        return outs
+
+    # def _forward_networks(self, inputs, current_states=None, num_steps=None):
+    #     if self._network_kwargs["state_as_input"] and self.dyn is not None:
+    #         inputs = torch.cat((inputs, current_states), dim=-1)
+
+    #     preds = self.mlp(inputs)
+
+    #     # if inputs.ndim == 2:
+    #     #     # [B, D]
+    #     #     preds = self.mlp(inputs)
+    #     # elif inputs.ndim == 3:
+    #     #     # [B, A, D]
+    #     #     preds = TensorUtils.time_distributed(inputs, self.mlp)
+    #     # else:
+    #     #     raise ValueError(
+    #     #         "Expecting inputs to have ndim == 2 or 3, got {}".format(inputs.ndim))
+    #     return preds
+
+
 class MLPTrajectoryDecoder(TrajectoryDecoder):
     def _create_networks(self):
         net_kwargs = dict() if self._network_kwargs is None else dict(self._network_kwargs)

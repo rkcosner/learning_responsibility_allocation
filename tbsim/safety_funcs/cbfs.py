@@ -21,7 +21,7 @@ class NormBallCBF(CBF):
         Torch auto-grad compatible implementation of a norm ball cbf
     """
 
-    def __init__(self, safe_radius = 5): 
+    def __init__(self, safe_radius = 1): 
         super(NormBallCBF, self).__init__() 
         self.safe_radius = safe_radius
 

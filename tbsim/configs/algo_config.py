@@ -9,11 +9,13 @@ class ResponsibilityConfig(AlgoConfig):
 
         self.name = "resp"
         self.model_architecture = "resnet18"
-        self.map_feature_dim = 256
+        self.map_feature_dim = 256 
         self.history_num_frames = 10
         self.history_num_frames_ego = 10
         self.history_num_frames_agents = 10
-        self.future_num_frames = 20
+        self.future_num_frames = 1 # RYAN : to get gamma, just need 1 step forward with no dynamics
+        self.responsibility_dim = 1 # RYAN : gamma is the 1 dimensional projection onto dhdx 
+        self.responsibility_dynamics = None # RYAN : we can force responsibility to have dynamics here
         self.step_time = 0.1
         self.render_ego_history = False
 
