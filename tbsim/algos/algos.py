@@ -89,7 +89,7 @@ class Responsibility(pl.LightningModule):
         metrics = {}
         return metrics
 
-    def get_states_and_inputs(self, batch): 
+    def get_states_inputs_and_masks(self, batch): 
         # Let the "current state" be time step (k-1) and then calculate the current input as (x_k - x_{k-1})/dt 
 
         
@@ -108,22 +108,8 @@ class Responsibility(pl.LightningModule):
 
         # Get acceleration and angle rate inputs [B, A, T, D] (acceleration, angle rae)
         inputs = (states[:,:,:-1,2:] - states[:,:,1:,2:])/batch["dt"][0]
-
-
-        ## TODO need to calculate cbf values. Let's just do it between the ego car and every other car so there are 2*availability cars, instead of a combinatoric number, and then we can still implement the gammas sum to >= 0 loss. We should decide on a CBF for the cars, but let's build the infrastructure first and then ask Karen and Yuxiao on Wednesday. For now we can assume the structure that the CBF returns.. 
-        safety_vals = self.cbf(states)
-        import pdb; pdb.set_trace()
-
-        yaws = batch["yaw"][:,None] # expand dims by 1 to match centroids
-        state = torch.cat([batch["centroid"], yaws], dim=1)
-        history_states = torch.cat([batch["history_positions"], batch["history_yaws"]], dim=2)
-
-        # Get state {k-1} using the history_state_diffs
-        state_curr = state + history_states[:,-2,:]
-        states_all_agents = torch.cat((all_agents["history_positions"], all_agents["history_yaws"]), dim = -1)
         
-        # TODO!!! Everything below here isn't working yet
-        return state_curr, inputs
+        return states, inputs, availability_masks
 
     def training_step(self, batch, batch_idx):
         
@@ -132,7 +118,13 @@ class Responsibility(pl.LightningModule):
 
         current_positions = batch["centroid"]
 
-        self.get_states_and_inputs(batch)
+        states, inputs, availability_masks = self.get_states_inputs_and_masks(batch)
+
+        ## TODO need to calculate cbf values. Let's just do it between the ego car and every other car so there are 2*availability cars, instead of a combinatoric number, and then we can still implement the gammas sum to >= 0 loss. We should decide on a CBF for the cars, but let's build the infrastructure first and then ask Karen and Yuxiao on Wednesday. For now we can assume the structure that the CBF returns.. 
+        h_vals = self.cbf(states)
+        import pdb; pdb.set_trace()
+
+        # TODO: need to get constraints and gammas and then calculate losses and then we're almost set up! Oh whoops, we also have to change the barrier to be relative degree one wrt to the extended unicycle. 
 
         raise Exception("Need to parse the data first")
         relevant_data= compute_relevant_data(batch )
