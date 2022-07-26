@@ -39,6 +39,10 @@ class ResponsibilityConfig(AlgoConfig):
         self.loss_weights.collision_loss = 0.0
         self.loss_weights.yaw_reg_loss = 0.1
 
+        self.loss_weights.constraint_loss = 1.0
+        self.loss_weights.max_likelihood_loss = 1e-3
+        self.loss_weights.sum_resp_loss = 1e-1
+
         self.optim_params.policy.learning_rate.initial = 1e-3  # policy learning rate
         self.optim_params.policy.learning_rate.decay_factor = (
             0.1  # factor to decay LR by (if epoch schedule non-empty)

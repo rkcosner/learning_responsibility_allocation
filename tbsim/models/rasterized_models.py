@@ -121,9 +121,9 @@ class RasterizedResponsibilityModel(nn.Module):
         loss_resp_sum = self.compute_resp_sum_loss(gamma_preds)
 
         losses = OrderedDict(
-            contraint_loss  = loss_constraint,
+            constraint_loss  = loss_constraint,
             max_likelihood_loss = loss_max_likelihood,
-            sum__resp_loss =loss_resp_sum
+            sum_resp_loss =loss_resp_sum
         )
 
         return losses
@@ -152,9 +152,9 @@ class RasterizedResponsibilityModel(nn.Module):
         ii, jj = torch.where(masks[:,1:,T_idx]) # First index is in A, second in T 
         dhdxA_masked = dhdx[ii,jj*0,T_idx,:] # dhdx wrt ego agent
         dhdxB_masked = dhdx[ii,jj+1,T_idx,:] # dhdx wrt other agent
-        h_masked = h_vals[ii,jj,T_idx]
-        inputA_masked = inputs[ii,jj*0,T_idx,:]
-        inputB_masked = inputs[ii,jj+1,T_idx,:]
+        h_masked = h_vals[ii,jj,T_idx-1]            # minus 1 time step because hs and inputs are only computed for everything up to current, excluding current
+        inputA_masked = inputs[ii,jj*0,T_idx-1,:]   # minus 1 time step because hs and inputs are only computed for everything up to current, excluding current
+        inputB_masked = inputs[ii,jj+1,T_idx-1,:]   # minus 1 time step because hs and inputs are only computed for everything up to current, excluding current
         stateA_masked = states[ii,jj*0,T_idx,:]
         stateB_masked = states[ii,jj+1,T_idx,:]
         

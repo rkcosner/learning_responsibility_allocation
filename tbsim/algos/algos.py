@@ -10,6 +10,7 @@ import torch.nn.functional as F
 import tbsim.utils.torch_utils as TorchUtils
 
 from tbsim.models.rasterized_models import (
+    RasterizedResponsibilityModel,
     RasterizedPlanningModel,
     RasterizedVAEModel,
     RasterizedGCModel,
@@ -22,6 +23,7 @@ from tbsim.models.rasterized_models import (
 from tbsim.models.base_models import (
     MLPTrajectoryDecoder,
     RasterizedMapUNet,
+    ResponsibilityDecoder,
 )
 from tbsim.models.transformer_model import TransformerModel
 import tbsim.utils.tensor_utils as TensorUtils
@@ -47,19 +49,33 @@ class Responsibility(pl.LightningModule):
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
         self._do_log = do_log
+
+
         # RYAN: Traj Decover is the Decoder portion of a train VAE
-        traj_decoder = MLPTrajectoryDecoder(
-            feature_dim=algo_config.map_feature_dim,
-            state_dim=3,
+        #   - feature_dim : dimension of the input feature
+        #   - state_dim : dimension of output trajectory at each step
+        #   - num_steps : number of future states to predict 
+        #   - dynamics_type : if specified, the network predicts inputs, otherwise predict future states directly 
+        #   - dynamics_kwargs : dictionary of dynamics variables
+        #   - step_time : time between steps (if dynamics_model is none, this isn't used)
+        #   - network_kwargs : ketword args for the decoder networks
+        #   - Gaussian_var : bool flag, whether to output the variance of the predicted trajectory 
+        traj_decoder = ResponsibilityDecoder(
+            feature_dim=algo_config.map_feature_dim + 8, # add 8 dims for the states of agent A and B
+            state_dim=algo_config.responsibility_dim,
             num_steps=algo_config.future_num_frames,
-            dynamics_type=algo_config.dynamics.type,
-            dynamics_kwargs=algo_config.dynamics,
+            dynamics_type=None,
+            dynamics_kwargs=algo_config.responsibility_dynamics,
             step_time=algo_config.step_time,
             network_kwargs=algo_config.decoder,
         )
 
-        # RYAN: I think that this the policy that plans the vehicles future states (?) 
-        self.nets["policy"] = RasterizedPlanningModel(
+
+        # RYAN: 
+        """
+            - model_arch : (ex) resnet18, modelarchitecture
+        """
+        self.nets["policy"] = RasterizedResponsibilityModel(
             model_arch=algo_config.model_architecture,
             input_image_shape=modality_shapes["image"],  # [C, H, W]
             trajectory_decoder=traj_decoder,
@@ -85,8 +101,9 @@ class Responsibility(pl.LightningModule):
         # RYAN: This isn't called during training??? 
         return self.nets["policy"](obs_dict)["predictions"]
 
-    def _compute_metrics(self, hs, gammas):
-        metrics = {}
+    def _compute_metrics(self):
+        # TODO implement metrics
+        metrics = {"blah" : 0 }
         return metrics
 
     def get_states_inputs_and_masks(self, batch): 
@@ -112,63 +129,66 @@ class Responsibility(pl.LightningModule):
         return states, inputs, availability_masks
 
     def training_step(self, batch, batch_idx):
-        
+        torch.set_grad_enabled(True) # RYAN: this slows thing down, but is required to calculate dhdx
+
         # Parse trajdata to get information relevant to tbsim
         batch = batch_utils().parse_batch(batch)
-
-        current_positions = batch["centroid"]
-
         states, inputs, availability_masks = self.get_states_inputs_and_masks(batch)
-
-        ## TODO need to calculate cbf values. Let's just do it between the ego car and every other car so there are 2*availability cars, instead of a combinatoric number, and then we can still implement the gammas sum to >= 0 loss. We should decide on a CBF for the cars, but let's build the infrastructure first and then ask Karen and Yuxiao on Wednesday. For now we can assume the structure that the CBF returns.. 
+        states.requires_grad = True 
         h_vals = self.cbf(states)
-        import pdb; pdb.set_trace()
-
-        # TODO: need to get constraints and gammas and then calculate losses and then we're almost set up! Oh whoops, we also have to change the barrier to be relative degree one wrt to the extended unicycle. 
-
-        raise Exception("Need to parse the data first")
-        relevant_data= compute_relevant_data(batch )
-        hs = self.cbf(relevant_data)
+        gamma_preds = self.nets["policy"](states, batch["image"]) 
+        losses = self.nets["policy"].compute_losses(h_vals, gamma_preds, states, inputs, availability_masks) 
         
-        gamma_preds = self.nets(relevant_data)
-        states, inputs = get_states_and_inputs(relevant_data)
 
-        losses = self.compute_losses(hs, gamma_preds, states, inputs)
         total_loss = 0.0
-        for lk, l in losses.items(): 
-            loss_contribution  = l * self.algo_config.loss_weights[lk]
+        for lk, ell in losses.items(): 
+            loss_contribution  = ell * self.algo_config.loss_weights[lk]
             total_loss += loss_contribution
 
-        metrics = self._compute_metrics(hs, gammas, losses)  
+        # TODO: implement metrics
+        # metrics = self._compute_metrics(hs, gammas, losses)  
 
         for lk, l in losses.items(): 
             self.log("train/losses_"+lk, l)
         
-        for mk, m in metrics.items(): 
-            self.log("train/metrics_" + mk, m)
+        # for mk, m in metrics.items(): 
+        #     self.log("train/metrics_" + mk, m)
 
         return {
             "loss": total_loss, 
             "all_losses": losses, 
-            "all_metrics": metrics
+            # "all_metrics": metrics
         }
 
     def validation_step(self, batch, batch_idx):
-        # TODO: Modify this, this runs first to validate the dataset
+        torch.set_grad_enabled(True) # RYAN: this slows thing down, but is required to calculate dhdx
         batch = batch_utils().parse_batch(batch)
-        pout = self.nets["policy"](batch)
-        losses = TensorUtils.detach(self.nets["policy"].compute_losses(pout, batch))
-        metrics = self._compute_metrics(pout, batch)
+        states, inputs, availability_masks = self.get_states_inputs_and_masks(batch)
+        states.requires_grad = True
+        h_vals = self.cbf(states)
+        gamma_preds = self.nets["policy"](states=states, image_batch=batch["image"]) 
+        losses = TensorUtils.detach(self.nets["policy"].compute_losses(h_vals, gamma_preds, states, inputs, availability_masks))        
+        metrics = self._compute_metrics() #TODO: implement metrics
+
         return {"losses": losses, "metrics": metrics}
 
     def validation_epoch_end(self, outputs) -> None:
-        for k in outputs[0]["losses"]:
-            m = torch.stack([o["losses"][k] for o in outputs]).mean()
-            self.log("val/losses_" + k, m)
+        # Log Losses
+        losses = []
+        for j in range(len(outputs)):
+            losses_batch = []
+            for k in outputs[0]["losses"]:
+                losses_batch.append(outputs[j]["losses"][k].item())
+            losses.append(losses_batch)
+        losses = np.array(losses)
+        losses = np.mean(losses, axis = 0)
+        for i, k in enumerate(outputs[0]["losses"]):
+            self.log("val/losses_" + k, losses[i])
 
-        for k in outputs[0]["metrics"]:
-            m = np.stack([o["metrics"][k] for o in outputs]).mean()
-            self.log("val/metrics_" + k, m)
+        # Log Metrics TODO: currently metrics are turned off
+        # for k in outputs[0]["metrics"]:
+        #     m = np.stack([o["metrics"][k] for o in outputs]).mean()
+        #     self.log("val/metrics_" + k, m)
 
     def configure_optimizers(self):
         optim_params = self.algo_config.optim_params["policy"]
