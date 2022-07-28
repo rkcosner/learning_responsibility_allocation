@@ -31,7 +31,7 @@ class NormBallCBF(CBF):
             Args: 
                 - states [B, A+1, T, D_states]
             Return: 
-                - h_vals [B, A, T-1, 1]
+                - h_vals [B, A, T-1]
         """
         
         A = states.shape[1] - 1  # removing ego availability
@@ -46,9 +46,64 @@ class NormBallCBF(CBF):
         h_vals  = torch.linalg.norm(dx_agents, ord = 2, axis = -1) # Compute 2 norm for vehicle positions 
         h_vals  = torch.pow(h_vals,2)
         h_vals -= self.safe_radius**2
-
         return h_vals
 
+class ExtendedNormBallCBF(CBF): 
+    """
+        Torch auto-grad compatible implementation of a norm ball cbf
+    """
+
+    def __init__(self, safe_radius = 0.1, alpha_e = 40): 
+        super(ExtendedNormBallCBF, self).__init__() 
+        self.safe_radius = safe_radius
+        self.alpha_e = alpha_e
+
+    def forward(self, states):
+        """
+            Calculate safety values (computes h for unavailable states as though they were available, mask later)
+            Args: 
+                - states [B, A+1, T, D_states] states are [x, y, v, yaw]
+            Return: 
+                - h_vals [B, A, T-1]
+        """
+        
+        A = states.shape[1] - 1  # removing ego availability
+        # Get the relative positions of the other agents with respect to ego pose for all states that we have inputs for
+        ego_pos = states[:,0,1:,0:2]
+        ego_pos = ego_pos[:,:,:,None]
+        ego_pos = ego_pos.repeat(1,1,1,A)
+        ego_pos = ego_pos.permute(0,3,1,2)
+        Dpos = states[:,1:,1:,0:2] - ego_pos
+
+        h_des  = torch.linalg.norm(Dpos, ord = 2, axis = -1) # Compute 2 norm for vehicle positions 
+        h_des  = torch.pow(h_des,2)
+        h_des -= self.safe_radius**2
+
+        # get ego dpos/dt
+        ego_vel = states[:,0,1:,2, None]
+        ego_yaw = states[:,0,1:,3, None]
+        ego_dxdt = ego_vel * torch.cos(ego_yaw)
+        ego_dydt = ego_vel * torch.sin(ego_yaw)
+        ego_dposdt = torch.cat([ego_dxdt, ego_dydt], axis = -1)[...,None]
+        ego_dposdt = ego_dposdt.repeat(1,1,1,A)
+        ego_dposdt = ego_dposdt.permute(0,3,1,2)
+
+        # get agent dpos/dt
+        agent_vel = states[:,1:,1:,2,None]
+        agent_yaw  = states[:,1:,1:,2,None]
+        agent_dxdt = agent_vel * torch.cos(agent_yaw)
+        agent_dydt = agent_vel * torch.sin(agent_yaw)
+        agent_dposdt = torch.cat([agent_dxdt, agent_dydt], axis=-1)
+
+        Ddposdt = agent_dposdt - ego_dposdt
+
+        # Calculate extended barrier
+        dot_pos_vel = torch.matmul(Dpos[:,:,:,None,:], Ddposdt[...,None])
+        dot_pos_vel = dot_pos_vel.squeeze()     
+
+        h_extended = 2 * dot_pos_vel + self.alpha_e * h_des 
+
+        return h_extended
 
 class RssCBF(CBF): 
     """
@@ -83,3 +138,5 @@ class RssCBF(CBF):
         h = (xf - xr) - d_min
 
         return h 
+
+

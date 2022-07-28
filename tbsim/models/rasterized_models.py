@@ -61,6 +61,8 @@ class RasterizedResponsibilityModel(nn.Module):
         # RYAN: Image in 
         # image_batch = data_batch["image"]
         # RYAN: Features from map
+
+
         map_feat = self.map_encoder(image_batch)
 
         # RYAN: Use decoder to generate trajectories
@@ -143,7 +145,7 @@ class RasterizedResponsibilityModel(nn.Module):
         loss_resp_sum = torch.sum(torch.nn.functional.relu(-gamma_sums)) / (1e-5 + gamma_sums.shape[0])
         return loss_resp_sum 
 
-    def compute_cbf_constraint_loss(self, h_vals, gamma_preds, states, inputs, masks):
+    def compute_cbf_constraint_loss(self, h_vals, gamma_preds, states, inputs, masks, leaky_relu_negative_slope=1e-4):
         dhdx, = torch.autograd.grad(outputs = h_vals, inputs = states, grad_outputs = torch.ones_like(h_vals), create_graph=True)
         T_idx = 1 
         alpha = 1 
@@ -167,14 +169,17 @@ class RasterizedResponsibilityModel(nn.Module):
 
         natural_dynamics  = LfhA + LfhB + alpha * h_masked
         natural_dynamics /= 2.0
-        LghAuA = torch.bmm(LghA, inputA_masked[:,:,None])
-        LghBuB = torch.bmm(LghB, inputB_masked[:,:,None])
+        LghAuA = torch.bmm(LghA, inputA_masked[:,:,None]).squeeze()
+        LghBuB = torch.bmm(LghB, inputB_masked[:,:,None]).squeeze()
 
+        # TODO: debug and check that this is right, the constraint loss is surprisingly high
         constraint_A = natural_dynamics + LghAuA - gamma_preds["gammas_A"] 
         constraint_B = natural_dynamics + LghBuB - gamma_preds["gammas_B"] 
 
-        loss_constraint  = torch.sum(torch.nn.functional.relu(-constraint_A-eps)) / (1e-5 + constraint_A.shape[0])
-        loss_constraint += torch.sum(torch.nn.functional.relu(-constraint_B-eps)) / (1e-5 + constraint_B.shape[0])
+
+        # TODO: decide leaky vs standard relu 
+        loss_constraint  = torch.sum(torch.nn.functional.leaky_relu(-constraint_A-eps, negative_slope = leaky_relu_negative_slope)) / (1e-5 + constraint_A.shape[0])
+        loss_constraint += torch.sum(torch.nn.functional.leaky_relu(-constraint_B-eps, negative_slope = leaky_relu_negative_slope)) / (1e-5 + constraint_B.shape[0])
         
         return loss_constraint
 

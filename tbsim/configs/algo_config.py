@@ -19,7 +19,7 @@ class ResponsibilityConfig(AlgoConfig):
         self.step_time = 0.1
         self.render_ego_history = False
 
-        self.decoder.layer_dims = ()
+        self.decoder.layer_dims = (128,128)
         self.decoder.state_as_input = True
 
         self.dynamics.type = "Unicycle"
@@ -34,16 +34,16 @@ class ResponsibilityConfig(AlgoConfig):
         self.spatial_softmax.kwargs.temperature = 1.0
         self.spatial_softmax.kwargs.learnable_temperature = False
 
-        self.loss_weights.prediction_loss = 1.0
-        self.loss_weights.goal_loss = 0.0
-        self.loss_weights.collision_loss = 0.0
-        self.loss_weights.yaw_reg_loss = 0.1
+        # self.loss_weights.prediction_loss = 1.0
+        # self.loss_weights.goal_loss = 0.0
+        # self.loss_weights.collision_loss = 0.0
+        # self.loss_weights.yaw_reg_loss = 0.1
 
         self.loss_weights.constraint_loss = 1.0
-        self.loss_weights.max_likelihood_loss = 1e-3
+        self.loss_weights.max_likelihood_loss = 1e-1
         self.loss_weights.sum_resp_loss = 1e-1
 
-        self.optim_params.policy.learning_rate.initial = 1e-3  # policy learning rate
+        self.optim_params.policy.learning_rate.initial = 1e-4  # policy learning rate
         self.optim_params.policy.learning_rate.decay_factor = (
             0.1  # factor to decay LR by (if epoch schedule non-empty)
         )
@@ -52,7 +52,8 @@ class ResponsibilityConfig(AlgoConfig):
         )  # epochs where LR decay occurs
         self.optim_params.policy.regularization.L2 = 0.00  # L2 regularization strength
 
-        self.cbf = "norm_ball_cbf"
+        self.cbf = "extended_norm_ball_cbf"
+        self.scene_centric = True
 
 class BehaviorCloningConfig(AlgoConfig):
     def __init__(self):

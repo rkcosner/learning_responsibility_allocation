@@ -1130,7 +1130,8 @@ class TrajectoryDecoder(nn.Module):
             dynamics_kwargs: dict = None,
             step_time: float = None,
             network_kwargs: dict = None,
-            Gaussian_var = False
+            Gaussian_var = False, 
+            layer_dims = 0
     ):
         """
         A class that predict future trajectories based on input features
@@ -1154,6 +1155,7 @@ class TrajectoryDecoder(nn.Module):
         self._dynamics_type = dynamics_type
         self._dynamics_kwargs = dynamics_kwargs
         self.Gaussian_var = Gaussian_var
+        self.layer_dims = layer_dims
         self._create_dynamics()
         self._create_networks()
 
@@ -1234,6 +1236,8 @@ class ResponsibilityDecoder(TrajectoryDecoder):
             feature_dim = self.feature_dim
         
         responsibility_dim = self.state_dim
+        layer_dims = self.layer_dims
+
 
         self.mlp = MLP(
             input_dim=feature_dim, 

@@ -142,6 +142,8 @@ class Unicycle(Dynamics):
             arg: 
                 - pos [B, A, T, D] where, for T, 0 is the oldest time step and -1 is the newest
                 - yaw [B, A, T, D] where, for T, 0 is the oldest time step and -1 is the newest
+                - dt  [D] 
+                - mask [B, A, T]
         """
         if isinstance(pos, torch.Tensor):
             vel = (pos[..., 1:, 0:1] - pos[..., :-1, 0:1]) / dt * torch.cos(

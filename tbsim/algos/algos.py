@@ -34,8 +34,12 @@ from tbsim.policies.common import Plan, Action
 import tbsim.algos.algo_utils as AlgoUtils
 from tbsim.utils.geometry_utils import transform_points_tensor
 
-from tbsim.safety_funcs.utils import batch_to_raw_all_agents
+from tbsim.safety_funcs.utils import (
+    batch_to_raw_all_agents, 
+    scene_centric_batch_to_raw
+)
 from tbsim.safety_funcs.cbfs import (
+    ExtendedNormBallCBF,
     NormBallCBF, 
     RssCBF
 )
@@ -68,8 +72,8 @@ class Responsibility(pl.LightningModule):
             dynamics_kwargs=algo_config.responsibility_dynamics,
             step_time=algo_config.step_time,
             network_kwargs=algo_config.decoder,
+            layer_dims = algo_config.decoder.layer_dims
         )
-
 
         # RYAN: 
         """
@@ -89,6 +93,8 @@ class Responsibility(pl.LightningModule):
             self.cbf = RssCBF()
         elif algo_config.cbf == "norm_ball_cbf": 
             self.cbf = NormBallCBF()
+        elif algo_config.cbf == "extended_norm_ball_cbf":
+            self.cbf = ExtendedNormBallCBF()
         else: 
             raise Exception("Config Error: algo_config.cbf is not properly defined")
         
@@ -109,24 +115,13 @@ class Responsibility(pl.LightningModule):
     def get_states_inputs_and_masks(self, batch): 
         # Let the "current state" be time step (k-1) and then calculate the current input as (x_k - x_{k-1})/dt 
 
-        
+        if self.algo_config.scene_centric == False: 
+            raise Exception("Responsibility calculations are scene-centric. Please set scene_centric = True in the algo_config.py")
         if self.algo_config.dynamics.type != "Unicycle": 
             raise Exception("Using dynamics: '" +self.algo_config.dynamics +"'that have not been implemented yet. Please use unicycle or add new dynamics and state parsing")
 
-        all_agents = batch_to_raw_all_agents(batch, batch["dt"][0])
-        # States [B, A, T, D] where D is [x pose, y pose, velocity, yaws] and increasing T goes backwards in time
-        states = torch.cat((
-                    all_agents["history_positions"], 
-                    all_agents["history_vel"], 
-                    all_agents["history_yaws"]), 
-                    axis =-1
-                )
-        availability_masks = all_agents["history_availabilities"]
-
-        # Get acceleration and angle rate inputs [B, A, T, D] (acceleration, angle rae)
-        inputs = (states[:,:,:-1,2:] - states[:,:,1:,2:])/batch["dt"][0]
-        
-        return states, inputs, availability_masks
+        data = scene_centric_batch_to_raw(batch)        
+        return data
 
     def training_step(self, batch, batch_idx):
         torch.set_grad_enabled(True) # RYAN: this slows thing down, but is required to calculate dhdx
@@ -150,6 +145,7 @@ class Responsibility(pl.LightningModule):
 
         for lk, l in losses.items(): 
             self.log("train/losses_"+lk, l)
+        self.log("train/total_loss", total_loss)
         
         # for mk, m in metrics.items(): 
         #     self.log("train/metrics_" + mk, m)
@@ -161,10 +157,13 @@ class Responsibility(pl.LightningModule):
         }
 
     def validation_step(self, batch, batch_idx):
+
         torch.set_grad_enabled(True) # RYAN: this slows thing down, but is required to calculate dhdx
         batch = batch_utils().parse_batch(batch)
-        states, inputs, availability_masks = self.get_states_inputs_and_masks(batch)
-        states.requires_grad = True
+
+        import pdb; pdb.set_trace()
+        data = self.get_states_inputs_and_masks(batch)
+        data["states"].requires_grad = True
         h_vals = self.cbf(states)
         gamma_preds = self.nets["policy"](states=states, image_batch=batch["image"]) 
         losses = TensorUtils.detach(self.nets["policy"].compute_losses(h_vals, gamma_preds, states, inputs, availability_masks))        
@@ -185,6 +184,10 @@ class Responsibility(pl.LightningModule):
         for i, k in enumerate(outputs[0]["losses"]):
             self.log("val/losses_" + k, losses[i])
 
+        self.log("val/losses_prediction_loss", 0.0)
+        self.log("val/losses_goal_loss",0.0)
+        self.log("val/losses_collision_loss",0.0)
+        self.log("val/losses_yaw_reg_loss",0.0)
         # Log Metrics TODO: currently metrics are turned off
         # for k in outputs[0]["metrics"]:
         #     m = np.stack([o["metrics"][k] for o in outputs]).mean()
@@ -198,64 +201,8 @@ class Responsibility(pl.LightningModule):
             weight_decay=optim_params["regularization"]["L2"],
         )
 
-    def get_plan(self, obs_dict, **kwargs):
-        raise Exception("Responsibility isn't built for forward plan prediction yet.")
-        preds = self(obs_dict)
-        plan = Plan(
-            positions=preds["positions"],
-            yaws=preds["yaws"],
-            availabilities=torch.ones(preds["positions"].shape[:-1]).to(
-                preds["positions"].device
-            ),  # [B, T]
-        )
-        return plan, {}
 
-    def get_action(self, obs_dict, **kwargs):
-        raise Exception("Responsibility isn't built for forward action prediction yet.")
-        preds = self(obs_dict)
-        action = Action(
-            positions=preds["positions"],
-            yaws=preds["yaws"]
-        )
-        return action, {}
 
-    def compute_losses(self, hs, gamma_pred, states): 
-        loss_constraint = self.compute_cbf_constraint_loss(hs, gamma_preds, states)
-        loss_maxlikely  = self.compute_max_likelihood_loss(gammas_preds)
-        losses = OrderedDict(
-            cosntraint_loss = loss_constraint, 
-            max_likelihood_loss = loss_maxlikely 
-        )
-        return losses
-
-    def compute_constraint_loss(self, hs, gamma_preds, data): 
-        N_agents_per_cbf = 2
-
-        raise Exception("Data Usage Undefined, please figure out what the data and states should be!")
-        state 
-        input 
-
-        dhdx, = torch.autograd(outputs = h, inputs = states, grad_ouputs=torch.ones_like(h), create_graph=True)
-        f, gs = dynamics(states) 
-        Lfh = torch.bmm(dhdx, f)
-
-        # For now only account for the ego agent's perspective
-        Lgh = torch.bmm(dhdx, g[0])
-        
-        # The ego's effect on dt 
-        dhdt = 1.0 / N_agents_per_cbf * Lfh + torch.bmm(Lgh, input)
-        constraint = dhdt + self.algo_config.alpha * h / N_agents_per_cbf - gamma_preds
-
-        loss_constraint = torch.sum(torch.nn.functional.leaky_relu(-constraint - self.algo_config.constraint_eps)) / (1e-5 + constraint.shape[0])
-
-        return loss_constraint
-
-    @staticmethod
-    def compute_max_likelihood_loss(gamma_pred): 
-        
-        loss_maxlikely = torch.sum(-gammas) / (1e-5 + gammas.shape[0])
-
-        return loss_maxlikely
         
 
     
