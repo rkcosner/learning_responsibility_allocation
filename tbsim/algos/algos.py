@@ -39,6 +39,7 @@ from tbsim.safety_funcs.utils import (
     scene_centric_batch_to_raw
 )
 from tbsim.safety_funcs.cbfs import (
+    BackupBarrierCBF,
     ExtendedNormBallCBF,
     NormBallCBF, 
     RssCBF
@@ -65,7 +66,7 @@ class Responsibility(pl.LightningModule):
         #   - network_kwargs : ketword args for the decoder networks
         #   - Gaussian_var : bool flag, whether to output the variance of the predicted trajectory 
         traj_decoder = ResponsibilityDecoder(
-            feature_dim=algo_config.map_feature_dim + 8, # add 8 dims for the states of agent A and B
+            feature_dim = 2 * algo_config.map_feature_dim + 8, # add 8 dims for the states of agent A and B
             state_dim=algo_config.responsibility_dim,
             num_steps=algo_config.future_num_frames,
             dynamics_type=None,
@@ -95,6 +96,8 @@ class Responsibility(pl.LightningModule):
             self.cbf = NormBallCBF()
         elif algo_config.cbf == "extended_norm_ball_cbf":
             self.cbf = ExtendedNormBallCBF()
+        elif algo_config.cbf == "backup_barrier_cbf": 
+            self.cbf = BackupBarrierCBF()
         else: 
             raise Exception("Config Error: algo_config.cbf is not properly defined")
         
@@ -112,7 +115,7 @@ class Responsibility(pl.LightningModule):
         metrics = {"blah" : 0 }
         return metrics
 
-    def get_states_inputs_and_masks(self, batch): 
+    def add_inputs_vel_to_batch(self, batch): 
         # Let the "current state" be time step (k-1) and then calculate the current input as (x_k - x_{k-1})/dt 
 
         if self.algo_config.scene_centric == False: 
@@ -120,19 +123,17 @@ class Responsibility(pl.LightningModule):
         if self.algo_config.dynamics.type != "Unicycle": 
             raise Exception("Using dynamics: '" +self.algo_config.dynamics +"'that have not been implemented yet. Please use unicycle or add new dynamics and state parsing")
 
-        data = scene_centric_batch_to_raw(batch)        
-        return data
+        batch = scene_centric_batch_to_raw(batch)        
+        return batch
 
     def training_step(self, batch, batch_idx):
         torch.set_grad_enabled(True) # RYAN: this slows thing down, but is required to calculate dhdx
-
-        # Parse trajdata to get information relevant to tbsim
+        #
         batch = batch_utils().parse_batch(batch)
-        states, inputs, availability_masks = self.get_states_inputs_and_masks(batch)
-        states.requires_grad = True 
-        h_vals = self.cbf(states)
-        gamma_preds = self.nets["policy"](states, batch["image"]) 
-        losses = self.nets["policy"].compute_losses(h_vals, gamma_preds, states, inputs, availability_masks) 
+        batch = self.add_inputs_vel_to_batch(batch)
+        batch["states"].requires_grad = True
+        gamma_preds = self.nets["policy"](batch)
+        losses = self.nets["policy"].compute_losses(self.cbf, gamma_preds, batch)
         
 
         total_loss = 0.0
@@ -160,13 +161,10 @@ class Responsibility(pl.LightningModule):
 
         torch.set_grad_enabled(True) # RYAN: this slows thing down, but is required to calculate dhdx
         batch = batch_utils().parse_batch(batch)
-
-        import pdb; pdb.set_trace()
-        data = self.get_states_inputs_and_masks(batch)
-        data["states"].requires_grad = True
-        h_vals = self.cbf(states)
-        gamma_preds = self.nets["policy"](states=states, image_batch=batch["image"]) 
-        losses = TensorUtils.detach(self.nets["policy"].compute_losses(h_vals, gamma_preds, states, inputs, availability_masks))        
+        batch = self.add_inputs_vel_to_batch(batch)
+        batch["states"].requires_grad = True
+        gamma_preds = self.nets["policy"](batch)
+        losses = TensorUtils.detach(self.nets["policy"].compute_losses(self.cbf, gamma_preds, batch))
         metrics = self._compute_metrics() #TODO: implement metrics
 
         return {"losses": losses, "metrics": metrics}
@@ -192,6 +190,7 @@ class Responsibility(pl.LightningModule):
         # for k in outputs[0]["metrics"]:
         #     m = np.stack([o["metrics"][k] for o in outputs]).mean()
         #     self.log("val/metrics_" + k, m)
+
 
     def configure_optimizers(self):
         optim_params = self.algo_config.optim_params["policy"]

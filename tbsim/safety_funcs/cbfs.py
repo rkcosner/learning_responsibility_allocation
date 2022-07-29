@@ -1,4 +1,15 @@
+from turtle import back
 import torch 
+from tbsim.utils.geometry_utils import (
+    VEH_VEH_collision, 
+    VEH_PED_collision, 
+    PED_VEH_collision, 
+    PED_PED_collision
+)
+
+from tbsim.dynamics import ( 
+    Unicycle
+)
 
 class CBF(torch.nn.Module):
     """
@@ -140,3 +151,74 @@ class RssCBF(CBF):
         return h 
 
 
+
+def forward_project_states(ego_pos, agent_pos, backup_controller, N_tForward, dt):    
+    ego_traj = []
+    agent_traj = []
+    next_ego_state = ego_pos
+    next_agent_state = agent_pos
+    for i in range(N_tForward): 
+        next_ego_state   = Unicycle.step(0, next_ego_state,   backup_controller, dt, bound = False)
+        next_agent_state = Unicycle.step(0, next_agent_state, backup_controller, dt, bound = False) 
+        ego_traj.append(next_ego_state[...,None])
+        agent_traj.append(next_agent_state[...,None])
+    ego_traj = torch.cat(ego_traj, axis=-1)
+    agent_traj = torch.cat(agent_traj, axis=-1)
+    ego_traj = ego_traj.permute(0,1,3,2)        # [B, A, T, D]
+    agent_traj = agent_traj.permute(0,1,3,2)    # [B, A, T, D]
+
+    return ego_traj, agent_traj
+
+
+class BackupBarrierCBF(CBF): 
+    """
+        Torch auto-grad compatible implementation of a norm ball cbf
+    """
+
+    def __init__(self, safe_radius = 0, T_horizon = 1): 
+        super(BackupBarrierCBF, self).__init__() 
+        self.safe_radius = safe_radius
+        self.T_horizon = T_horizon
+
+    def process_batch(self, batch): 
+        T_idx = -2 # move back one time step, so that we can calculate input data.
+        A = batch["states"].shape[1] - 1
+        ego_pos = batch["states"][:,0,T_idx,:]
+        ego_extent = batch["extent"][:,0,:]
+        ego_pos = ego_pos.unsqueeze(1).repeat(1, A, 1)
+        ego_extent = ego_extent.unsqueeze(1).repeat(1,A,1)
+        agent_pos = batch["states"][:,1:,T_idx,:]
+        agent_extent = batch["extent"][:,1:,:]
+        dt = batch["dt"][0]
+
+        data = torch.cat([ego_pos, agent_pos, ego_extent, agent_extent, dt * torch.ones_like(agent_extent[:,:,:1])], axis=-1)
+
+        return data
+
+    def forward(self, data):
+        """
+            Calculates Safety Values for the batch between each agent and the ego (agent0)
+                The safety measure is h = min_{tau in [0, T_horizon]} distance(x_0(t+tau), x_j(t+tau))
+
+            The assumed backup controller is constant velocity and driving forward, so the input is [accel=0,angle rate=0]
+        """
+
+        ego_pos = data[...,0:4]
+        agent_pos = data[...,4:8]
+        ego_extent = data[...,8:11]
+        agent_extent = data[...,11:14]
+        dt = data[...,14,None]
+
+        B = data.shape[0]
+        A = data.shape[1]
+        N_tForward = int(self.T_horizon/dt[0,0])
+        backup_controller = torch.zeros(B, A, 2).to(ego_pos.device)
+        ego_traj, agent_traj = forward_project_states(ego_pos, agent_pos, backup_controller, N_tForward, dt)
+        ego_extent   = ego_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
+        agent_extent = agent_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
+        dis = VEH_VEH_collision(ego_traj, agent_traj, ego_extent, agent_extent, return_dis = False)
+        min_dis, _ = dis.min(axis=-1) 
+
+        h = min_dis
+
+        return h 

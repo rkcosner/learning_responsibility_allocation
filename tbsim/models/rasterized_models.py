@@ -57,31 +57,23 @@ class RasterizedResponsibilityModel(nn.Module):
         self.traj_decoder = trajectory_decoder
         self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
 
-    def forward(self, states, image_batch) -> Dict[str, torch.Tensor]:
+    def forward(self, batch) -> Dict[str, torch.Tensor]:
         # RYAN: Image in 
         # image_batch = data_batch["image"]
         # RYAN: Features from map
 
-
-        map_feat = self.map_encoder(image_batch)
-
-        # RYAN: Use decoder to generate trajectories
-        if self.traj_decoder.dyn is not None:
-            curr_states = batch_utils().get_current_states(data_batch, dyn_type=self.traj_decoder.dyn.type())
-        else:
-            curr_states = None
-
-        A = states.shape[1]-1 # number of other agents recorded
+        ego_imgs   = batch["image"][:,0,...]
+        ego_map_feat = self.map_encoder(ego_imgs)
+        ego_state = batch["states"][:,0,-1,:]
+        A = batch["image"].shape[1]
 
         gamma_preds = []
-        for other_agent_idx in range(A):
-            #for time_idx in range(T): 
-            # only use most resent time with input, T_idx = 1
-            time_idx = 1 
-            state_A = states[:,0,time_idx,:]
-            state_B = states[:,other_agent_idx+1,time_idx,:]
-            network_input_A = torch.cat([state_A, state_B, map_feat], axis =1 )
-            network_input_B = torch.cat([state_B, state_A, map_feat], axis =1 )
+        for i in range(A - 1):
+            agent_state = batch["states"][:,1+i,-1,:]
+            agent_imgs = batch["image"][:,i,...]
+            agent_map_feat = self.map_encoder(agent_imgs)
+            network_input_A = torch.cat([ego_state, agent_state, ego_map_feat, agent_map_feat], axis =1 )
+            network_input_B = torch.cat([agent_state, ego_state, agent_map_feat, ego_map_feat], axis =1 )
             decoder_output_A = self.traj_decoder.forward(network_input_A)
             decoder_output_B = self.traj_decoder.forward(network_input_B)
             decoder_output = torch.cat([decoder_output_A, decoder_output_B], axis = 1)[:,:,None]
@@ -96,29 +88,27 @@ class RasterizedResponsibilityModel(nn.Module):
 
         return out_dict
 
-    def compute_losses(self, h_vals, gamma_preds, states, inputs, masks):
+    def compute_losses(self, cbf, gamma_preds, batch):
         """
             RYAN : Behavioral Cloning Loss
                 args: 
                     - data_batch : provides target_positions and target_yaws 
         """
+        masks = batch["history_availabilities"]
+        T = masks.shape[-1]
 
-        # ii, jj = torch.where(masks[0]) # First index is in A, second in T 
-        # for i in ii: 
-        #     for j in jj: 
+        # ii, jj, kk = torch.where(masks[:,1:,:]) # First index is in A, second in T 
+        ii, jj = torch.where(torch.sum(masks[:,1:,:], axis=-1) == T ) # get the indeces of ii,jj that represent states where the vehicle is available for the whole history
 
-        T_idx = 1
-        A = masks.shape[1]-1
+        # Select only the states where the other agents are available for the whole history
         gamma_A = gamma_preds["gammas_A"]
         gamma_B = gamma_preds["gammas_B"]
-        # Select only the states where the other agents are available
-        ii, jj = torch.where(masks[:,1:,T_idx]) # First index is in A, second in T 
         gamma_A_masked = torch.squeeze(gamma_A[ii,jj,:,:])
         gamma_B_masked = torch.squeeze(gamma_B[ii,jj,:,:])
         gamma_preds["gammas_A"] = gamma_A_masked
         gamma_preds["gammas_B"] = gamma_B_masked
 
-        loss_constraint = self.compute_cbf_constraint_loss(h_vals, gamma_preds, states, inputs, masks)
+        loss_constraint = self.compute_cbf_constraint_loss(cbf, gamma_preds, batch, ii, jj)
         loss_max_likelihood = self.compute_max_likelihood_loss(gamma_preds)
         loss_resp_sum = self.compute_resp_sum_loss(gamma_preds)
 
@@ -145,20 +135,23 @@ class RasterizedResponsibilityModel(nn.Module):
         loss_resp_sum = torch.sum(torch.nn.functional.relu(-gamma_sums)) / (1e-5 + gamma_sums.shape[0])
         return loss_resp_sum 
 
-    def compute_cbf_constraint_loss(self, h_vals, gamma_preds, states, inputs, masks, leaky_relu_negative_slope=1e-4):
-        dhdx, = torch.autograd.grad(outputs = h_vals, inputs = states, grad_outputs = torch.ones_like(h_vals), create_graph=True)
-        T_idx = 1 
+    def compute_cbf_constraint_loss(self, cbf, gamma_preds, batch, ii, jj, leaky_relu_negative_slope=1e-4):
+        data = cbf.process_batch(batch)
+        h_vals = cbf(data)                
+        dhdx, = torch.autograd.grad(h_vals, inputs = data, grad_outputs = torch.ones_like(h_vals), create_graph=True)
+        
         alpha = 1 
         eps = 1e-3
 
-        ii, jj = torch.where(masks[:,1:,T_idx]) # First index is in A, second in T 
-        dhdxA_masked = dhdx[ii,jj*0,T_idx,:] # dhdx wrt ego agent
-        dhdxB_masked = dhdx[ii,jj+1,T_idx,:] # dhdx wrt other agent
-        h_masked = h_vals[ii,jj,T_idx-1]            # minus 1 time step because hs and inputs are only computed for everything up to current, excluding current
-        inputA_masked = inputs[ii,jj*0,T_idx-1,:]   # minus 1 time step because hs and inputs are only computed for everything up to current, excluding current
-        inputB_masked = inputs[ii,jj+1,T_idx-1,:]   # minus 1 time step because hs and inputs are only computed for everything up to current, excluding current
-        stateA_masked = states[ii,jj*0,T_idx,:]
-        stateB_masked = states[ii,jj+1,T_idx,:]
+        dhdxA_masked = dhdx[ii,jj,0:4] # dhdx wrt ego agent
+        dhdxB_masked = dhdx[ii,jj,4:8] # dhdx wrt other agent
+        h_masked = h_vals[ii,jj]            # minus 1 time step because hs and inputs are only computed for everything up to current, excluding current
+        
+        inputs = batch["inputs"]
+        inputA_masked = inputs[ii,jj*0,-1,:]   # minus 1 time step because hs and inputs are only computed for everything up to current, excluding current
+        inputB_masked = inputs[ii,jj+1,-1,:]   # minus 1 time step because hs and inputs are only computed for everything up to current, excluding current
+        stateA_masked = data[ii,jj,0:4]
+        stateB_masked = data[ii,jj,4:8]
         
 
         (fA,fB,gA,gB) = self.unicycle_dynamics(stateA_masked, stateB_masked)

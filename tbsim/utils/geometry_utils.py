@@ -187,6 +187,7 @@ def VEH_VEH_collision(
                 - extent 1
                 - extent 2
     """
+
     if isinstance(p1, torch.Tensor):
         cornersX = torch.kron(
             # RYAN: get the center of the agents and then use a kronecker product to generate the x positions for corners of a box +/-0.5 meters
@@ -202,10 +203,11 @@ def VEH_VEH_collision(
 
         # RYAN : position difference
         dx = (p1[..., 0:2] - p2[..., 0:2]).repeat_interleave(4, dim=-2)
-
+        
         # RYAN : Get thetas 
         theta1 = p1[..., 2]
         theta2 = p2[..., 2]
+    
 
         # ego is always at (0,0,0) and all non-ego vehicles are relative to the ego in all 3 states (so ignore the centroid and yaw information because that gives absolute position which we never actually care about)
         #           first rotate from vehicle 2 angle to vehicle 1 angle, then shift to vehicle 1 center, then rotate to world angle (which is always ego vehicle's)

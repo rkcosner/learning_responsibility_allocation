@@ -1,6 +1,7 @@
 import torch 
 from tbsim import dynamics as dynamics
 
+
 def scene_centric_batch_to_raw(data_batch):
     """
         RYAN: 
@@ -18,11 +19,11 @@ def scene_centric_batch_to_raw(data_batch):
             - "extents"
     """
 
-    raw_type = data_batch["type"] # [B, A]
+    # raw_type = data_batch["type"] # [B, A]
     src_pos = data_batch["history_positions"] # [B, A, T, D]
     src_yaw = data_batch["history_yaws"] # [B, A, T, D]
     src_mask = data_batch["history_availabilities"] # [B, A, T]
-    src_extents = data_batch["extent"] # [B, A, D]
+    # src_extents = data_batch["extent"] # [B, A, D]
 
     # estimate velocity
     src_vel = dynamics.Unicycle.calculate_vel(src_pos, src_yaw, data_batch["dt"][0] , src_mask)
@@ -33,21 +34,12 @@ def scene_centric_batch_to_raw(data_batch):
     # src_yaw = torch.flip(src_yaw, dims=[-2])
     # src_mask = torch.flip(src_mask, dims=[-1])
     # src_vel = torch.flip(src_vel, dims=[-1])
-
+    
     states = torch.cat((src_pos, src_vel, src_yaw), axis =-1)
-    inputs = (states[:,:,1:,2:] - states[:,:,:-1,2:])/data_batch["dt"][0]
+    data_batch["states"] = states
+    data_batch["inputs"] = (states[:,:,1:,2:] - states[:,:,:-1,2:])/data_batch["dt"][0]
 
-
-    return {
-        "history_positions": src_pos,
-        "history_vel" : src_vel, 
-        "history_yaws": src_yaw,
-        "raw_types": raw_type,
-        "history_availabilities": src_mask,
-        "extents": src_extents,
-        "states": states, 
-        "inputs": inputs
-    }
+    return data_batch 
 
 
 def batch_to_raw_all_agents(data_batch, step_time):
