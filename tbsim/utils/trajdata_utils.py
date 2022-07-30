@@ -151,7 +151,6 @@ def parse_scene_centric(batch: dict):
     centered_world_from_agent = torch.inverse(batch["centered_agent_from_world_tf"])
 
 
-
     # map-related
     if batch["maps"] is not None:
         map_res = batch["maps_resolution"][0,0]

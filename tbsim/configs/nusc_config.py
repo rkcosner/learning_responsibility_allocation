@@ -21,18 +21,18 @@ class NuscTrainConfig(TrainConfig):
         self.rollout.every_n_steps = 5000
 
         # training config
-        self.training.batch_size = 5 # RYAN : changed batch size after switching to scene-centric
+        self.training.batch_size = 2 # RYAN : changed batch size after switching to scene-centric
         self.training.num_steps = 200000
         self.training.num_data_workers = 8
 
-        self.save.every_n_steps = 2000
+        self.save.every_n_steps = 1000
         self.save.best_k = 10
 
         # validation config
         self.validation.enabled = True
         self.validation.batch_size = 32
         self.validation.num_data_workers = 6
-        self.validation.every_n_steps = 1000
+        self.validation.every_n_steps = 500
         self.validation.num_steps_per_epoch = 50
 
 

@@ -58,26 +58,56 @@ class RasterizedResponsibilityModel(nn.Module):
         self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
 
     def forward(self, batch) -> Dict[str, torch.Tensor]:
-        # RYAN: Image in 
-        # image_batch = data_batch["image"]
-        # RYAN: Features from map
+        """"
+            batch[image] is of size [B, A, T + 7, Pxl_x, Pxl_y]
 
-        ego_imgs   = batch["image"][:,0,...]
-        ego_map_feat = self.map_encoder(ego_imgs)
-        ego_state = batch["states"][:,0,-1,:]
+            Takes in the images and gets the relevant channels: 
+                - T-1, the previous time step where we can estimate input and velocity data
+                - T+1 : T+7, the environment channels
+                - the other channels for <T-1 or =T are trajectory history and future which we don't want to use
+
+        """
+        T_curr = -1
         A = batch["image"].shape[1]
+        T = batch["image"].shape[2]
+        # img_idx = [T+T_curr] # the current image and the segmented scene data
+        # for i in range(7): img_idx.append(i+T)    
 
+        # Get ego agent imgs, map features, and state 
+        A_state = batch["states"][:,0,T_curr,:]
+        A_imgs = batch["image"][:,0,...] # semantic data and all trajectory data 
+        A_map_feat = self.map_encoder(A_imgs)
         gamma_preds = []
-        for i in range(A - 1):
-            agent_state = batch["states"][:,1+i,-1,:]
-            agent_imgs = batch["image"][:,i,...]
-            agent_map_feat = self.map_encoder(agent_imgs)
-            network_input_A = torch.cat([ego_state, agent_state, ego_map_feat, agent_map_feat], axis =1 )
-            network_input_B = torch.cat([agent_state, ego_state, agent_map_feat, ego_map_feat], axis =1 )
+        for b_idx in range(1, A):
+            # Get other agent imgs, map features, and state 
+            B_state = batch["states"][:,b_idx,T_curr,:]
+            B_imgs = batch["image"][:,b_idx,...]
+            B_map_feat = self.map_encoder(B_imgs)
+
+            # Compose network inputs from each perspective
+            # Network input is [ego_vel, x agent relative to ego, y agent relative to ego, yaw agent relative to ego, ego map features]
+            network_input_A = torch.cat([A_state[:,2:3], B_state, A_map_feat], axis =1 )
+
+            # Compute network output from the perspective of agent B
+            B_T_A =  batch["agents_from_center"][:,b_idx]
+
+            A_temp = torch.ones_like(A_state[:,[0,1,2]])
+            A_temp[:,[0,1]] = A_state[:,[0,1]]
+            A_temp = A_temp[:,:,None]
+            A_temp = torch.bmm(B_T_A, A_temp)
+            A_relative_state = torch.zeros_like(A_state)
+            A_relative_state[:,0] = A_temp[:,0].squeeze()
+            A_relative_state[:,1] = A_temp[:,1].squeeze()
+            A_relative_state[:,2] = A_state[:,2]
+            A_relative_state[:,3] = A_state[:,3] - B_state[:,3]
+            network_input_B = torch.cat([B_state[:,2:3], A_relative_state, B_map_feat], axis =1 )
+
+            # Pass states and features through the decoder to estimate gamma
             decoder_output_A = self.traj_decoder.forward(network_input_A)
             decoder_output_B = self.traj_decoder.forward(network_input_B)
             decoder_output = torch.cat([decoder_output_A, decoder_output_B], axis = 1)[:,:,None]
             gamma_preds.append(decoder_output)
+            
         gamma_preds = torch.cat(gamma_preds, axis=-1)
         gamma_preds = gamma_preds.permute(0, 2, 1)
 
@@ -108,7 +138,7 @@ class RasterizedResponsibilityModel(nn.Module):
         gamma_preds["gammas_A"] = gamma_A_masked
         gamma_preds["gammas_B"] = gamma_B_masked
 
-        loss_constraint = self.compute_cbf_constraint_loss(cbf, gamma_preds, batch, ii, jj)
+        loss_constraint, _, _ = self.compute_cbf_constraint_loss(cbf, gamma_preds, batch)
         loss_max_likelihood = self.compute_max_likelihood_loss(gamma_preds)
         loss_resp_sum = self.compute_resp_sum_loss(gamma_preds)
 
@@ -123,7 +153,13 @@ class RasterizedResponsibilityModel(nn.Module):
     def compute_max_likelihood_loss(self, gamma_preds):
         gammas_A = gamma_preds["gammas_A"]
         gammas_B = gamma_preds["gammas_B"]
-        loss_max_likelihood = torch.sum(-gammas_A -gammas_B) / (1e-5 + gammas_A.shape[0] + gammas_B.shape[0])
+        
+        # return zero if there aren't any vehicle pairs
+        if len(gammas_A.shape)>0: 
+            loss_max_likelihood = torch.sum(-gammas_A -gammas_B) / (1e-5 + gammas_A.shape[0] + gammas_B.shape[0])
+        else: 
+            loss_max_likelihood = torch.tensor(0)
+
         return loss_max_likelihood
 
 
@@ -132,10 +168,18 @@ class RasterizedResponsibilityModel(nn.Module):
         gammas_A = gamma_preds["gammas_A"]
         gammas_B = gamma_preds["gammas_B"]
         gamma_sums = gammas_A + gammas_B  
-        loss_resp_sum = torch.sum(torch.nn.functional.relu(-gamma_sums)) / (1e-5 + gamma_sums.shape[0])
+        if len(gamma_sums.shape)>0: 
+            loss_resp_sum = torch.sum(torch.nn.functional.relu(-gamma_sums)) / (1e-5 + gamma_sums.shape[0])
+        else: 
+            loss_resp_sum = torch.tensor(0)
+
         return loss_resp_sum 
 
-    def compute_cbf_constraint_loss(self, cbf, gamma_preds, batch, ii, jj, leaky_relu_negative_slope=1e-4):
+    def compute_cbf_constraint_loss(self, cbf, gamma_preds, batch, leaky_relu_negative_slope=1e-4):
+        masks = batch["history_availabilities"]
+        T = masks.shape[-1]
+        ii, jj = torch.where(torch.sum(masks[:,1:,:], axis=-1) == T ) # get the indeces of ii,jj that represent states where the vehicle is available for the whole history
+
         data = cbf.process_batch(batch)
         h_vals = cbf(data)                
         dhdx, = torch.autograd.grad(h_vals, inputs = data, grad_outputs = torch.ones_like(h_vals), create_graph=True)
@@ -173,8 +217,11 @@ class RasterizedResponsibilityModel(nn.Module):
         # TODO: decide leaky vs standard relu 
         loss_constraint  = torch.sum(torch.nn.functional.leaky_relu(-constraint_A-eps, negative_slope = leaky_relu_negative_slope)) / (1e-5 + constraint_A.shape[0])
         loss_constraint += torch.sum(torch.nn.functional.leaky_relu(-constraint_B-eps, negative_slope = leaky_relu_negative_slope)) / (1e-5 + constraint_B.shape[0])
-        
-        return loss_constraint
+    
+        percent_violations = (sum(constraint_A<0).item() + sum(constraint_B<0).item()) / (constraint_A.shape[0] + constraint_B.shape[0])
+        max_violations = min(constraint_A.min(), constraint_B.min()).item()
+
+        return loss_constraint, percent_violations, max_violations
 
     def unicycle_dynamics(self, stateA, stateB):
         # states are [x, y, v, yaw]

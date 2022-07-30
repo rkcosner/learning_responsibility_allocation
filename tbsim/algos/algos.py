@@ -45,6 +45,11 @@ from tbsim.safety_funcs.cbfs import (
     RssCBF
 )
 
+
+import matplotlib.pyplot as plt
+
+
+
 class Responsibility(pl.LightningModule):
     def __init__(self, algo_config, modality_shapes, do_log=True):
         """
@@ -56,7 +61,7 @@ class Responsibility(pl.LightningModule):
         self._do_log = do_log
 
 
-        # RYAN: Traj Decover is the Decoder portion of a train VAE
+        # RYAN: Traj Decoder is the Decoder portion of a train VAE
         #   - feature_dim : dimension of the input feature
         #   - state_dim : dimension of output trajectory at each step
         #   - num_steps : number of future states to predict 
@@ -66,7 +71,7 @@ class Responsibility(pl.LightningModule):
         #   - network_kwargs : ketword args for the decoder networks
         #   - Gaussian_var : bool flag, whether to output the variance of the predicted trajectory 
         traj_decoder = ResponsibilityDecoder(
-            feature_dim = 2 * algo_config.map_feature_dim + 8, # add 8 dims for the states of agent A and B
+            feature_dim = algo_config.map_feature_dim + 5, # add 5 dims for the relative positions of the 2 agents (3) plus their velocities (2)
             state_dim=algo_config.responsibility_dim,
             num_steps=algo_config.future_num_frames,
             dynamics_type=None,
@@ -80,9 +85,10 @@ class Responsibility(pl.LightningModule):
         """
             - model_arch : (ex) resnet18, modelarchitecture
         """
+
         self.nets["policy"] = RasterizedResponsibilityModel(
             model_arch=algo_config.model_architecture,
-            input_image_shape=modality_shapes["image"],  # [C, H, W]
+            input_image_shape= modality_shapes["image"],  # [C, H, W]
             trajectory_decoder=traj_decoder,
             map_feature_dim=algo_config.map_feature_dim,
             weights_scaling=[1.0, 1.0, 1.0],
@@ -110,9 +116,44 @@ class Responsibility(pl.LightningModule):
         # RYAN: This isn't called during training??? 
         return self.nets["policy"](obs_dict)["predictions"]
 
-    def _compute_metrics(self):
-        # TODO implement metrics
-        metrics = {"blah" : 0 }
+    def _plot_metrics(self, batch):
+
+        state_fig, axs = plt.subplots(4,1)
+        states = batch["states"][0,...]
+        inputs = batch["inputs"][0,...]
+        states = states.cpu().detach().numpy()
+        inputs = inputs.cpu().detach().numpy()
+        for i in range(states.shape[0]): 
+            for j in range(4):
+                axs[j].plot(states[i,:,j], linestyle = '-')
+        axs[0].set_title("States")
+        axs[0].set_ylabel("x")
+        axs[1].set_ylabel("y")
+        axs[2].set_ylabel("v")
+        axs[3].set_ylabel("yaw")
+        plt.savefig("state_viewer.png")
+
+        input_fig, input_ax = plt.subplots(2,1)
+        for i in range(states.shape[0]):
+            input_ax[0].plot(inputs[i,:,0], linestyle="-")
+            input_ax[1].plot(inputs[i,:,1], linestyle="-")
+        input_ax[0].set_title("Inputs")
+        input_ax[0].set_ylabel("accel")
+        input_ax[1].set_ylabel("yaw rate")
+        plt.savefig("input_viewer")
+
+        import pdb; pdb.set_trace()
+        
+        plotted_metrics = None
+        return plotted_metrics
+
+    def _compute_metrics(self, batch, gammas):
+        _, percent_violations, max_violations = self.nets["policy"].compute_cbf_constraint_loss(self.cbf, gammas, batch)
+        metrics = {
+            "percent_constraint_violations" : percent_violations, 
+            "max_constraint_violations" : max_violations
+            }
+
         return metrics
 
     def add_inputs_vel_to_batch(self, batch): 
@@ -138,18 +179,21 @@ class Responsibility(pl.LightningModule):
 
         total_loss = 0.0
         for lk, ell in losses.items(): 
-            loss_contribution  = ell * self.algo_config.loss_weights[lk]
-            total_loss += loss_contribution
-
+            try: 
+                loss_contribution  = ell * self.algo_config.loss_weights[lk]
+                total_loss += loss_contribution
+            except: 
+                import pdb; pdb.set_trace()
+                
         # TODO: implement metrics
-        # metrics = self._compute_metrics(hs, gammas, losses)  
+        metrics = self._compute_metrics(batch, gamma_preds)  
 
         for lk, l in losses.items(): 
             self.log("train/losses_"+lk, l)
         self.log("train/total_loss", total_loss)
         
-        # for mk, m in metrics.items(): 
-        #     self.log("train/metrics_" + mk, m)
+        for mk, m in metrics.items(): 
+            self.log("train/metrics/" + mk, m)
 
         return {
             "loss": total_loss, 
@@ -161,12 +205,16 @@ class Responsibility(pl.LightningModule):
 
         torch.set_grad_enabled(True) # RYAN: this slows thing down, but is required to calculate dhdx
         batch = batch_utils().parse_batch(batch)
+        import pdb; pdb.set_trace()
         batch = self.add_inputs_vel_to_batch(batch)
         batch["states"].requires_grad = True
         gamma_preds = self.nets["policy"](batch)
         losses = TensorUtils.detach(self.nets["policy"].compute_losses(self.cbf, gamma_preds, batch))
-        metrics = self._compute_metrics() #TODO: implement metrics
+        metrics = self._compute_metrics(batch, gamma_preds) 
 
+        # plotted_metrics = self._plot_metrics(batch)
+        self.batch = batch # TODO: this is probably not how this should be done... but store data for validation epoch end, for plotting metrics
+        
         return {"losses": losses, "metrics": metrics}
 
     def validation_epoch_end(self, outputs) -> None:
@@ -186,11 +234,13 @@ class Responsibility(pl.LightningModule):
         self.log("val/losses_goal_loss",0.0)
         self.log("val/losses_collision_loss",0.0)
         self.log("val/losses_yaw_reg_loss",0.0)
-        # Log Metrics TODO: currently metrics are turned off
-        # for k in outputs[0]["metrics"]:
-        #     m = np.stack([o["metrics"][k] for o in outputs]).mean()
-        #     self.log("val/metrics_" + k, m)
 
+        # Log Metrics TODO: currently metrics are turned off
+        for k in outputs[0]["metrics"]:
+            m = np.stack([o["metrics"][k] for o in outputs]).mean()
+            self.log("val/metrics_" + k, m)
+
+        # Figure out how to plot and exactly what the raster maps should look like
 
     def configure_optimizers(self):
         optim_params = self.algo_config.optim_params["policy"]

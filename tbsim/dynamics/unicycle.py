@@ -146,19 +146,24 @@ class Unicycle(Dynamics):
                 - mask [B, A, T]
         """
         if isinstance(pos, torch.Tensor):
+
+            # First Order Approximation 
             vel = (pos[..., 1:, 0:1] - pos[..., :-1, 0:1]) / dt * torch.cos(
                 yaw[..., 1:, :]
             ) + (pos[..., 1:, 1:2] - pos[..., :-1, 1:2]) / dt * torch.sin(
                 yaw[..., 1:, :]
             )
-            # right finite difference velocity
-            vel_r = torch.cat((vel[..., 0:1, :], vel), dim=-2)
-            # left finite difference velocity
-            vel_l = torch.cat((vel, vel[..., -1:, :]), dim=-2)
-            mask_r = torch.roll(mask, 1, dims=-1)
-            mask_r[..., 0] = False
-            mask_r = mask_r & mask
 
+
+            # right finite difference velocity
+            vel_r = torch.cat((vel[..., 0:1, :], vel), dim=-2) # left append 1st vel
+            # left finite difference velocity
+            vel_l = torch.cat((vel, vel[..., -1:, :]), dim=-2) # right append last vel
+            
+            # Mask for locations where 1st ord approx is available
+            mask_r = torch.roll(mask, 1, dims=-1) # shift mask by 1 for right
+            mask_r[..., 0] = False 
+            mask_r = mask_r & mask
             mask_l = torch.roll(mask, -1, dims=-1)
             mask_l[..., -1] = False
             mask_l = mask_l & mask
