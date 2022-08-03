@@ -235,7 +235,7 @@ def batch_to_raw_all_agents(data_batch, step_time):
 
 
 
-def plot_gammas(batch, net,  B=0, A=0):
+def plot_gammas(batch, net, relspeed=0.0, B=0, A=0):
     net.eval() 
     i = A
     with torch.no_grad():
@@ -285,7 +285,7 @@ def plot_gammas(batch, net,  B=0, A=0):
         agentFromRaster = torch.repeat_interleave(agentFromRaster[None,...], Bprime, axis=0)
         state_positions = torch.bmm(agentFromRaster, pxl_positions)[:,None, :2,:] # Remove extension required for transformation 
         state_positions = torch.permute(state_positions, (0,1,3,2))
-        state_vel = state_agentA[...,2:3] # FORCE AGENTB to have the same velocity as agentA) torch.repeat_interleave(batch["states"][0:1,1,0:1,2:3], Bprime, axis=0)
+        state_vel = state_agentA[...,2:3] + relspeed # FORCE AGENTB to have the same velocity as agentA) torch.repeat_interleave(batch["states"][0:1,1,0:1,2:3], Bprime, axis=0)
         state_yaw = torch.zeros_like(state_vel)
         state_agentB = torch.cat([state_positions, state_vel, state_yaw], axis=-1)
 
@@ -316,8 +316,8 @@ def plot_gammas(batch, net,  B=0, A=0):
     gammasA = gammasA.squeeze().reshape(N_datapoints, N_datapoints)
     gridX, gridY = torch.meshgrid(pxls_x, pxls_y, indexing='ij')
 
-    fig = plt.figure()
-    ax = plt.axes(projection='3d')
+    fig = plt.figure(figsize=(8,4))
+    ax = fig.add_subplot(1,2,1, projection="3d") #plt.axes(projection='3d')
     ax.plot_surface(gridX.numpy(), gridY.numpy(), gammasA, cmap=cm.coolwarm)
 
     # Set Colors 
@@ -350,7 +350,7 @@ def plot_gammas(batch, net,  B=0, A=0):
     semantic_image = np.sum(semantic_image, axis=-1)
     semantic_image /= semantic_image.max()
     ax.plot_surface(X, Y, Z, rstride=1, cstride=1, facecolors=plt.cm.coolwarm(semantic_image), shade=False)
-    ax.set_title("gamma for agent A: [0,0,%.1f,0], agent B: [x,y,%.1f,0]" % (state_agentA[0,0,0,2].item(),state_agentA[0,0,0,2].item()) )
+    ax.set_title("gamma for agent A: [0,0,%.1f,0], agent B: [x,y,%.1f,0]" % (state_agentA[0,0,0,2].item(), relspeed + state_agentA[0,0,0,2].item()) )
     # ax.set_ylabel("y position")
     # ax.set_xlabel("x position")
     ax.set_zlabel("$\gamma(x_A, x_B, e)$")
@@ -358,11 +358,28 @@ def plot_gammas(batch, net,  B=0, A=0):
     ax.get_yaxis().set_ticks([])#set_visible(False)
     # plt.savefig("test_gamma_plotter.png")
 
+    # surf_img = wandb.Image(fig)
+    # plt.close()
+
+
+    # Create Contour Image
+    # fig, ax = plt.subplots()
+    ax_cont = fig.add_subplot(1,2,2) #plt.axes(projection='3d')
+    ax_cont.imshow(np.flip(semantic_image, axis=0), cmap=plt.cm.coolwarm)
+    cs = ax_cont.contour(gridX.numpy(), gridY.numpy(), np.flip(gammasA, axis=0), colors='k', linewidths=3, linestyles="solid")
+    ax_cont.contour(gridX.numpy(), gridY.numpy(), np.flip(gammasA, axis=0), cmap=plt.cm.coolwarm, linewidths=2)
+    ax_cont.clabel(cs, cs.levels[np.where(cs.levels!=0)])
+        # Plot 0 level 
+    cs = ax_cont.contour(gridX.numpy(), gridY.numpy(), np.flip(gammasA, axis=0), levels=0, colors='k', linewidths=5)
+    ax_cont.contour(gridX.numpy(), gridY.numpy(), np.flip(gammasA, axis=0), levels=0, colors='w', linewidths=3, linestyles='--')
+    ax_cont.clabel(cs,cs.levels)
+    ax_cont.get_xaxis().set_ticks([])#set_visible(False)
+    ax_cont.get_yaxis().set_ticks([])#set_visible(False)
     img = wandb.Image(fig)
-    
     plt.close()
 
-    return img  
+
+    return img
 
 
 if __name__ == "__main__": 
