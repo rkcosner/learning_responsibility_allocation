@@ -40,7 +40,7 @@ class ResponsibilityConfig(AlgoConfig):
         # self.loss_weights.yaw_reg_loss = 0.1
 
         self.loss_weights.constraint_loss = 1.0
-        self.loss_weights.max_likelihood_loss = 1e-1
+        self.loss_weights.max_likelihood_loss = 1e-2
         self.loss_weights.sum_resp_loss = 1e-1
 
         self.optim_params.policy.learning_rate.initial = 1e-4  # policy learning rate

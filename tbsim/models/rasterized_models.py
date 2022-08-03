@@ -69,7 +69,6 @@ class RasterizedResponsibilityModel(nn.Module):
         """
         T_curr = -1
         A = batch["image"].shape[1]
-        T = batch["image"].shape[2]
         # img_idx = [T+T_curr] # the current image and the segmented scene data
         # for i in range(7): img_idx.append(i+T)    
 

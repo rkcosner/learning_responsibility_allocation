@@ -9,6 +9,8 @@ from matplotlib import cm
 
 from math import comb
 
+import wandb
+
 def get_bezier(points):
     
     def bez_curve(t):
@@ -149,6 +151,7 @@ def scene_centric_batch_to_raw(data_batch):
 
     data_batch["states"] = states[:,:,:-1,:] # Remove the future state
     data_batch["inputs"] = inputs[:,:,:-1,:] # Remove the future input
+    data_batch["image"]  = data_batch["image"][...,T-2:,:,:] # Remove Image Trajectory
 
     return data_batch 
 
@@ -289,7 +292,7 @@ def plot_gammas(batch, net,  B=0, A=0):
         gen_states = torch.cat([state_agentA, state_agentB], axis=1)
         gen_availabilities = torch.ones((Bprime,Aprime, Tprime), dtype=torch.bool, device=gen_states.device)
         gen_agents_from_center = torch.eye(3)[None,None,...].repeat(Bprime, Aprime,1,1).to(gen_states.device)
-        semantic_imgs = batch["image"][B:B+1,0:2,T:, ...].repeat(Bprime, 1, 1, 1, 1)
+        semantic_imgs = batch["image"][B:B+1,0:2,Tprime:, ...].repeat(Bprime, 1, 1, 1, 1)
         gen_image = torch.cat([state_imgs, semantic_imgs], axis=-3)
 
         """
@@ -312,6 +315,8 @@ def plot_gammas(batch, net,  B=0, A=0):
     gammasA = gammas["gammas_A"].cpu().numpy()
     gammasA = gammasA.squeeze().reshape(N_datapoints, N_datapoints)
     gridX, gridY = torch.meshgrid(pxls_x, pxls_y, indexing='ij')
+
+    fig = plt.figure()
     ax = plt.axes(projection='3d')
     ax.plot_surface(gridX.numpy(), gridY.numpy(), gammasA, cmap=cm.coolwarm)
 
@@ -351,9 +356,13 @@ def plot_gammas(batch, net,  B=0, A=0):
     ax.set_zlabel("$\gamma(x_A, x_B, e)$")
     ax.get_xaxis().set_ticks([])#set_visible(False)
     ax.get_yaxis().set_ticks([])#set_visible(False)
-    plt.savefig("test_gamma_plotter.png")
+    # plt.savefig("test_gamma_plotter.png")
+
+    img = wandb.Image(fig)
     
-    return ax    
+    plt.close()
+
+    return img  
 
 
 if __name__ == "__main__": 

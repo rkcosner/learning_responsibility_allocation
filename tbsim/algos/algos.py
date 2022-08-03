@@ -49,6 +49,7 @@ from tbsim.safety_funcs.cbfs import (
 
 import matplotlib.pyplot as plt
 
+import wandb
 
 
 class Responsibility(pl.LightningModule):
@@ -178,9 +179,6 @@ class Responsibility(pl.LightningModule):
 
         gamma_preds = self.nets["policy"](batch)
         losses = self.nets["policy"].compute_losses(self.cbf, gamma_preds, batch)
-    
-        import pdb; pdb.set_trace()
-
 
         total_loss = 0.0
         for lk, ell in losses.items(): 
@@ -207,24 +205,23 @@ class Responsibility(pl.LightningModule):
         }
 
     def validation_step(self, batch, batch_idx):
-        
+
         torch.set_grad_enabled(True) # RYAN: this slows thing down, but is required to calculate dhdx
         batch = batch_utils().parse_batch(batch)
         batch = self.add_inputs_vel_to_batch(batch)
         batch["states"].requires_grad = True
 
-        plot_gammas(batch, self.nets["policy"])
-
+        fig = plot_gammas(batch, self.nets["policy"])
 
         gamma_preds = self.nets["policy"](batch)
         losses = TensorUtils.detach(self.nets["policy"].compute_losses(self.cbf, gamma_preds, batch))
         metrics = self._compute_metrics(batch, gamma_preds) 
 
 
-        # plotted_metrics = self._plot_metrics(batch)
-        self.batch = batch # TODO: this is probably not how this should be done... but store data for validation epoch end, for plotting metrics
+        # # plotted_metrics = self._plot_metrics(batch)
+        # self.batch = batch # TODO: this is probably not how this should be done... but store data for validation epoch end, for plotting metrics
         
-        return {"losses": losses, "metrics": metrics}
+        return {"losses": losses, "metrics": metrics, "plots" : fig}
 
     def validation_epoch_end(self, outputs) -> None:
         # Log Losses
@@ -249,7 +246,12 @@ class Responsibility(pl.LightningModule):
             m = np.stack([o["metrics"][k] for o in outputs]).mean()
             self.log("val/metrics_" + k, m)
 
-        # Figure out how to plot and exactly what the raster maps should look like
+        for j in range(len(outputs)): 
+            wandb.log({"val/plot_gamma": outputs[j]["plots"]})
+
+        torch.cuda.empty_cache()
+        plt.close()
+
 
     def configure_optimizers(self):
         optim_params = self.algo_config.optim_params["policy"]
