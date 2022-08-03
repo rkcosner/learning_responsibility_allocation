@@ -53,7 +53,7 @@ class ResponsibilityConfig(AlgoConfig):
         self.scene_centric = True
 
         self.loss_weights.constraint_loss = 1.0
-        self.loss_weights.max_likelihood_loss = 0.2
+        self.loss_weights.max_likelihood_loss = 0.0
         self.loss_weights.sum_resp_loss = 0.5
         self.leaky_relu_negative_slope = 1e-2
 
