@@ -96,6 +96,7 @@ class Responsibility(pl.LightningModule):
             weights_scaling=[1.0, 1.0, 1.0],
             use_spatial_softmax=algo_config.spatial_softmax.enabled,
             spatial_softmax_kwargs=algo_config.spatial_softmax.kwargs,
+            leaky_relu_negative_slope=algo_config.leaky_relu_negative_slope
         )
         # TODO : create loss discount parameters
         if   algo_config.cbf == "rss_cbf": 
@@ -211,7 +212,15 @@ class Responsibility(pl.LightningModule):
         batch = self.add_inputs_vel_to_batch(batch)
         batch["states"].requires_grad = True
 
-        fig = plot_gammas(batch, self.nets["policy"])
+        img_m2= plot_gammas(batch,self.nets["policy"], relspeed=-2.0)
+        img_0 = plot_gammas(batch, self.nets["policy"], relspeed=0)
+        img_p2= plot_gammas(batch,self.nets["policy"], relspeed=2.0)
+
+        plots = {
+            "gammas_m2": img_m2, 
+            "gammas_0":  img_0, 
+            "gammas_p2": img_p2
+            }
 
         gamma_preds = self.nets["policy"](batch)
         losses = TensorUtils.detach(self.nets["policy"].compute_losses(self.cbf, gamma_preds, batch))
@@ -221,7 +230,7 @@ class Responsibility(pl.LightningModule):
         # # plotted_metrics = self._plot_metrics(batch)
         # self.batch = batch # TODO: this is probably not how this should be done... but store data for validation epoch end, for plotting metrics
         
-        return {"losses": losses, "metrics": metrics, "plots" : fig}
+        return {"losses": losses, "metrics": metrics, "plots" : plots}
 
     def validation_epoch_end(self, outputs) -> None:
         # Log Losses
@@ -247,7 +256,8 @@ class Responsibility(pl.LightningModule):
             self.log("val/metrics_" + k, m)
 
         for j in range(len(outputs)): 
-            wandb.log({"val/plot_gamma": outputs[j]["plots"]})
+            for k in outputs[0]["plots"]: 
+                wandb.log({"val/plot_gamma_"+k: outputs[j]["plots"][k]})
 
         torch.cuda.empty_cache()
         plt.close()

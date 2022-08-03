@@ -39,6 +39,7 @@ class RasterizedResponsibilityModel(nn.Module):
             trajectory_decoder: nn.Module,
             use_spatial_softmax=False,
             spatial_softmax_kwargs=None,
+            leaky_relu_negative_slope = 1e-4
     ) -> None:
 
         super().__init__()
@@ -53,9 +54,9 @@ class RasterizedResponsibilityModel(nn.Module):
             output_activation=nn.ReLU
         )
 
-        # RYAN: Decoder is passed in ahead of time 
         self.traj_decoder = trajectory_decoder
         self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
+        self.leaky_relu_negative_slope = leaky_relu_negative_slope
 
     def forward(self, batch) -> Dict[str, torch.Tensor]:
         """"
@@ -174,7 +175,8 @@ class RasterizedResponsibilityModel(nn.Module):
 
         return loss_resp_sum 
 
-    def compute_cbf_constraint_loss(self, cbf, gamma_preds, batch, leaky_relu_negative_slope=1e-4):
+    def compute_cbf_constraint_loss(self, cbf, gamma_preds, batch):
+        leaky_relu_negative_slope = self.leaky_relu_negative_slope
         masks = batch["history_availabilities"]
         T = masks.shape[-1]
         ii, jj = torch.where(torch.sum(masks[:,1:,:], axis=-1) == T ) # get the indeces of ii,jj that represent states where the vehicle is available for the whole history
