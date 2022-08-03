@@ -39,9 +39,6 @@ class ResponsibilityConfig(AlgoConfig):
         # self.loss_weights.collision_loss = 0.0
         # self.loss_weights.yaw_reg_loss = 0.1
 
-        self.loss_weights.constraint_loss = 1.0
-        self.loss_weights.max_likelihood_loss = 1e-1
-        self.loss_weights.sum_resp_loss = 0.5
 
         self.optim_params.policy.learning_rate.initial = 1e-4  # policy learning rate
         self.optim_params.policy.learning_rate.decay_factor = (
@@ -55,6 +52,9 @@ class ResponsibilityConfig(AlgoConfig):
         self.cbf = "backup_barrier_cbf"
         self.scene_centric = True
 
+        self.loss_weights.constraint_loss = 1.0
+        self.loss_weights.max_likelihood_loss = 0.2
+        self.loss_weights.sum_resp_loss = 0.5
         self.leaky_relu_negative_slope = 1e-2
 
 
