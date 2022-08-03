@@ -36,7 +36,8 @@ from tbsim.utils.geometry_utils import transform_points_tensor
 
 from tbsim.safety_funcs.utils import (
     batch_to_raw_all_agents, 
-    scene_centric_batch_to_raw
+    scene_centric_batch_to_raw, 
+    plot_gammas
 )
 from tbsim.safety_funcs.cbfs import (
     BackupBarrierCBF,
@@ -85,7 +86,7 @@ class Responsibility(pl.LightningModule):
         """
             - model_arch : (ex) resnet18, modelarchitecture
         """
-
+        modality_shapes["image"] = (8,224,224)
         self.nets["policy"] = RasterizedResponsibilityModel(
             model_arch=algo_config.model_architecture,
             input_image_shape= modality_shapes["image"],  # [C, H, W]
@@ -168,14 +169,18 @@ class Responsibility(pl.LightningModule):
         return batch
 
     def training_step(self, batch, batch_idx):
-        torch.set_grad_enabled(True) # RYAN: this slows thing down, but is required to calculate dhdx
-        #
+        
+        # A single raw batch is 0.007 GB
         batch = batch_utils().parse_batch(batch)
+        # A single parsed batch is 0.025 GB
         batch = self.add_inputs_vel_to_batch(batch)
         batch["states"].requires_grad = True
+
         gamma_preds = self.nets["policy"](batch)
         losses = self.nets["policy"].compute_losses(self.cbf, gamma_preds, batch)
-        
+    
+        import pdb; pdb.set_trace()
+
 
         total_loss = 0.0
         for lk, ell in losses.items(): 
@@ -202,15 +207,19 @@ class Responsibility(pl.LightningModule):
         }
 
     def validation_step(self, batch, batch_idx):
-
+        
         torch.set_grad_enabled(True) # RYAN: this slows thing down, but is required to calculate dhdx
         batch = batch_utils().parse_batch(batch)
-        import pdb; pdb.set_trace()
         batch = self.add_inputs_vel_to_batch(batch)
         batch["states"].requires_grad = True
+
+        plot_gammas(batch, self.nets["policy"])
+
+
         gamma_preds = self.nets["policy"](batch)
         losses = TensorUtils.detach(self.nets["policy"].compute_losses(self.cbf, gamma_preds, batch))
         metrics = self._compute_metrics(batch, gamma_preds) 
+
 
         # plotted_metrics = self._plot_metrics(batch)
         self.batch = batch # TODO: this is probably not how this should be done... but store data for validation epoch end, for plotting metrics
