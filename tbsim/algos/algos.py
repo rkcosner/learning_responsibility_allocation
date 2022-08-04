@@ -62,7 +62,6 @@ class Responsibility(pl.LightningModule):
         self.nets = nn.ModuleDict()
         self._do_log = do_log
 
-
         # RYAN: Traj Decoder is the Decoder portion of a train VAE
         #   - feature_dim : dimension of the input feature
         #   - state_dim : dimension of output trajectory at each step
@@ -256,8 +255,9 @@ class Responsibility(pl.LightningModule):
             self.log("val/metrics_" + k, m)
 
         for j in range(len(outputs)): 
-            for k in outputs[0]["plots"]: 
-                wandb.log({"val/plot_gamma_"+k: outputs[j]["plots"][k]})
+            for k in outputs[0]["plots"]:
+                if wandb.run is not None: 
+                    wandb.log({"val/plot_gamma_"+k: outputs[j]["plots"][k]})
 
         torch.cuda.empty_cache()
         plt.close()

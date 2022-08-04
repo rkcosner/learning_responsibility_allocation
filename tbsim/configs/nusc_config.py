@@ -12,6 +12,7 @@ class NuscTrainConfig(TrainConfig):
         self.trajdata_source_train = "train"
         self.trajdata_source_valid = "val"
         self.trajdata_source_root = "nusc_trainval"
+        self.trajdata_source_locations = ["boston"] # list of "boston" and or "singapore"
 
         self.dataset_path = "SET-THIS-THROUGH-TRAIN-SCRIPT-ARGS"
         self.datamodule_class = "UnifiedDataModule"
@@ -32,7 +33,7 @@ class NuscTrainConfig(TrainConfig):
         self.validation.enabled = True
         self.validation.batch_size = 5
         self.validation.num_data_workers = 6
-        self.validation.every_n_steps = 200
+        self.validation.every_n_steps = 10
         self.validation.num_steps_per_epoch = 10
 
 

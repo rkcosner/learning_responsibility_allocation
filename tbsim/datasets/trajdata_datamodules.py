@@ -54,10 +54,10 @@ class UnifiedDataModule(pl.LightningDataModule):
             max_agent_num = 1+data_cfg.other_agents_num,
             num_workers=os.cpu_count(),
         )
-        print(kwargs)
+        kwargs["desired_data"].extend(data_cfg.trajdata_source_locations)
         self.train_dataset = UnifiedDataset(**kwargs)
-
-        kwargs["desired_data"] = [data_cfg.trajdata_source_valid]
+        kwargs["desired_data"] = [data_cfg.trajdata_source_valid] 
+        kwargs["desired_data"].extend(data_cfg.trajdata_source_locations)
         kwargs["rebuild_cache"] = self._train_config.on_ngc
         self.valid_dataset = UnifiedDataset(**kwargs)
 

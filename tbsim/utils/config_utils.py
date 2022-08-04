@@ -47,6 +47,7 @@ def translate_trajdata_cfg(cfg: ExperimentConfig):
     rcfg.trajdata_source_root = cfg.train.trajdata_source_root
     rcfg.trajdata_source_train = cfg.train.trajdata_source_train
     rcfg.trajdata_source_valid = cfg.train.trajdata_source_valid
+    rcfg.trajdata_source_locations = cfg.train.trajdata_source_locations
     rcfg.dataset_path = cfg.train.dataset_path
     rcfg.history_num_frames = cfg.algo.history_num_frames
     rcfg.future_num_frames = cfg.algo.future_num_frames
