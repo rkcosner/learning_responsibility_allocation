@@ -376,10 +376,21 @@ def plot_gammas(batch, net, relspeed=0.0, B=0, A=0):
     img = wandb.Image(fig)
     plt.close()
 
-
     return img
 
 
-if __name__ == "__main__": 
-    test_bezier()
+import pickle
+def plot_static_gammas(net): 
+    breakpoint()
 
+    with open("./tbsim/safety_funcs/static_scenes/batch2wayDivider.pickle", 'rb') as file: 
+        batch2way = pickle.load(file)
+    with open("./tbsim/safety_funcs/static_scenes/batch2wayDivider.pickle", 'rb') as file: 
+        batch4way = pickle.load(file)
+    # with open("./tbsim/safety_funcs/static_scenes/batchRoundabout.pickle", 'rb') as file: 
+    #     batchRoundabout = pickle.load(file)
+
+
+
+if __name__ == "__main__": 
+    plot_static_gammas(net = 1)

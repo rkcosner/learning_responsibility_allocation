@@ -54,8 +54,10 @@ class ResponsibilityConfig(AlgoConfig):
 
         self.loss_weights.constraint_loss = 1.0
         self.loss_weights.max_likelihood_loss = 0.0
-        self.loss_weights.sum_resp_loss = 0.5
-        self.leaky_relu_negative_slope = 1e-2
+        self.loss_weights.sum_resp_loss = 1.0
+        self.leaky_relu_negative_slope = 1-2
+
+        self.max_angle_diff = 45
 
 
 class BehaviorCloningConfig(AlgoConfig):

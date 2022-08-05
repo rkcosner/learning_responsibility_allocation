@@ -39,7 +39,8 @@ class RasterizedResponsibilityModel(nn.Module):
             trajectory_decoder: nn.Module,
             use_spatial_softmax=False,
             spatial_softmax_kwargs=None,
-            leaky_relu_negative_slope = 1e-4
+            leaky_relu_negative_slope = 1e-4, 
+            max_angle = 90
     ) -> None:
 
         super().__init__()
@@ -57,6 +58,7 @@ class RasterizedResponsibilityModel(nn.Module):
         self.traj_decoder = trajectory_decoder
         self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
         self.leaky_relu_negative_slope = leaky_relu_negative_slope
+        self.max_angle = max_angle
 
     def forward(self, batch) -> Dict[str, torch.Tensor]:
         """"
@@ -124,20 +126,19 @@ class RasterizedResponsibilityModel(nn.Module):
                 args: 
                     - data_batch : provides target_positions and target_yaws 
         """
-        masks = batch["history_availabilities"]
-        T = masks.shape[-1]
-
-        # ii, jj, kk = torch.where(masks[:,1:,:]) # First index is in A, second in T 
-        ii, jj = torch.where(torch.sum(masks[:,1:,:], axis=-1) == T ) # get the indeces of ii,jj that represent states where the vehicle is available for the whole history
+        ii, jj, other_masks = self.get_masks(cbf, batch)
 
         # Select only the states where the other agents are available for the whole history
         gamma_A = gamma_preds["gammas_A"]
         gamma_B = gamma_preds["gammas_B"]
-        gamma_A_masked = torch.squeeze(gamma_A[ii,jj,:,:])
-        gamma_B_masked = torch.squeeze(gamma_B[ii,jj,:,:])
-        gamma_preds["gammas_A"] = gamma_A_masked
-        gamma_preds["gammas_B"] = gamma_B_masked
+        gamma_preds["gammas_A"] = torch.squeeze(gamma_A[ii,jj,:,:])
+        gamma_preds["gammas_B"] = torch.squeeze(gamma_B[ii,jj,:,:])
 
+        for mask in other_masks: 
+            gamma_preds["gammas_A"] = gamma_preds["gammas_A"][mask]
+            gamma_preds["gammas_B"] = gamma_preds["gammas_B"][mask]
+
+        # Get losses, MUST run constraint loss first to get proper masking
         loss_constraint, _, _ = self.compute_cbf_constraint_loss(cbf, gamma_preds, batch)
         loss_max_likelihood = self.compute_max_likelihood_loss(gamma_preds)
         loss_resp_sum = self.compute_resp_sum_loss(gamma_preds)
@@ -175,29 +176,64 @@ class RasterizedResponsibilityModel(nn.Module):
 
         return loss_resp_sum 
 
-    def compute_cbf_constraint_loss(self, cbf, gamma_preds, batch):
-        leaky_relu_negative_slope = self.leaky_relu_negative_slope
+    def get_masks(self, cbf, batch): 
+        # Mask for availability
         masks = batch["history_availabilities"]
         T = masks.shape[-1]
-        ii, jj = torch.where(torch.sum(masks[:,1:,:], axis=-1) == T ) # get the indeces of ii,jj that represent states where the vehicle is available for the whole history
+        batch_ii, batch_jj = torch.where(torch.sum(masks[:,1:,:], axis=-1) == T )
+
+
+        other_masks = []
+
+        # Mask for heading
+        data = cbf.process_batch(batch)
+        stateA_masked = data[batch_ii,batch_jj,0:4]
+        stateB_masked = data[batch_ii,batch_jj,4:8]
+        thetasA = stateA_masked[:,3]
+        thetasB = stateB_masked[:,3]
+        dtheta = torch.abs(thetasA - thetasB)
+        heading_mask, = torch.where(dtheta<=self.max_angle*3.14/180)
+        other_masks.append(heading_mask)
+
+
+        # Mask for vehicle-vehicle interactions
+            # veh_mask = (raw_types >= 3) & (raw_types <= 13)
+            # ped_mask = (raw_types == 14) | (raw_types == 15)
+        types_masked = batch["type"][batch_ii,batch_jj]
+        for mask in other_masks: 
+            types_masked = types_masked[mask]
+        types_mask, = torch.where(torch.logical_and(3<=types_masked, types_masked<=13)) 
+        other_masks.append(types_mask)
+
+        return batch_ii, batch_jj, other_masks
+
+    def compute_cbf_constraint_loss(self, cbf, gamma_preds, batch):
+        leaky_relu_negative_slope = self.leaky_relu_negative_slope
+        alpha = 1 
+        eps = 1e-3
 
         data = cbf.process_batch(batch)
         h_vals = cbf(data)                
         dhdx, = torch.autograd.grad(h_vals, inputs = data, grad_outputs = torch.ones_like(h_vals), create_graph=True)
-        
-        alpha = 1 
-        eps = 1e-3
 
-        dhdxA_masked = dhdx[ii,jj,0:4] # dhdx wrt ego agent
-        dhdxB_masked = dhdx[ii,jj,4:8] # dhdx wrt other agent
-        h_masked = h_vals[ii,jj]            # minus 1 time step because hs and inputs are only computed for everything up to current, excluding current
-        
+        ii, jj, other_masks = self.get_masks(cbf, batch)
         inputs = batch["inputs"]
         inputA_masked = inputs[ii,jj*0,-1,:]   # minus 1 time step because hs and inputs are only computed for everything up to current, excluding current
         inputB_masked = inputs[ii,jj+1,-1,:]   # minus 1 time step because hs and inputs are only computed for everything up to current, excluding current
         stateA_masked = data[ii,jj,0:4]
         stateB_masked = data[ii,jj,4:8]
-        
+        dhdxA_masked = dhdx[ii,jj,0:4]          # dhdx wrt ego agent
+        dhdxB_masked = dhdx[ii,jj,4:8]          # dhdx wrt other agent
+        h_masked = h_vals[ii,jj]                # minus 1 time step because hs and inputs are only computed for everything up to current, excluding current
+
+        for mask in other_masks: 
+            inputA_masked = inputA_masked[mask,:]
+            inputB_masked = inputB_masked[mask,:]
+            stateA_masked = stateA_masked[mask,:]
+            stateB_masked = stateB_masked[mask,:]
+            dhdxA_masked = dhdxA_masked[mask,:]
+            dhdxB_masked = dhdxB_masked[mask,:]
+            h_masked = h_masked[mask]
 
         (fA,fB,gA,gB) = self.unicycle_dynamics(stateA_masked, stateB_masked)
         LfhA = torch.bmm(dhdxA_masked[:,None,:], fA).squeeze() 
@@ -213,7 +249,6 @@ class RasterizedResponsibilityModel(nn.Module):
         # TODO: debug and check that this is right, the constraint loss is surprisingly high
         constraint_A = natural_dynamics + LghAuA - gamma_preds["gammas_A"] 
         constraint_B = natural_dynamics + LghBuB - gamma_preds["gammas_B"] 
-
 
         # TODO: decide leaky vs standard relu 
         loss_constraint  = torch.sum(torch.nn.functional.leaky_relu(-constraint_A-eps, negative_slope = leaky_relu_negative_slope)) / (1e-5 + constraint_A.shape[0])

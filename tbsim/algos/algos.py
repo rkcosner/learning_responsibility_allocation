@@ -37,7 +37,8 @@ from tbsim.utils.geometry_utils import transform_points_tensor
 from tbsim.safety_funcs.utils import (
     batch_to_raw_all_agents, 
     scene_centric_batch_to_raw, 
-    plot_gammas
+    plot_gammas, 
+    plot_static_gammas
 )
 from tbsim.safety_funcs.cbfs import (
     BackupBarrierCBF,
@@ -95,7 +96,8 @@ class Responsibility(pl.LightningModule):
             weights_scaling=[1.0, 1.0, 1.0],
             use_spatial_softmax=algo_config.spatial_softmax.enabled,
             spatial_softmax_kwargs=algo_config.spatial_softmax.kwargs,
-            leaky_relu_negative_slope=algo_config.leaky_relu_negative_slope
+            leaky_relu_negative_slope=algo_config.leaky_relu_negative_slope, 
+            max_angle=algo_config.max_angle_diff
         )
         # TODO : create loss discount parameters
         if   algo_config.cbf == "rss_cbf": 
@@ -232,6 +234,10 @@ class Responsibility(pl.LightningModule):
         return {"losses": losses, "metrics": metrics, "plots" : plots}
 
     def validation_epoch_end(self, outputs) -> None:
+
+        # Get Static Plots
+        # fourWay, twoWay, roundabout = plot_static_gammas()
+
         # Log Losses
         losses = []
         for j in range(len(outputs)):

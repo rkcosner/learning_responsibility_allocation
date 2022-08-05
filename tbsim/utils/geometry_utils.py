@@ -217,8 +217,8 @@ def VEH_VEH_collision(
 
         # RYAN : rotate bounding box from world to vehicle 2 
         delta_x2 = batch_rotate_2D(delta_x1, -theta2.repeat_interleave(4, dim=-1))
-        
-        # RYAN : find the maximum distance betwee the edges of the boxes in vehicle 2's reference frame
+        # RYAN : find the maximum X or Y distance betwee the edges of the boxes in vehicle 2's reference frame
+                
         dis = torch.maximum(
             torch.abs(delta_x2[..., 0]) - 0.5 * S2[..., 0].repeat_interleave(4, dim=-1),
             torch.abs(delta_x2[..., 1]) - 0.5 * S2[..., 1].repeat_interleave(4, dim=-1),

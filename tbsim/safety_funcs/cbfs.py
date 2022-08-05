@@ -181,8 +181,8 @@ class BackupBarrierCBF(CBF):
         self.T_horizon = T_horizon
 
     def process_batch(self, batch): 
-        T_idx = -2 # move back one time step, so that we can calculate input data.
-        A = batch["states"].shape[1] - 1
+        T_idx = -1 # Most recent time step 
+        A = batch["states"].shape[1] - 1 # Number of non-ego vehicles
         ego_pos = batch["states"][:,0,T_idx,:]
         ego_extent = batch["extent"][:,0,:]
         ego_pos = ego_pos.unsqueeze(1).repeat(1, A, 1)
@@ -203,20 +203,26 @@ class BackupBarrierCBF(CBF):
             The assumed backup controller is constant velocity and driving forward, so the input is [accel=0,angle rate=0]
         """
 
-        ego_pos = data[...,0:4]
-        agent_pos = data[...,4:8]
+        ego_state = data[...,0:4]
+        ego_pos = ego_state[...,[0,1,3]] # remove velocity
+        agent_state = data[...,4:8]
+        agent_pos = agent_state[...,[0,1,3]] # remove velocity 
         ego_extent = data[...,8:11]
         agent_extent = data[...,11:14]
         dt = data[...,14,None]
+
+        # TODO: Currently I'm ignoring the extents
+
+        h = torch.linalg.norm(ego_pos[...,0:2] - agent_pos[...,0:2], axis=-1)#VEH_VEH_collision(ego_pos, agent_pos, ego_extent, agent_extent, offsetX=0, offsetY=0) #
 
         B = data.shape[0]
         A = data.shape[1]
         N_tForward = int(self.T_horizon/dt[0,0])
         backup_controller = torch.zeros(B, A, 2).to(ego_pos.device)
-        ego_traj, agent_traj = forward_project_states(ego_pos, agent_pos, backup_controller, N_tForward, dt)
+        ego_traj, agent_traj = forward_project_states(ego_state, agent_state, backup_controller, N_tForward, dt)
         ego_extent   = ego_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
         agent_extent = agent_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
-        dis = VEH_VEH_collision(ego_traj, agent_traj, ego_extent, agent_extent, return_dis = False)
+        dis = torch.linalg.norm(ego_traj[...,0:2] - agent_traj[...,0:2], axis=-1) #VEH_VEH_collision(ego_traj, agent_traj, ego_extent, agent_extent, return_dis = False)
         min_dis, _ = dis.min(axis=-1) 
 
         h = min_dis
