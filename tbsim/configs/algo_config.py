@@ -49,15 +49,19 @@ class ResponsibilityConfig(AlgoConfig):
         )  # epochs where LR decay occurs
         self.optim_params.policy.regularization.L2 = 0.00  # L2 regularization strength
 
-        self.cbf = "backup_barrier_cbf"
+        self.cbf.type = "backup_barrier_cbf"
+        self.cbf.T_horizon = 3
+        self.cbf.alpha = 0.2
         self.scene_centric = True
 
         self.loss_weights.constraint_loss = 1.0
         self.loss_weights.max_likelihood_loss = 0.0
-        self.loss_weights.sum_resp_loss = 1.0
-        self.leaky_relu_negative_slope = 1-2
+        self.loss_weights.sum_resp_loss = 10
 
-        self.max_angle_diff = 45
+        self.constraint_loss.leaky_relu_negative_slope = 1e-1
+        self.sum_resp_loss.leaky_relu_negative_slope = 1e-4
+
+        self.max_angle_diff = 90
 
 
 class BehaviorCloningConfig(AlgoConfig):

@@ -38,7 +38,8 @@ from tbsim.safety_funcs.utils import (
     batch_to_raw_all_agents, 
     scene_centric_batch_to_raw, 
     plot_gammas, 
-    plot_static_gammas
+    plot_static_gammas_inline,
+    plot_static_gammas_traj
 )
 from tbsim.safety_funcs.cbfs import (
     BackupBarrierCBF,
@@ -96,18 +97,19 @@ class Responsibility(pl.LightningModule):
             weights_scaling=[1.0, 1.0, 1.0],
             use_spatial_softmax=algo_config.spatial_softmax.enabled,
             spatial_softmax_kwargs=algo_config.spatial_softmax.kwargs,
-            leaky_relu_negative_slope=algo_config.leaky_relu_negative_slope, 
+            constraint_loss_leaky_relu_negative_slope = algo_config.constraint_loss.leaky_relu_negative_slope,
+            sum_resp_loss_leaky_relu_negative_slope   = algo_config.sum_resp_loss.leaky_relu_negative_slope, 
             max_angle=algo_config.max_angle_diff
         )
         # TODO : create loss discount parameters
-        if   algo_config.cbf == "rss_cbf": 
+        if   algo_config.cbf.type == "rss_cbf": 
             self.cbf = RssCBF()
-        elif algo_config.cbf == "norm_ball_cbf": 
+        elif algo_config.cbf.type == "norm_ball_cbf": 
             self.cbf = NormBallCBF()
-        elif algo_config.cbf == "extended_norm_ball_cbf":
+        elif algo_config.cbf.type == "extended_norm_ball_cbf":
             self.cbf = ExtendedNormBallCBF()
-        elif algo_config.cbf == "backup_barrier_cbf": 
-            self.cbf = BackupBarrierCBF()
+        elif algo_config.cbf.type == "backup_barrier_cbf": 
+            self.cbf = BackupBarrierCBF(T_horizon = algo_config.cbf.T_horizon, alpha=algo_config.cbf.alpha)
         else: 
             raise Exception("Config Error: algo_config.cbf is not properly defined")
         
@@ -207,7 +209,6 @@ class Responsibility(pl.LightningModule):
         }
 
     def validation_step(self, batch, batch_idx):
-
         torch.set_grad_enabled(True) # RYAN: this slows thing down, but is required to calculate dhdx
         batch = batch_utils().parse_batch(batch)
         batch = self.add_inputs_vel_to_batch(batch)
@@ -234,10 +235,6 @@ class Responsibility(pl.LightningModule):
         return {"losses": losses, "metrics": metrics, "plots" : plots}
 
     def validation_epoch_end(self, outputs) -> None:
-
-        # Get Static Plots
-        # fourWay, twoWay, roundabout = plot_static_gammas()
-
         # Log Losses
         losses = []
         for j in range(len(outputs)):
@@ -265,6 +262,15 @@ class Responsibility(pl.LightningModule):
                 if wandb.run is not None: 
                     wandb.log({"val/plot_gamma_"+k: outputs[j]["plots"][k]})
 
+        gammas2way = plot_static_gammas_inline(self.nets["policy"], 2)
+        gammas4way_samelane = plot_static_gammas_inline(self.nets["policy"], 4)
+        gammas4way_cross = plot_static_gammas_traj(self.nets["policy"], 4)
+        gammasRoundabout = plot_static_gammas_traj(self.nets["policy"],0)
+        if wandb.run is not None: 
+            wandb.log({"val/plot_gammas2way":gammas2way})
+            wandb.log({"val/plot_gammas4way_samelane":gammas4way_samelane})
+            wandb.log({"val/plot_gammas4way_cross": gammas4way_cross})
+            wandb.log({"val/plot_gammasRoundabout": gammasRoundabout})
         torch.cuda.empty_cache()
         plt.close()
 

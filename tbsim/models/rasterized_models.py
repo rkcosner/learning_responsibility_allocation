@@ -40,7 +40,9 @@ class RasterizedResponsibilityModel(nn.Module):
             use_spatial_softmax=False,
             spatial_softmax_kwargs=None,
             leaky_relu_negative_slope = 1e-4, 
-            max_angle = 90
+            max_angle = 90,
+            constraint_loss_leaky_relu_negative_slope = 1e-2, 
+            sum_resp_loss_leaky_relu_negative_slope = 1e-2
     ) -> None:
 
         super().__init__()
@@ -59,7 +61,9 @@ class RasterizedResponsibilityModel(nn.Module):
         self.weights_scaling = nn.Parameter(torch.Tensor(weights_scaling), requires_grad=False)
         self.leaky_relu_negative_slope = leaky_relu_negative_slope
         self.max_angle = max_angle
-
+        self.constraint_loss_leaky_relu_negative_slope  = constraint_loss_leaky_relu_negative_slope 
+        self.sum_resp_loss_leaky_relu_negative_slope    = sum_resp_loss_leaky_relu_negative_slope   
+        
     def forward(self, batch) -> Dict[str, torch.Tensor]:
         """"
             batch[image] is of size [B, A, T + 7, Pxl_x, Pxl_y]
@@ -165,12 +169,13 @@ class RasterizedResponsibilityModel(nn.Module):
 
 
     def compute_resp_sum_loss(self, gamma_preds): 
+        leaky_relu_negative_slope = self.sum_resp_loss_leaky_relu_negative_slope
         # Penalize whenever the gammas sum up to be less than 0 (which would indicate unsafe actions)
         gammas_A = gamma_preds["gammas_A"]
         gammas_B = gamma_preds["gammas_B"]
         gamma_sums = gammas_A + gammas_B  
         if len(gamma_sums.shape)>0: 
-            loss_resp_sum = torch.sum(torch.nn.functional.relu(-gamma_sums)) / (1e-5 + gamma_sums.shape[0])
+            loss_resp_sum = torch.sum(torch.nn.functional.leaky_relu(-gamma_sums, negative_slope = leaky_relu_negative_slope)) / (1e-5 + gamma_sums.shape[0])
         else: 
             loss_resp_sum = torch.tensor(0)
 
@@ -208,7 +213,7 @@ class RasterizedResponsibilityModel(nn.Module):
         return batch_ii, batch_jj, other_masks
 
     def compute_cbf_constraint_loss(self, cbf, gamma_preds, batch):
-        leaky_relu_negative_slope = self.leaky_relu_negative_slope
+        leaky_relu_negative_slope = self.constraint_loss_leaky_relu_negative_slope
         alpha = 1 
         eps = 1e-3
 
@@ -241,7 +246,7 @@ class RasterizedResponsibilityModel(nn.Module):
         LghA = torch.bmm(dhdxA_masked[:,None,:], gA)
         LghB = torch.bmm(dhdxB_masked[:,None,:], gB) 
 
-        natural_dynamics  = LfhA + LfhB + alpha * h_masked
+        natural_dynamics  = LfhA + LfhB + cbf.alpha * h_masked
         natural_dynamics /= 2.0
         LghAuA = torch.bmm(LghA, inputA_masked[:,:,None]).squeeze()
         LghBuB = torch.bmm(LghB, inputB_masked[:,:,None]).squeeze()

@@ -1,3 +1,4 @@
+from platform import release
 from turtle import pos
 import torch 
 from tbsim import dynamics as dynamics
@@ -10,6 +11,8 @@ from matplotlib import cm
 from math import comb
 
 import wandb
+
+import pickle
 
 def get_bezier(points):
     
@@ -379,18 +382,238 @@ def plot_gammas(batch, net, relspeed=0.0, B=0, A=0):
     return img
 
 
-import pickle
-def plot_static_gammas(net): 
-    breakpoint()
+"""
+    PLOT STATIC GAMMAS
+"""
+ego_extent = [4.0840, 1.7300, 1.5620]
+pxl_center = [56, 112]
+pxls_per_meter = 2
+pxl_center = [56, 112]
+pxls_per_meter = 2
+white = [1.0, 1.0, 1.0]
+black = [0.0, 0.0, 0.0]
 
-    with open("./tbsim/safety_funcs/static_scenes/batch2wayDivider.pickle", 'rb') as file: 
-        batch2way = pickle.load(file)
-    with open("./tbsim/safety_funcs/static_scenes/batch2wayDivider.pickle", 'rb') as file: 
-        batch4way = pickle.load(file)
+def generate_3channel_image(batch):  
+    
+    colors = [[0.5, 0.0, 0.0],[0.0, 0.5, 0.0],[0.0, 0.0, 0.5],[0.0, 0.4, 0.4],[0.5, 0.3, 0.0],[0.5, 0.5, 0.0],[0.5, 0.0, 0.5]]
+
+    semantic_channels = batch['image'][1:].cpu().detach().numpy()
+    N_pxls = semantic_channels.shape[-1]
+    visualizer_image = np.zeros((N_pxls, N_pxls, 3)) + 0.5
+    for j, color in enumerate(colors): 
+        color_np = np.array([color]) 
+        s_channel = semantic_channels[j][...,None]
+        visualizer_image += (s_channel @ color_np).squeeze()
+
+    # Draw Ego Vehicle
+    visualizer_image[pxl_center[1],pxl_center[0]] = white
+    xs = torch.arange(-ego_extent[0]/2*pxls_per_meter, ego_extent[0]/2+1*pxls_per_meter, step = 1).int()
+    ys = torch.arange(-ego_extent[1]/2*pxls_per_meter, ego_extent[1]/2+1*pxls_per_meter, step = 1).int()
+    for x in xs: 
+        for y in ys: 
+            if x != 0 or y !=0:
+                visualizer_image[pxl_center[1]+y, pxl_center[0]+x] = black 
+
+    return visualizer_image 
+
+def generate_static_gamma_plots(fig, visualizer_image, X, Y, gammas_A):
+    fig = plt.figure()
+    ax_img = fig.add_subplot(1,2,1)
+    ax_img.imshow(np.flip(visualizer_image, axis=0))
+    ax_img.get_xaxis().set_ticks([])#set_visible(False)
+    ax_img.get_yaxis().set_ticks([])#set_visible(False)
+
+    ax_contour = fig.add_subplot(1,2,2)
+    out_cont = ax_contour.contourf(X, Y,gammas_A.cpu().numpy(), cmap=cm.coolwarm)#, levels = levels, vmin = vmin, vmax = vmax)
+    fig.colorbar(out_cont, ax=ax_contour, label="$\gamma(x_A, x_B, e_A)$")
+    return fig, ax_contour
+
+
+def plot_static_gammas_inline(net, type): 
+    torch.cuda.empty_cache()
+    net.eval()
+    with torch.no_grad():
+        datapoints_per_meter = 0.5 
+        window = 20 
+        rel_vel_max = 5
+        if type == 2: 
+            with open("./tbsim/safety_funcs/static_scenes/batch2wayDivider.pickle", 'rb') as file: 
+                batch = pickle.load(file)
+                stateA = batch["states"][-1,:]
+        else: 
+            with open("./tbsim/safety_funcs/static_scenes/batch4way.pickle", 'rb') as file: 
+                batch = pickle.load(file)
+                stateA = batch["states"][0,0,-1,:]
+
+        N_pxls = batch['image'][1:].cpu().detach().numpy().shape[-1]
+
+
+        x_window = torch.arange(-window, window + 1.0/datapoints_per_meter, step=1.0/datapoints_per_meter)
+        window_pxls = (x_window * pxls_per_meter).int()
+        
+        v_window = torch.arange(0, stateA[2].item() + rel_vel_max, step = 1)
+
+        # Fill Batch 
+        Bprime = len(x_window) * len(v_window) 
+        Aprime = 2
+        Tprime = 1 
+        gen_states = torch.zeros(Bprime, Aprime, Tprime, 4, device=batch["image"].device)
+        gen_states[:,0,0,2] = stateA[2]
+        for ix, x in enumerate(x_window):
+            for jv, v in enumerate(v_window): 
+                gen_states[ix + len(x_window)*jv, 1, 0, :] = torch.tensor([x, 0, v, 0]) 
+
+        gen_availabilities = torch.ones(Bprime, Aprime, Tprime, device=batch["image"].device).bool()
+        gen_agents_from_center = torch.eye(3)[None,None,...].repeat(Bprime, Aprime,1,1).to(gen_states.device)
+
+        state_imgs = torch.zeros((Bprime,Aprime,Tprime,N_pxls,N_pxls), device=batch["image"].device)
+        for ix, pxl_x in enumerate(window_pxls): 
+            for jy, _ in enumerate(v_window): 
+                state_imgs[ix+jy*len(window_pxls),0,0,pxl_center[1],pxl_x + pxl_center[0]] = -1.0
+                state_imgs[ix+jy*len(window_pxls),0,0,pxl_center[1],pxl_center[0]] = 1.0
+
+        semantic_imgs = batch["image"][Tprime:, ...].repeat(Bprime, Aprime, Tprime, 1, 1)
+        gen_image = torch.cat([state_imgs, semantic_imgs], axis=-3)
+
+        test_batch ={
+            "states" : gen_states, 
+            "history_availabilities" : gen_availabilities, 
+            "agents_from_center" : gen_agents_from_center, 
+            "image" : gen_image
+        }
+
+        gamma_preds = net(test_batch)
+    net.train()
+
+
+    # Generate Semantic 3 Channel Image
+    visualizer_image = generate_3channel_image(batch)
+    visualizer_image[pxl_center[1], pxl_center[0] + window_pxls] = black
+
+
+    X, Y = np.meshgrid(x_window, v_window)
+    gammas_A = gamma_preds["gammas_A"]
+    gammas_A = gammas_A.reshape(len(v_window), len(x_window))
+
+    fig = plt.figure()
+    fig, ax_contour = generate_static_gamma_plots(fig, visualizer_image, X, Y, gammas_A)
+    # customize labels
+    ax_contour.plot([X.min(), X.max()], [stateA[-2].item(), stateA[-2].item()], color='k', linestyle='--', linewidth=0.5)
+    ax_contour.plot([ego_extent[0]/2, ego_extent[0]/2], [v_window.min(), v_window.max()], color='k', linestyle='--', linewidth=0.5)
+    ax_contour.plot([-ego_extent[0]/2, -ego_extent[0]/2], [v_window.min(), v_window.max()], color='k', linestyle='--', linewidth=0.5)
+    ax_contour.set_ylabel("Agent Velocity")
+    ax_contour.set_xlabel("Agent Relative $x$ Position")
+    img = wandb.Image(fig)
+
+    return img
+
+    # plt.savefig("test.png")
+
     # with open("./tbsim/safety_funcs/static_scenes/batchRoundabout.pickle", 'rb') as file: 
-    #     batchRoundabout = pickle.load(file)
+    #     batchR = pickle.load(file)
 
 
+
+def plot_static_gammas_traj(net, type=4): 
+    
+    # net.eval()
+    with torch.no_grad():
+        datapoints_per_meter = 0.5 
+        window = 20 
+        rel_vel_max = 10
+
+        if type == 4:
+            with open("./tbsim/safety_funcs/static_scenes/batch4way.pickle", 'rb') as file: 
+                batch = pickle.load(file)
+            N_pxls = batch['image'][1:].cpu().detach().numpy().shape[-1]
+            stateA = batch["states"][0,0,-1,:]
+            x_traj = np.concatenate([np.ones(13)*97, 97 - np.arange(1,5, 5.0/12)]).astype(int)
+            y_traj = np.linspace(112-20, 112+42, len(x_traj)).astype(int)
+            theta1 = -np.pi/2
+            theta2 = np.arctan2(y_traj[13:].min()- y_traj[13:].max(), x_traj.max()-x_traj.min())
+            theta_traj = np.concatenate([theta1*np.ones(13), theta2*np.ones(len(x_traj[13:]))])
+
+            x_traj = np.flip(x_traj)
+            y_traj = np.flip(y_traj)
+            theta_traj = np.flip(theta_traj)
+        else: 
+            with open("./tbsim/safety_funcs/static_scenes/batchRoundabout.pickle", 'rb') as file: 
+                batch = pickle.load(file)
+            N_pxls = batch['image'][1:].cpu().detach().numpy().shape[-1]
+            stateA = batch["states"][-1,:]
+            
+            circle_center = [47, 131]
+            radius = np.sqrt((56-47)**2 + (112-131)**2)
+            thetas_roundabout = np.linspace(-np.pi, 0, 20)
+            x_traj = (circle_center[0] + radius*np.cos(thetas_roundabout)).astype(int)
+            y_traj = (circle_center[1] + radius*np.sin(thetas_roundabout)).astype(int)
+            theta_traj = thetas_roundabout - np.pi/2
+
+            theta1 = -np.pi/2
+            theta2 = np.arctan2(y_traj[13:].min()- y_traj[13:].max(), x_traj.max()-x_traj.min())
+            theta_traj = np.concatenate([theta1*np.ones(13), theta2*np.ones(len(x_traj[13:]))])
+
+        pos_idx_window = torch.arange(0, len(x_traj)-1).int()
+        v_window = torch.arange(0, stateA[2].item() + rel_vel_max, step = 1)
+
+        # Fill Batch 
+        Bprime = len(pos_idx_window) * len(v_window) 
+        Aprime = 2
+        Tprime = 1 
+        gen_states = torch.zeros(Bprime, Aprime, Tprime, 4, device=batch["image"].device)
+        gen_states[:,0,0,2] = stateA[2]
+        for ipos in pos_idx_window:
+            for jv, v in enumerate(v_window): 
+                x = (x_traj[ipos]-pxl_center[0]) / pxls_per_meter
+                y = (y_traj[ipos]-pxl_center[1]) / pxls_per_meter
+                theta = theta_traj[ipos]
+                gen_states[ipos + len(pos_idx_window)*jv, 1, 0, :] = torch.tensor([x, y, v, theta]) 
+
+        gen_availabilities = torch.ones(Bprime, Aprime, Tprime, device=batch["image"].device).bool()
+        gen_agents_from_center = torch.eye(3)[None,None,...].repeat(Bprime, Aprime,1,1).to(gen_states.device)
+
+        state_imgs = torch.zeros((Bprime,Aprime,Tprime,N_pxls,N_pxls), device=batch["image"].device)
+        for ipos in pos_idx_window: 
+            for jy, _ in enumerate(v_window): 
+                state_imgs[ipos+jy*len(pos_idx_window),0,0, y_traj[ipos], x_traj[ipos]] = -1.0
+                state_imgs[ipos+jy*len(pos_idx_window),0,0,pxl_center[1],pxl_center[0]] = 1.0
+
+        semantic_imgs = batch["image"][Tprime:, ...].repeat(Bprime, Aprime, Tprime, 1, 1)
+        gen_image = torch.cat([state_imgs, semantic_imgs], axis=-3)
+
+        test_batch ={
+            "states" : gen_states, 
+            "history_availabilities" : gen_availabilities, 
+            "agents_from_center" : gen_agents_from_center, 
+            "image" : gen_image
+        }
+
+        gamma_preds = net(test_batch)
+    net.train()
+
+    # Generate Road Image
+    visualizer_image = generate_3channel_image(batch)
+    visualizer_image[y_traj, x_traj] = black
+    
+
+    # Generate Contour Plot  
+    X, Y = torch.meshgrid(pos_idx_window.float()/ (len(pos_idx_window)-1), v_window, indexing='xy')
+    gammas_A = gamma_preds["gammas_A"]
+    gammas_A = gammas_A.reshape(len(v_window), len(pos_idx_window))
+
+
+    fig = plt.figure()
+    fig, ax_contour = generate_static_gamma_plots(fig, visualizer_image, X, Y, gammas_A)
+    # customize labels
+    # ax_contour.plot([X.min(), X.max()], [stateA[-2].item(), stateA[-2].item()], color='k', linestyle='--', linewidth=0.5)
+    # ax_contour.plot([ego_extent[0]/2, ego_extent[0]/2], [v_window.min(), v_window.max()], color='k', linestyle='--', linewidth=0.5)
+    # ax_contour.plot([-ego_extent[0]/2, -ego_extent[0]/2], [v_window.min(), v_window.max()], color='k', linestyle='--', linewidth=0.5)
+    ax_contour.set_ylabel("Agent Velocity")
+    ax_contour.set_xlabel("Agent Trajectory Completion")
+
+    img = wandb.Image(fig)
+
+    return img
 
 if __name__ == "__main__": 
-    plot_static_gammas(net = 1)
+    plot_static_gammas_4way(net = 1, type = 0 )

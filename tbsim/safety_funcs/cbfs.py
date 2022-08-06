@@ -175,10 +175,11 @@ class BackupBarrierCBF(CBF):
         Torch auto-grad compatible implementation of a norm ball cbf
     """
 
-    def __init__(self, safe_radius = 0, T_horizon = 1): 
+    def __init__(self, safe_radius = 0, T_horizon = 1, alpha=1): 
         super(BackupBarrierCBF, self).__init__() 
         self.safe_radius = safe_radius
         self.T_horizon = T_horizon
+        self.alpha = alpha
 
     def process_batch(self, batch): 
         T_idx = -1 # Most recent time step 
@@ -223,6 +224,12 @@ class BackupBarrierCBF(CBF):
         ego_extent   = ego_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
         agent_extent = agent_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
         dis = torch.linalg.norm(ego_traj[...,0:2] - agent_traj[...,0:2], axis=-1) #VEH_VEH_collision(ego_traj, agent_traj, ego_extent, agent_extent, return_dis = False)
+
+
+        # Adding sigmoid to h to focus on locality
+        dis = (torch.sigmoid(dis)-0.5)*10 # safety value can range (-5, 5) with 0 at 0)
+
+
         min_dis, _ = dis.min(axis=-1) 
 
         h = min_dis
