@@ -33,8 +33,8 @@ class NuscTrainConfig(TrainConfig):
         self.validation.enabled = True
         self.validation.batch_size = 5
         self.validation.num_data_workers = 6
-        self.validation.every_n_steps = 10
-        self.validation.num_steps_per_epoch = 1
+        self.validation.every_n_steps = 200
+        self.validation.num_steps_per_epoch = 10
 
 
 class NuscEnvConfig(EnvConfig):

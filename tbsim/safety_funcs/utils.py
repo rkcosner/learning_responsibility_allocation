@@ -605,7 +605,8 @@ def plot_static_gammas_traj(net, type=4):
     fig = plt.figure()
     fig, ax_contour = generate_static_gamma_plots(fig, visualizer_image, X, Y, gammas_A)
     # customize labels
-    # ax_contour.plot([X.min(), X.max()], [stateA[-2].item(), stateA[-2].item()], color='k', linestyle='--', linewidth=0.5)
+    if type == 0 : 
+        ax_contour.plot([X.min(), X.max()], [stateA[-2].item(), stateA[-2].item()], color='k', linestyle='--', linewidth=0.5)
     # ax_contour.plot([ego_extent[0]/2, ego_extent[0]/2], [v_window.min(), v_window.max()], color='k', linestyle='--', linewidth=0.5)
     # ax_contour.plot([-ego_extent[0]/2, -ego_extent[0]/2], [v_window.min(), v_window.max()], color='k', linestyle='--', linewidth=0.5)
     ax_contour.set_ylabel("Agent Velocity")
