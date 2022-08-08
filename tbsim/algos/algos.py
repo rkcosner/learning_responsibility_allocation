@@ -110,7 +110,11 @@ class Responsibility(pl.LightningModule):
         elif algo_config.cbf.type == "extended_norm_ball_cbf":
             self.cbf = ExtendedNormBallCBF()
         elif algo_config.cbf.type == "backup_barrier_cbf": 
-            self.cbf = BackupBarrierCBF(T_horizon = algo_config.cbf.T_horizon, alpha=algo_config.cbf.alpha, veh_veh=algo_config.cbf.veh_veh)
+            self.cbf = BackupBarrierCBF(T_horizon = algo_config.cbf.T_horizon, 
+                                        alpha=algo_config.cbf.alpha, 
+                                        veh_veh=algo_config.cbf.veh_veh, 
+                                        saturate_cbf=algo_config.cbf.saturate_cbf
+                                        )
         else: 
             raise Exception("Config Error: algo_config.cbf is not properly defined")
         
@@ -213,6 +217,7 @@ class Responsibility(pl.LightningModule):
         torch.set_grad_enabled(True) # RYAN: this slows thing down, but is required to calculate dhdx
         batch = batch_utils().parse_batch(batch)
         batch = self.add_inputs_vel_to_batch(batch)
+
         batch["states"].requires_grad = True
 
         img_m2= plot_gammas(batch,self.nets["policy"], relspeed=-2.0)

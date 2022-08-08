@@ -267,16 +267,22 @@ class RasterizedResponsibilityModel(nn.Module):
         loss_constraint += torch.sum(torch.nn.functional.leaky_relu(-constraint_B-eps, negative_slope = leaky_relu_negative_slope)) / (1e-5 + constraint_B.shape[0])
     
         percent_violations = (sum(constraint_A<0).item() + sum(constraint_B<0).item()) / (constraint_A.shape[0] + constraint_B.shape[0])
-        max_violations = min(constraint_A.min(), constraint_B.min()).item()
-
+        if self.normalize_constraint: 
+            max_violations = min(constraint_A.min() * normLghA, constraint_B.min() * normLghB).item()
+        else: 
+            max_violations = min(constraint_A.min(), constraint_B.min()).item()
 
         # Responsibility Sum loss
         leaky_relu_negative_slope = self.sum_resp_loss_leaky_relu_negative_slope
         # Penalize whenever the gammas sum up to be less than 0 (which would indicate unsafe actions)
         #   We have to remove the gamma normalization for this
-        unnormalized_gammas_A = gamma_preds["gammas_A"] * normLghA
-        unnormalized_gammas_B = gamma_preds["gammas_B"] * normLghB
-        gamma_sums = unnormalized_gammas_A + unnormalized_gammas_B  
+        if self.normalize_constraint: 
+            gammas_A = gamma_preds["gammas_A"] * normLghA
+            gammas_B = gamma_preds["gammas_B"] * normLghB
+        else: 
+            gammas_A = gamma_preds["gammas_A"]
+            gammas_B = gamma_preds["gammas_B"]            
+        gamma_sums = gammas_A + gammas_B  
         if len(gamma_sums.shape)>0: 
             loss_resp_sum = torch.sum(torch.nn.functional.leaky_relu(-gamma_sums, negative_slope = leaky_relu_negative_slope)) / (1e-5 + gamma_sums.shape[0])
         else: 

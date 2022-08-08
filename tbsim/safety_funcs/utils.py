@@ -98,7 +98,6 @@ def scene_centric_batch_to_raw(data_batch):
         src_vel = dynamics.Unicycle.calculate_vel(src_pos, src_yaw, data_batch["dt"][0] , src_mask)
         src_vel[:, :, -1] = data_batch["curr_speed"].unsqueeze(-1) # replace calculated velocity with true velocity
     
-    
 
     """
     Get Bezier Approximations

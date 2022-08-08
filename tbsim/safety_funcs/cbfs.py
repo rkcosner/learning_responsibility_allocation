@@ -176,12 +176,13 @@ class BackupBarrierCBF(CBF):
         Torch auto-grad compatible implementation of a norm ball cbf
     """
 
-    def __init__(self, safe_radius = 0, T_horizon = 1, alpha=1, veh_veh = True): 
+    def __init__(self, safe_radius = 0, T_horizon = 1, alpha=1, veh_veh = True, saturate_cbf=True): 
         super(BackupBarrierCBF, self).__init__() 
         self.safe_radius = safe_radius
         self.T_horizon = T_horizon
         self.alpha = alpha
         self.veh_veh = veh_veh
+        self.saturate_cbf = saturate_cbf
 
     def process_batch(self, batch): 
         T_idx = -1 # Most recent time step 
@@ -234,7 +235,8 @@ class BackupBarrierCBF(CBF):
             dist = dist.amin(-1) 
 
         h = dist 
+        if self.saturate_cbf: 
         # Adding sigmoid to h to focus on locality
-        # h = (torch.sigmoid(h)-0.5)*10 # safety value can range (-5, 5) with 0 at 0)
+            h = (torch.sigmoid(h)-0.5)*10 # safety value can range (-5, 5) with 0 at 0)
 
         return h 
