@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributions as distributions
 import random
+import time 
 
 import tbsim.models.base_models as base_models
 from tbsim.models.Transformer import SimpleTransformer
@@ -142,8 +143,11 @@ class RasterizedResponsibilityModel(nn.Module):
             gamma_preds["gammas_A"] = gamma_preds["gammas_A"][mask]
             gamma_preds["gammas_B"] = gamma_preds["gammas_B"][mask]
 
-        # Get losses, MUST run constraint loss first to get proper masking
+        # Get losses
+        tic = time.time()
         loss_constraint, _, _ = self.compute_cbf_constraint_loss(cbf, gamma_preds, batch)
+        toc = time.time()
+        print("Time to evaluate constraint loss = ", toc-tic)
         loss_max_likelihood = self.compute_max_likelihood_loss(gamma_preds)
         loss_resp_sum = self.compute_resp_sum_loss(gamma_preds)
 

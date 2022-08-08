@@ -262,11 +262,12 @@ class Responsibility(pl.LightningModule):
                 if wandb.run is not None: 
                     wandb.log({"val/plot_gamma_"+k: outputs[j]["plots"][k]})
 
-        gammas2way = plot_static_gammas_inline(self.nets["policy"], 2)
-        gammas4way_samelane = plot_static_gammas_inline(self.nets["policy"], 4)
-        gammas4way_cross = plot_static_gammas_traj(self.nets["policy"], 4)
-        gammasRoundabout = plot_static_gammas_traj(self.nets["policy"],0)
         if wandb.run is not None: 
+            gammas2way = plot_static_gammas_inline(self.nets["policy"], 2)
+            gammas4way_samelane = plot_static_gammas_inline(self.nets["policy"], 4)
+            gammas4way_cross = plot_static_gammas_traj(self.nets["policy"], 4)
+            gammasRoundabout = plot_static_gammas_traj(self.nets["policy"],0)
+
             wandb.log({"val/plot_gammas2way":gammas2way})
             wandb.log({"val/plot_gammas4way_samelane":gammas4way_samelane})
             wandb.log({"val/plot_gammas4way_cross": gammas4way_cross})

@@ -223,16 +223,13 @@ class BackupBarrierCBF(CBF):
         N_tForward = int(self.T_horizon/dt[0,0])
         backup_controller = torch.zeros(B, A, 2).to(ego_state.device)
         ego_traj, agent_traj = forward_project_states(ego_state, agent_state, backup_controller, N_tForward, dt)
-
+        ego_extent   = ego_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
+        agent_extent = agent_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
         if self.veh_veh: 
-            dists = []
-            for tau in range(N_tForward): 
-                dist = VEH_VEH_distance(ego_traj[...,tau,0:3],agent_traj[...,tau,0:3],ego_extent, agent_extent )
-                dists.append(dist[...,None])
-            dist = torch.cat(dists, axis=-1).amin(-1)
+            dist = VEH_VEH_distance(ego_traj[...,0:3],agent_traj[...,0:3],ego_extent, agent_extent )
+            dist = dist.amin(-1)
         else: # ball norm 
-            ego_extent   = ego_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
-            agent_extent = agent_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
+
             dist = torch.linalg.norm(ego_traj[...,0:2] - agent_traj[...,0:2], axis=-1) #VEH_VEH_collision(ego_traj, agent_traj, ego_extent, agent_extent, return_dis = False)
             dist = dist.amin(-1) 
 

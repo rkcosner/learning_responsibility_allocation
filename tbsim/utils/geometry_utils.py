@@ -184,12 +184,11 @@ def VEH_VEH_distance(p1, p2, S1, S2, offsetX=0, offsetY=0):
     d1,_,_ = distance_points_to_lines(p1,p2,S1,S2) # from agent1's vertices to agent2's lines
     d2, corners1, corners2 = distance_points_to_lines(p2,p1,S2,S1) # from agent2's vertices to agent1's lines
     # Next get the distance between all the vertices (16 distances)
-    d3 = torch.inf * torch.ones((d1.shape[0],  d1.shape[1], 4 * 4,), device = p1.device)
+    d3 = torch.inf * torch.ones((d1.shape[0], d1.shape[1],d1.shape[2], 4 * 4), device = p1.device)
     # Get the distance between each vertex
     for i in range(4): 
         for j in range(4):
-            d3[:,:,i+4*j] = torch.linalg.norm(corners1[:,:,i,:] - corners2[:,:,j,:], axis=-1)
-    
+            d3[...,i+4*j] = torch.linalg.norm(corners1[...,i,:] - corners2[...,j,:], axis=-1)
     # Get and return the minimum of all the calculated distances
     dists = torch.cat((d1,d2,d3), axis = -1)
     dists = dists.amin(-1)
@@ -223,14 +222,14 @@ def distance_points_to_lines(p1, p2, S1, S2, offsetX=0, offsetY=0):
     corners2 = torch.stack([corners2X, corners2Y], dim=-1)
 
     # Next get distance between points and lines from agent 1 to 2 
-    A = p1.shape[-2]
-    corners2 = corners2.reshape(corners2.shape[0], A, 4, 2)
-    delta_x2 = delta_x2.reshape(delta_x2.shape[0], A, 4, 2)
+    A = p1.shape[1]
+    T = p1.shape[-2]
+    corners2 = corners2.reshape(corners2.shape[0], A, T, 4, 2)
+    delta_x2 = delta_x2.reshape(delta_x2.shape[0], A, T, 4, 2)
 
     dist = torch.inf * torch.ones(corners2.shape[:-1], device=p1.device)
     for corner_number in range(4): # for each corner
-
-        c1 = delta_x2[:,:,corner_number,:]
+        c1 = delta_x2[...,corner_number,:]
         # Get Distance from vertex to x lines
         aboveRect =  (c1[...,1] - corners2[...,1].amax(dim=-1) >=0).bool()
         belowRect =  (c1[...,1] - corners2[...,1].amin(dim=-1) <=0).bool()
@@ -243,15 +242,15 @@ def distance_points_to_lines(p1, p2, S1, S2, offsetX=0, offsetY=0):
         left_keep  = torch.logical_and(leftRect, torch.logical_not(torch.logical_or(aboveRect, belowRect)))
 
         for idx_keep, keep in enumerate([above_keep, below_keep, right_keep, left_keep]): # find distance from each line
-            ii,jj = torch.where(keep)
+            ii,jj,kk = torch.where(keep)
             if idx_keep==0: 
-                dist[ii,jj,corner_number] = c1[ii,jj,1] - corners2[ii,jj,:,1].amax(dim=1)
+                dist[ii,jj,kk,corner_number] = c1[ii,jj,kk,1] - corners2[ii,jj,kk,:,1].amax(dim=1)
             elif idx_keep==1: 
-                dist[ii,jj,corner_number] = corners2[ii,jj,:,1].amin(dim=1) - c1[ii,jj,1]
+                dist[ii,jj,kk,corner_number] = corners2[ii,jj,kk,:,1].amin(dim=1) - c1[ii,jj,kk,1]
             elif idx_keep==2: 
-                dist[ii,jj,corner_number] = c1[ii,jj,0] - corners2[ii,jj,:,0].amax(dim=1)
+                dist[ii,jj,kk,corner_number] = c1[ii,jj,kk,0] - corners2[ii,jj,kk,:,0].amax(dim=1)
             elif idx_keep==3: 
-                dist[ii,jj,corner_number] = corners2[ii,jj,:,0].amin(dim=1) - c1[ii,jj,0] 
+                dist[ii,jj,kk,corner_number] = corners2[ii,jj,kk,:,0].amin(dim=1) - c1[ii,jj,kk,0] 
 
     return dist, delta_x2, corners2 
 
