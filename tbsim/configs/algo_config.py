@@ -52,6 +52,8 @@ class ResponsibilityConfig(AlgoConfig):
         self.cbf.type = "backup_barrier_cbf"
         self.cbf.T_horizon = 3
         self.cbf.alpha = 0.2
+        self.cbf.veh_veh = True 
+        
         self.scene_centric = True
 
         self.loss_weights.constraint_loss = 1.0

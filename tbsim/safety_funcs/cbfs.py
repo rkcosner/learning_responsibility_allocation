@@ -2,6 +2,7 @@ from turtle import back
 import torch 
 from tbsim.utils.geometry_utils import (
     VEH_VEH_collision, 
+    VEH_VEH_distance,
     VEH_PED_collision, 
     PED_VEH_collision, 
     PED_PED_collision
@@ -175,11 +176,12 @@ class BackupBarrierCBF(CBF):
         Torch auto-grad compatible implementation of a norm ball cbf
     """
 
-    def __init__(self, safe_radius = 0, T_horizon = 1, alpha=1): 
+    def __init__(self, safe_radius = 0, T_horizon = 1, alpha=1, veh_veh = True): 
         super(BackupBarrierCBF, self).__init__() 
         self.safe_radius = safe_radius
         self.T_horizon = T_horizon
         self.alpha = alpha
+        self.veh_veh = veh_veh
 
     def process_batch(self, batch): 
         T_idx = -1 # Most recent time step 
@@ -205,33 +207,36 @@ class BackupBarrierCBF(CBF):
         """
 
         ego_state = data[...,0:4]
-        ego_pos = ego_state[...,[0,1,3]] # remove velocity
         agent_state = data[...,4:8]
-        agent_pos = agent_state[...,[0,1,3]] # remove velocity 
         ego_extent = data[...,8:11]
         agent_extent = data[...,11:14]
         dt = data[...,14,None]
 
-        # TODO: Currently I'm ignoring the extents
-
-        h = torch.linalg.norm(ego_pos[...,0:2] - agent_pos[...,0:2], axis=-1)#VEH_VEH_collision(ego_pos, agent_pos, ego_extent, agent_extent, offsetX=0, offsetY=0) #
+        # # TODO: Currently I'm ignoring the extents
+        # if self.veh_veh:
+        #     h1 = VEH_VEH_distance(ego_pos, agent_pos, ego_extent, agent_extent, offsetX=0, offsetY=0) 
+        # else: 
+        #     h = torch.linalg.norm(ego_pos[...,0:2] - agent_pos[...,0:2], axis=-1)
 
         B = data.shape[0]
         A = data.shape[1]
         N_tForward = int(self.T_horizon/dt[0,0])
-        backup_controller = torch.zeros(B, A, 2).to(ego_pos.device)
+        backup_controller = torch.zeros(B, A, 2).to(ego_state.device)
         ego_traj, agent_traj = forward_project_states(ego_state, agent_state, backup_controller, N_tForward, dt)
-        ego_extent   = ego_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
-        agent_extent = agent_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
-        dis = torch.linalg.norm(ego_traj[...,0:2] - agent_traj[...,0:2], axis=-1) #VEH_VEH_collision(ego_traj, agent_traj, ego_extent, agent_extent, return_dis = False)
 
+        if self.veh_veh: 
+            dists = []
+            for tau in range(N_tForward): 
+                dist = VEH_VEH_distance(ego_traj[...,tau,0:3],agent_traj[...,tau,0:3],ego_extent, agent_extent )
+                dists.append(dist[...,None])
+            dist = torch.cat(dists, axis=-1).amin(-1)
+        else: # ball norm 
+            ego_extent   = ego_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
+            agent_extent = agent_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
+            dist = torch.linalg.norm(ego_traj[...,0:2] - agent_traj[...,0:2], axis=-1) #VEH_VEH_collision(ego_traj, agent_traj, ego_extent, agent_extent, return_dis = False)
+            dist = dist.amin(-1) 
 
         # Adding sigmoid to h to focus on locality
-        dis = (torch.sigmoid(dis)-0.5)*10 # safety value can range (-5, 5) with 0 at 0)
-
-
-        min_dis, _ = dis.min(axis=-1) 
-
-        h = min_dis
+        h = (torch.sigmoid(dist)-0.5)*10 # safety value can range (-5, 5) with 0 at 0)
 
         return h 

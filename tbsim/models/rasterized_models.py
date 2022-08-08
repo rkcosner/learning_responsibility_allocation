@@ -216,7 +216,6 @@ class RasterizedResponsibilityModel(nn.Module):
         leaky_relu_negative_slope = self.constraint_loss_leaky_relu_negative_slope
         alpha = 1 
         eps = 1e-3
-
         data = cbf.process_batch(batch)
         h_vals = cbf(data)                
         dhdx, = torch.autograd.grad(h_vals, inputs = data, grad_outputs = torch.ones_like(h_vals), create_graph=True)

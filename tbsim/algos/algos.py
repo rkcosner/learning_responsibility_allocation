@@ -109,7 +109,7 @@ class Responsibility(pl.LightningModule):
         elif algo_config.cbf.type == "extended_norm_ball_cbf":
             self.cbf = ExtendedNormBallCBF()
         elif algo_config.cbf.type == "backup_barrier_cbf": 
-            self.cbf = BackupBarrierCBF(T_horizon = algo_config.cbf.T_horizon, alpha=algo_config.cbf.alpha)
+            self.cbf = BackupBarrierCBF(T_horizon = algo_config.cbf.T_horizon, alpha=algo_config.cbf.alpha, veh_veh=algo_config.cbf.veh_veh)
         else: 
             raise Exception("Config Error: algo_config.cbf is not properly defined")
         

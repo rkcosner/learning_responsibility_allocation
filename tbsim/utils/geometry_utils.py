@@ -176,11 +176,93 @@ def batch_rotate_2D(xy, theta):
         return np.concatenate((x1.reshape(-1, 1), y1.reshape(-1, 1)), axis=-1)
 
 
+def VEH_VEH_distance(p1, p2, S1, S2, offsetX=0, offsetY=0): 
+    # Get the distance vehicle to vehicle. THIS ASSUMES THAT THE DISTANCE BETWEEN RECTANGLES IS POSITIVE 
+
+    # First get the perpendicular distance between lines and vertices (<=4)*2
+    #   Don't record the distance if the perpendicular line isn't contained within the line segment
+    d1,_,_ = distance_points_to_lines(p1,p2,S1,S2) # from agent1's vertices to agent2's lines
+    d2, corners1, corners2 = distance_points_to_lines(p2,p1,S2,S1) # from agent2's vertices to agent1's lines
+    # Next get the distance between all the vertices (16 distances)
+    d3 = torch.inf * torch.ones((d1.shape[0],  d1.shape[1], 4 * 4,), device = p1.device)
+    # Get the distance between each vertex
+    for i in range(4): 
+        for j in range(4):
+            d3[:,:,i+4*j] = torch.linalg.norm(corners1[:,:,i,:] - corners2[:,:,j,:], axis=-1)
+    
+    # Get and return the minimum of all the calculated distances
+    dists = torch.cat((d1,d2,d3), axis = -1)
+    dists = dists.amin(-1)
+
+    return dists 
+
+
+def distance_points_to_lines(p1, p2, S1, S2, offsetX=0, offsetY=0): 
+    # First get all the corners in p2's reference frame: 
+    corners1X = torch.kron(
+        S1[..., 0] + offsetX, torch.tensor([0.5, 0.5, -0.5, -0.5]).to(p1.device)
+    )
+    corners1Y = torch.kron(
+        S1[..., 1] + offsetY, torch.tensor([0.5, -0.5, 0.5, -0.5]).to(p1.device)
+    )
+    corners1 = torch.stack([corners1X, corners1Y], dim=-1)
+
+    dx = (p1[..., 0:2] - p2[..., 0:2]).repeat_interleave(4, dim=-2)
+    theta1 = p1[..., 2]
+    theta2 = p2[..., 2]
+
+    delta_x1 = batch_rotate_2D(corners1, theta1.repeat_interleave(4, dim=-1)) + dx
+    delta_x2 = batch_rotate_2D(delta_x1, -theta2.repeat_interleave(4, dim=-1))
+
+    corners2X = torch.kron(
+        S2[..., 0] + offsetX, torch.tensor([0.5, 0.5, -0.5, -0.5]).to(p1.device)
+    )
+    corners2Y = torch.kron(
+        S2[..., 1] + offsetY, torch.tensor([0.5, -0.5, 0.5, -0.5]).to(p1.device)
+    )
+    corners2 = torch.stack([corners2X, corners2Y], dim=-1)
+
+    # Next get distance between points and lines from agent 1 to 2 
+    A = p1.shape[-2]
+    corners2 = corners2.reshape(corners2.shape[0], A, 4, 2)
+    delta_x2 = delta_x2.reshape(delta_x2.shape[0], A, 4, 2)
+
+    dist = torch.inf * torch.ones(corners2.shape[:-1], device=p1.device)
+    for corner_number in range(4): # for each corner
+
+        c1 = delta_x2[:,:,corner_number,:]
+        # Get Distance from vertex to x lines
+        aboveRect =  (c1[...,1] - corners2[...,1].amax(dim=-1) >=0).bool()
+        belowRect =  (c1[...,1] - corners2[...,1].amin(dim=-1) <=0).bool()
+        rightRect =  (c1[...,0] - corners2[...,0].amax(dim=-1) >=0).bool()
+        leftRect =   (c1[...,0] - corners2[...,0].amin(dim=-1) <=0).bool()
+
+        above_keep = torch.logical_and(aboveRect, torch.logical_not(torch.logical_or(rightRect, leftRect)))
+        below_keep = torch.logical_and(belowRect, torch.logical_not(torch.logical_or(rightRect, leftRect)))
+        right_keep = torch.logical_and(rightRect, torch.logical_not(torch.logical_or(aboveRect, belowRect)))
+        left_keep  = torch.logical_and(leftRect, torch.logical_not(torch.logical_or(aboveRect, belowRect)))
+
+        for idx_keep, keep in enumerate([above_keep, below_keep, right_keep, left_keep]): # find distance from each line
+            ii,jj = torch.where(keep)
+            if idx_keep==0: 
+                dist[ii,jj,corner_number] = c1[ii,jj,1] - corners2[ii,jj,:,1].amax(dim=1)
+            elif idx_keep==1: 
+                dist[ii,jj,corner_number] = corners2[ii,jj,:,1].amin(dim=1) - c1[ii,jj,1]
+            elif idx_keep==2: 
+                dist[ii,jj,corner_number] = c1[ii,jj,0] - corners2[ii,jj,:,0].amax(dim=1)
+            elif idx_keep==3: 
+                dist[ii,jj,corner_number] = corners2[ii,jj,:,0].amin(dim=1) - c1[ii,jj,0] 
+
+    return dist, delta_x2, corners2 
+
+
+
+
 def VEH_VEH_collision(
     p1, p2, S1, S2, alpha=5, return_dis=False, offsetX=1.0, offsetY=0.3
 ):
     """
-        RYAN: vehicle collision calculator README collision_calculator reference
+        RYAN: Get minimum distance between vertices of agent1 and the lines describing agent2 
             args: 
                 - pose 1 [x,y,yaw]
                 - pose 2 [x,y,yaw]
@@ -197,7 +279,6 @@ def VEH_VEH_collision(
             # RYAN: get the center of the agents and then use a kronecker product to generate the y positions for corners of a box +/-0.5 meters
             S1[..., 1] + offsetY, torch.tensor([0.5, -0.5, 0.5, -0.5]).to(p1.device)
         )
-
         # RYAN : corners for a box +/-0.5m around a box centered at (extent_0, extent_1) around vehicle 1 
         corners = torch.stack([cornersX, cornersY], dim=-1)
 
