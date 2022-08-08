@@ -43,7 +43,8 @@ class RasterizedResponsibilityModel(nn.Module):
             leaky_relu_negative_slope = 1e-4, 
             max_angle = 90,
             constraint_loss_leaky_relu_negative_slope = 1e-2, 
-            sum_resp_loss_leaky_relu_negative_slope = 1e-2
+            sum_resp_loss_leaky_relu_negative_slope = 1e-2, 
+            normalize_constraint = True 
     ) -> None:
 
         super().__init__()
@@ -64,7 +65,8 @@ class RasterizedResponsibilityModel(nn.Module):
         self.max_angle = max_angle
         self.constraint_loss_leaky_relu_negative_slope  = constraint_loss_leaky_relu_negative_slope 
         self.sum_resp_loss_leaky_relu_negative_slope    = sum_resp_loss_leaky_relu_negative_slope   
-        
+        self.normalize_constraint = normalize_constraint
+
     def forward(self, batch) -> Dict[str, torch.Tensor]:
         """"
             batch[image] is of size [B, A, T + 7, Pxl_x, Pxl_y]
@@ -144,12 +146,9 @@ class RasterizedResponsibilityModel(nn.Module):
             gamma_preds["gammas_B"] = gamma_preds["gammas_B"][mask]
 
         # Get losses
-        tic = time.time()
-        loss_constraint, _, _ = self.compute_cbf_constraint_loss(cbf, gamma_preds, batch)
-        toc = time.time()
-        print("Time to evaluate constraint loss = ", toc-tic)
+        loss_constraint, loss_resp_sum, _, _ = self.compute_cbf_constraint_loss(cbf, gamma_preds, batch)
         loss_max_likelihood = self.compute_max_likelihood_loss(gamma_preds)
-        loss_resp_sum = self.compute_resp_sum_loss(gamma_preds)
+        # loss_resp_sum = self.compute_resp_sum_loss(gamma_preds)
 
         losses = OrderedDict(
             constraint_loss  = loss_constraint,
@@ -172,18 +171,18 @@ class RasterizedResponsibilityModel(nn.Module):
         return loss_max_likelihood
 
 
-    def compute_resp_sum_loss(self, gamma_preds): 
-        leaky_relu_negative_slope = self.sum_resp_loss_leaky_relu_negative_slope
-        # Penalize whenever the gammas sum up to be less than 0 (which would indicate unsafe actions)
-        gammas_A = gamma_preds["gammas_A"]
-        gammas_B = gamma_preds["gammas_B"]
-        gamma_sums = gammas_A + gammas_B  
-        if len(gamma_sums.shape)>0: 
-            loss_resp_sum = torch.sum(torch.nn.functional.leaky_relu(-gamma_sums, negative_slope = leaky_relu_negative_slope)) / (1e-5 + gamma_sums.shape[0])
-        else: 
-            loss_resp_sum = torch.tensor(0)
+    # def compute_resp_sum_loss(self, gamma_preds): 
+    #     leaky_relu_negative_slope = self.sum_resp_loss_leaky_relu_negative_slope
+    #     # Penalize whenever the gammas sum up to be less than 0 (which would indicate unsafe actions)
+    #     gammas_A = gamma_preds["gammas_A"]
+    #     gammas_B = gamma_preds["gammas_B"]
+    #     gamma_sums = gammas_A + gammas_B  
+    #     if len(gamma_sums.shape)>0: 
+    #         loss_resp_sum = torch.sum(torch.nn.functional.leaky_relu(-gamma_sums, negative_slope = leaky_relu_negative_slope)) / (1e-5 + gamma_sums.shape[0])
+    #     else: 
+    #         loss_resp_sum = torch.tensor(0)
 
-        return loss_resp_sum 
+    #     return loss_resp_sum 
 
     def get_masks(self, cbf, batch): 
         # Mask for availability
@@ -216,10 +215,8 @@ class RasterizedResponsibilityModel(nn.Module):
 
         return batch_ii, batch_jj, other_masks
 
-    def compute_cbf_constraint_loss(self, cbf, gamma_preds, batch):
+    def compute_cbf_constraint_loss(self, cbf, gamma_preds, batch, eps = 1e-3):
         leaky_relu_negative_slope = self.constraint_loss_leaky_relu_negative_slope
-        alpha = 1 
-        eps = 1e-3
         data = cbf.process_batch(batch)
         h_vals = cbf(data)                
         dhdx, = torch.autograd.grad(h_vals, inputs = data, grad_outputs = torch.ones_like(h_vals), create_graph=True)
@@ -254,9 +251,16 @@ class RasterizedResponsibilityModel(nn.Module):
         LghAuA = torch.bmm(LghA, inputA_masked[:,:,None]).squeeze()
         LghBuB = torch.bmm(LghB, inputB_masked[:,:,None]).squeeze()
 
-        # TODO: debug and check that this is right, the constraint loss is surprisingly high
-        constraint_A = natural_dynamics + LghAuA - gamma_preds["gammas_A"] 
-        constraint_B = natural_dynamics + LghBuB - gamma_preds["gammas_B"] 
+        if self.normalize_constraint: 
+            normLghA = torch.linalg.norm(LghA, axis=-1)[:,0]
+            normLghB = torch.linalg.norm(LghB, axis=-1)[:,0]
+            if sum(normLghA<=1e-5) + sum(normLghB<=1e-5)>0: 
+                raise Exception("zero input error!")
+            constraint_A = (natural_dynamics + LghAuA) / normLghA - gamma_preds["gammas_A"] 
+            constraint_B = (natural_dynamics + LghBuB) / normLghB - gamma_preds["gammas_B"] 
+        else: 
+            constraint_A = natural_dynamics + LghAuA - gamma_preds["gammas_A"] 
+            constraint_B = natural_dynamics + LghBuB - gamma_preds["gammas_B"] 
 
         # TODO: decide leaky vs standard relu 
         loss_constraint  = torch.sum(torch.nn.functional.leaky_relu(-constraint_A-eps, negative_slope = leaky_relu_negative_slope)) / (1e-5 + constraint_A.shape[0])
@@ -265,7 +269,21 @@ class RasterizedResponsibilityModel(nn.Module):
         percent_violations = (sum(constraint_A<0).item() + sum(constraint_B<0).item()) / (constraint_A.shape[0] + constraint_B.shape[0])
         max_violations = min(constraint_A.min(), constraint_B.min()).item()
 
-        return loss_constraint, percent_violations, max_violations
+
+        # Responsibility Sum loss
+        leaky_relu_negative_slope = self.sum_resp_loss_leaky_relu_negative_slope
+        # Penalize whenever the gammas sum up to be less than 0 (which would indicate unsafe actions)
+        #   We have to remove the gamma normalization for this
+        unnormalized_gammas_A = gamma_preds["gammas_A"] * normLghA
+        unnormalized_gammas_B = gamma_preds["gammas_B"] * normLghB
+        gamma_sums = unnormalized_gammas_A + unnormalized_gammas_B  
+        if len(gamma_sums.shape)>0: 
+            loss_resp_sum = torch.sum(torch.nn.functional.leaky_relu(-gamma_sums, negative_slope = leaky_relu_negative_slope)) / (1e-5 + gamma_sums.shape[0])
+        else: 
+            loss_resp_sum = torch.tensor(0)
+
+
+        return loss_constraint, loss_resp_sum, percent_violations, max_violations
 
     def unicycle_dynamics(self, stateA, stateB):
         # states are [x, y, v, yaw]

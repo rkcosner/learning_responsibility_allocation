@@ -99,7 +99,8 @@ class Responsibility(pl.LightningModule):
             spatial_softmax_kwargs=algo_config.spatial_softmax.kwargs,
             constraint_loss_leaky_relu_negative_slope = algo_config.constraint_loss.leaky_relu_negative_slope,
             sum_resp_loss_leaky_relu_negative_slope   = algo_config.sum_resp_loss.leaky_relu_negative_slope, 
-            max_angle=algo_config.max_angle_diff
+            max_angle=algo_config.max_angle_diff,
+            normalize_constraint=algo_config.cbf.normalize_constraint
         )
         # TODO : create loss discount parameters
         if   algo_config.cbf.type == "rss_cbf": 
@@ -154,7 +155,7 @@ class Responsibility(pl.LightningModule):
         return plotted_metrics
 
     def _compute_metrics(self, batch, gammas):
-        _, percent_violations, max_violations = self.nets["policy"].compute_cbf_constraint_loss(self.cbf, gammas, batch)
+        _, _, percent_violations, max_violations = self.nets["policy"].compute_cbf_constraint_loss(self.cbf, gammas, batch)
         metrics = {
             "percent_constraint_violations" : percent_violations, 
             "max_constraint_violations" : max_violations

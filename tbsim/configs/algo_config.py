@@ -53,6 +53,7 @@ class ResponsibilityConfig(AlgoConfig):
         self.cbf.T_horizon = 3
         self.cbf.alpha = 0.2
         self.cbf.veh_veh = True
+        self.cbf.normalize_constraint = True
 
         self.scene_centric = True
 

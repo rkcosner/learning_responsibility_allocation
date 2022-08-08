@@ -233,7 +233,8 @@ class BackupBarrierCBF(CBF):
             dist = torch.linalg.norm(ego_traj[...,0:2] - agent_traj[...,0:2], axis=-1) #VEH_VEH_collision(ego_traj, agent_traj, ego_extent, agent_extent, return_dis = False)
             dist = dist.amin(-1) 
 
+        h = dist 
         # Adding sigmoid to h to focus on locality
-        h = (torch.sigmoid(dist)-0.5)*10 # safety value can range (-5, 5) with 0 at 0)
+        # h = (torch.sigmoid(h)-0.5)*10 # safety value can range (-5, 5) with 0 at 0)
 
         return h 
