@@ -70,6 +70,7 @@ def test_bezier():
     plt.plot(x,y, '*')
     plt.savefig("bez_test.png")
 
+BEZ_TEST = False
 
 def scene_centric_batch_to_raw(data_batch):
     """
@@ -87,6 +88,7 @@ def scene_centric_batch_to_raw(data_batch):
             - "history_availabilities"
             - "extents"
     """
+    N_future = data_batch["target_positions"].shape[-2]
 
     # Add target states (the next state in the trajectory), so that the input can be computed now 
     src_pos = torch.cat([data_batch["history_positions"], data_batch["target_positions"]], axis = -2) # [B, A, T, D]
@@ -94,7 +96,7 @@ def scene_centric_batch_to_raw(data_batch):
     src_mask = torch.cat([data_batch["history_availabilities"], data_batch["target_availabilities"]], axis=-1)# [B, A, T]
 
     # Estimate Velocity: 3 point method when possible and 2 point method when not
-    if False: # 1st order approximation for debugging
+    if BEZ_TEST: # 1st order approximation for debugging
         src_vel = dynamics.Unicycle.calculate_vel(src_pos, src_yaw, data_batch["dt"][0] , src_mask)
         src_vel[:, :, -1] = data_batch["curr_speed"].unsqueeze(-1) # replace calculated velocity with true velocity
     
@@ -147,12 +149,16 @@ def scene_centric_batch_to_raw(data_batch):
     except: 
         import pdb; pdb.set_trace()
 
-    if False: # 1st order approximation for debugging
+    if BEZ_TEST: # 1st order approximation for debugging
+        from tbsim.safety_funcs.debug_utils import view_states_and_inputs
         states_1stord = torch.cat((src_pos, src_vel, src_yaw), axis =-1) 
         inputs_1stord = (states_1stord[:,:,1:,2:] - states_1stord[:,:,:-1,2:])/data_batch["dt"][0]
+        view_states_and_inputs(states, inputs, states_1stord, inputs_1stord)
+        breakpoint()
 
-    data_batch["states"] = states[:,:,:-1,:] # Remove the future state
-    data_batch["inputs"] = inputs[:,:,:-1,:] # Remove the future input
+
+    data_batch["states"] = states[:,:,:-N_future,:] # Remove the future state
+    data_batch["inputs"] = inputs[:,:,:-N_future,:] # Remove the future input
     data_batch["image"]  = data_batch["image"][...,T-2:,:,:] # Remove Image Trajectory
 
     return data_batch 

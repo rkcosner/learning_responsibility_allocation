@@ -13,7 +13,7 @@ class ResponsibilityConfig(AlgoConfig):
         self.history_num_frames = 10
         self.history_num_frames_ego = 10
         self.history_num_frames_agents = 10
-        self.future_num_frames = 1 # RYAN : to get gamma, just need 1 step forward with no dynamics
+        self.future_num_frames = 5 # RYAN : to get gamma, just need 1 step forward with no dynamics
         self.responsibility_dim = 1 # RYAN : gamma is the 1 dimensional projection onto dhdx 
         self.responsibility_dynamics = None # RYAN : we can force responsibility to have dynamics here
         self.step_time = 0.1
