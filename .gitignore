@@ -75,3 +75,12 @@ plot_result_l5kit.ipynb
 plot_result_nusc.ipynb
 plot_result.ipynb
 test.py
+
+
+# Logged Data
+*_models
+*.png
+
+# Data Sets
+lyft_prediction
+nuscenes
