@@ -65,7 +65,7 @@ class ResponsibilityConfig(AlgoConfig):
         self.constraint_loss.leaky_relu_negative_slope = 1e-1
         self.sum_resp_loss.leaky_relu_negative_slope = 1e-2
 
-        self.max_angle_diff = 100
+        self.max_angle_diff = 100 # max angle diff away from 0 to consider, in degrees
 
 
 class BehaviorCloningConfig(AlgoConfig):

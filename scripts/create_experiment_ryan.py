@@ -18,7 +18,7 @@ def configs_to_search_nusc(base_cfg):
     plan.add_const_param(Param("algo.loss_weights.constraint_loss", alias="cl", value=1.0))
     plan.add_const_param(Param("algo.loss_weights.sum_resp_loss", alias="srl", value=10))
     plan.add_const_param(Param("algo.constraint_loss.leaky_relu_negative_slope", alias="cl_lrns", value=1e-1))
-
+    plan.add_const_param(Param("algo.max_angle_diff", alias="max_d_angl", value=100))
     # plan.add_const_param(Param("algo.loss_weights.yaw_reg_loss", alias="yrl", value=0.01))
     # plan.add_const_param(Param("algo.dynamics.type", alias="dyn", value=None))
     # plan.add_const_param(Param("train.rollout.enabled", alias="rl", value=False))
