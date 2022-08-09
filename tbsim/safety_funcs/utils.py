@@ -442,11 +442,11 @@ def plot_static_gammas_inline(net, type):
         window = 20 
         rel_vel_max = 5
         if type == 2: 
-            with open("./tbsim/safety_funcs/static_scenes/batch2wayDivider.pickle", 'rb') as file: 
+            with open("workspace/static_scenes/batchRoundabout.pickle", 'rb') as file: 
                 batch = pickle.load(file)
                 stateA = batch["states"][-1,:]
         else: 
-            with open("./tbsim/safety_funcs/static_scenes/batch4way.pickle", 'rb') as file: 
+            with open("workspace/static_scenes/batch4way.pickle", 'rb') as file: 
                 batch = pickle.load(file)
                 stateA = batch["states"][0,0,-1,:]
 
@@ -528,7 +528,7 @@ def plot_static_gammas_traj(net, type=4):
         rel_vel_max = 10
 
         if type == 4:
-            with open("./tbsim/safety_funcs/static_scenes/batch4way.pickle", 'rb') as file: 
+            with open("workspace/static_scenes/batch4way.pickle", 'rb') as file: 
                 batch = pickle.load(file)
             N_pxls = batch['image'][1:].cpu().detach().numpy().shape[-1]
             stateA = batch["states"][0,0,-1,:]
@@ -542,7 +542,7 @@ def plot_static_gammas_traj(net, type=4):
             y_traj = np.flip(y_traj)
             theta_traj = np.flip(theta_traj)
         else: 
-            with open("./tbsim/safety_funcs/static_scenes/batchRoundabout.pickle", 'rb') as file: 
+            with open("workspace/static_scenes/batchRoundabout.pickle", 'rb') as file: 
                 batch = pickle.load(file)
             N_pxls = batch['image'][1:].cpu().detach().numpy().shape[-1]
             stateA = batch["states"][-1,:]
