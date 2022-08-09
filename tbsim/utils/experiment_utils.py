@@ -243,15 +243,21 @@ def launch_experiments_ngc(
         py_cmd = [
             "export WANDB_APIKEY={};".format(ngc_config["wandb_apikey"]),
             "cd {}/tbsim;".format(ngc_config["workspace_mounting_point"]),
-            "pip install -e .; pip install numpy==1.21.4;",
+            "pip install -e .; pip install numpy==1.22.4;",
+            "pip install pytorch_lightning==1.6.4;",
             "cd {}/uadl;".format(ngc_config["workspace_mounting_point"]),
             "pip install -r requirements.txt; pip install -e .;",
             "cd {}/Pplan;".format(ngc_config["workspace_mounting_point"]),
             "pip install -e .;",
             "cd /opt/conda/lib/python3.8/site-packages; rm -rf cv2; "
             "cd {}/tbsim;".format(ngc_config["workspace_mounting_point"]),
+            "pip install wandb; ", 
+            "pip install opencv-python-headless<4.3; ",
+            "pip install trajdata[nusc]; ", 
+            "pip install pytorch-lightning; ",
             "pip uninstall -y opencv-python; ",
-            "pip install opencv-python; "
+            "pip install opencv-python; ",
+            "apt install -y libsm6 libxext6"
         ]
         ## the Opencv installation is added to resolve a new bug on NGC caused by non-unique cv2 packages
         py_cmd.extend(script_command)
