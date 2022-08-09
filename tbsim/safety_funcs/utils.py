@@ -106,7 +106,7 @@ def scene_centric_batch_to_raw(data_batch):
     """
     pos_curve, pos_dot_curve, pos_ddot_curve = get_bezier(src_pos)
     yaw_curve, yaw_rate_curve, _ = get_bezier(src_yaw)    
-    T = src_pos.shape[-2]
+    T = src_pos.shape[-2] 
     Taus = torch.linspace(0,1, T) 
     dTaudt = 1.0/((T-1)*data_batch["dt"][0]) # remove one for the starting point
     fit_poses = []
@@ -156,10 +156,10 @@ def scene_centric_batch_to_raw(data_batch):
         view_states_and_inputs(states, inputs, states_1stord, inputs_1stord)
         breakpoint()
 
-
+    T_history = data_batch["history_positions"].shape[-2]
     data_batch["states"] = states[:,:,:-N_future,:] # Remove the future state
     data_batch["inputs"] = inputs[:,:,:-N_future,:] # Remove the future input
-    data_batch["image"]  = data_batch["image"][...,T-2:,:,:] # Remove Image Trajectory
+    data_batch["image"]  = data_batch["image"][...,T_history-1:,:,:] # Remove Image Trajectory
 
     return data_batch 
 
