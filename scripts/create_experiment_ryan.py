@@ -31,14 +31,14 @@ def configs_to_search_nusc(base_cfg):
         ParamRange("algo.loss_weights.max_likelihood_loss", alias="mll", range=[1e-3,0]),
         ParamRange("algo.sum_resp_loss.leaky_relu_negative_slope", alias="srl_lrns", range=[1e-3, 1e-2]),
         ParamRange("algo.cbf.alpha", alias="a", range=[0.1,1,10]),
-        ParamRange("algo.T_horizon", alias="T", range=[1,3]),
+        ParamRange("algo.cbf.T_horizon", alias="T", range=[1,3]),
         # ParamRange("algo.perturb.OU.sigma", alias="sigma", range=[1.0,2.0,4.0]),
         # ParamRange("algo.loss_weights.EC_collision_loss", alias="EC_loss", range=[10.0,20.0,40.0]),
         # ParamRange("algo.dynamics.type", alias="dyn", range=[None,"Unicycle"]),
     ]))
 
     plan.extend(plan.compose_zip([
-        ParamRange("algo.saturate_cbf", alias="sat_cbf", range=[True, False])
+        ParamRange("algo.cbf.saturate_cbf", alias="sat_cbf", range=[True, False])
     ]))
 
     return plan.generate_configs(base_cfg=base_cfg)
