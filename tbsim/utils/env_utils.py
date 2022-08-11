@@ -185,7 +185,7 @@ def rollout_episodes(
     adjust_plan_recipe=None,
     horizon=None,
     seed_each_episode=None,
-
+    save_collision_data=False
 ):
     """
     Rollout an environment for a number of episodes
@@ -275,7 +275,6 @@ def rollout_episodes(
 
             with timers.timed("network"):
                 action = policy.get_action(obs_torch, step_index=counter)
-
 
             if counter < skip_first_n:
                 # use GT action for the first N steps to warm up environment state (velocity, etc.)

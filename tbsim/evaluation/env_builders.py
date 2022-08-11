@@ -140,11 +140,11 @@ class EnvNuscBuilder(EnvironmentBuilder):
         neighbor_distance = data_cfg.max_agents_distance
 
         kwargs = dict(
-            desired_data=["nusc-val"],
+            desired_data=["nusc_trainval"],
             future_sec=(future_sec, future_sec),
             history_sec=(history_sec, history_sec),
             data_dirs={
-                "nusc": data_cfg.dataset_path,
+                "nusc_trainval": data_cfg.dataset_path,
                 "nusc_mini": data_cfg.dataset_path,
             },
             only_types=[AgentType.VEHICLE],

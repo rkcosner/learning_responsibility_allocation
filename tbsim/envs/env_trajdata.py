@@ -72,7 +72,8 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
     @property
     def current_scene_names(self):
-        return deepcopy([scene.scene_info.name for scene in self._current_scenes])
+        # return deepcopy([scene.scene_info.name for scene in self._current_scenes])
+        return deepcopy([scene.scene_name for scene in self._current_scenes])
 
     @property
     def current_num_agents(self):

@@ -144,6 +144,7 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
             seed_each_episode=eval_cfg.seed_each_episode,
             horizon=eval_cfg.num_simulation_steps,
             adjust_plan_recipe=eval_cfg.adjustment.to_dict(),
+            save_collision_data=eval_cfg.save_collision_data,
         )
         for ei,adjust_plan in enumerate(adjust_plans):
             for k,v in adjust_plan.items():
@@ -324,6 +325,14 @@ if __name__ == "__main__":
         default=None,
     )
 
+    parser.add_argument(
+        "--save_collision_data",
+        action="store_true",
+        default=False,
+        help="whether to store collision data"
+    )
+
+
     args = parser.parse_args()
 
     cfg = EvaluationConfig()
@@ -387,6 +396,8 @@ if __name__ == "__main__":
             ckpt_info = yaml.safe_load(f)
             cfg.ckpt.update(**ckpt_info)
     
+    cfg.save_collision_data = args.save_collision_data
+        
     cfg.lock()
     run_evaluation(
         cfg,
