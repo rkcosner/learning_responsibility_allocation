@@ -237,6 +237,6 @@ class BackupBarrierCBF(CBF):
         h = dist 
         if self.saturate_cbf: 
         # Adding sigmoid to h to focus on locality
-            h = (torch.sigmoid(h)-0.5)*10 # safety value can range (-5, 5) with 0 at 0)
+            h = (torch.sigmoid(h/5)-0.5)*10 # safety value can range (-5, 5) with 0 at 0, with real meaning within 20 meters
 
         return h 
