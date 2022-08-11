@@ -51,7 +51,7 @@ class ResponsibilityConfig(AlgoConfig):
 
         self.cbf.type = "backup_barrier_cbf"
         self.cbf.T_horizon = 1
-        self.cbf.alpha = 1
+        self.cbf.alpha = 10
         self.cbf.veh_veh = True
         self.cbf.normalize_constraint = False
         self.cbf.saturate_cbf = True
