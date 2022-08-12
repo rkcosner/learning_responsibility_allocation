@@ -2,6 +2,9 @@ import argparse
 import h5py
 import torch
 
+from tbsim.safety_funcs.utils import * 
+
+
 filename = "/home/rkcosner/Documents/tbsim/results/HierAgentAware/data.hdf5"
 
 if __name__=="__main__": 
