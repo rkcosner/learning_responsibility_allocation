@@ -220,6 +220,8 @@ def rollout_episodes(
     if start_frame_index_each_episode is not None:
         assert len(start_frame_index_each_episode) == num_episodes
 
+    breakpoint()
+
     for ei in range(num_episodes):
         if start_frame_index_each_episode is not None:
             start_frame_index = start_frame_index_each_episode[ei]

@@ -5,6 +5,7 @@ import os
 
 from l5kit.data import LocalDataManager, ChunkedDataset
 from l5kit.rasterization import build_rasterizer
+from ..safety_funcs.utils import scene_centric_batch_to_raw
 from trajdata import AgentType, UnifiedDataset
 
 from tbsim.l5kit.vectorizer import build_vectorizer
@@ -138,9 +139,15 @@ class EnvNuscBuilder(EnvironmentBuilder):
         future_sec = data_cfg.future_num_frames * data_cfg.step_time
         history_sec = data_cfg.history_num_frames * data_cfg.step_time
         neighbor_distance = data_cfg.max_agents_distance
+        
+        if "scene_centric" in exp_cfg.algo: 
+            centric = 'scene'
+        else: 
+            centric = 'agent'
 
         kwargs = dict(
             desired_data=["nusc_trainval"],
+            centric=centric, 
             future_sec=(future_sec, future_sec),
             history_sec=(history_sec, history_sec),
             data_dirs={

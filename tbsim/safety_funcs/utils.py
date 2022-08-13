@@ -14,6 +14,8 @@ import wandb
 
 import pickle
 
+from tqdm import tqdm 
+
 def get_bezier(points):
     
     def bez_curve(t):
@@ -70,9 +72,101 @@ def test_bezier():
     plt.plot(x,y, '*')
     plt.savefig("bez_test.png")
 
-BEZ_TEST = False
+def get_fits(pos_curves, yaw_curves, T = 10, Last=False): 
 
-def scene_centric_batch_to_raw(data_batch):
+    pos_curve = pos_curves[0]
+    pos_dot_curve = pos_curves[1]
+    pos_ddot_curve = pos_curves[2]
+    yaw_curve = yaw_curves[0]
+    yaw_rate_curve = yaw_curves[1] 
+
+    Taus = torch.linspace(0,1, T) 
+    dt = 0.1
+    dTaudt = 1.0/((T-1)*dt) # remove one for the starting point
+    fit_poses = []
+    fit_vels = []
+    fit_yaws = []
+    fit_yaw_rates = []
+    fit_accels = []
+    if not Last: 
+        Taus = Taus[:-1]
+
+    for tau in Taus: # include the last point to connect, but then drop it for recording
+        # Fit poses, yaw rates, yaws and velocities
+        yaws =  yaw_curve(tau)
+        yaw_rates = yaw_rate_curve(tau) * dTaudt
+
+        fit_yaws.append(yaws[..., None, :])
+        fit_yaw_rates.append(yaw_rates[...,None, :])
+        yaws = yaws.squeeze()
+        yaw_rates = yaw_rates.squeeze()
+
+        pos_dot = pos_dot_curve(tau) * dTaudt 
+        fit_vel = pos_dot[...,0] * torch.cos(yaws) + pos_dot[...,1] * torch.sin(yaws)
+        pos_ddot = pos_ddot_curve(tau) * dTaudt * dTaudt
+        fit_accel  = torch.cos(yaws) * (pos_ddot[...,0] + pos_dot[...,1]*yaw_rates) 
+        fit_accel += torch.sin(yaws) * (pos_ddot[...,1] - pos_dot[...,0]*yaw_rates)
+        fit_vel = fit_vel[...,None,None]
+        fit_accel = fit_accel[...,None,None]
+        
+        # Fitted states
+        fit_poses.append(pos_curve(tau)[...,None,:] )
+        fit_vels.append(fit_vel)        
+        fit_accels.append(fit_accel)
+
+    fit_pos = torch.cat(fit_poses, axis=-2)
+    fit_vel = torch.cat(fit_vels, axis=-2)
+    fit_accel = torch.cat(fit_accels, axis=-2)
+    fit_yaw = torch.cat(fit_yaws, axis=-2)
+    fit_yaw_rate = torch.cat(fit_yaw_rates, axis=-2)
+
+    fit_states = torch.cat([fit_pos, fit_vel, fit_yaw], axis=-1)
+    fit_inputs = torch.cat([fit_accel, fit_yaw_rate], axis=-1)
+
+    return fit_states, fit_inputs
+    
+
+T_sec = 11 # Create a bezier curve for each 1 second of the trajectories
+def get_bez_for_long_trajectories(batch, DeltaT=1):
+    A = batch["history_positions"].shape[0]
+    T_total = batch["history_positions"].shape[1]
+    states = torch.empty(A, T_total, 4)
+    inputs = torch.empty(A, T_total, 2)
+
+    dt = 0.1
+    for i in range(int(T_total*dt)):
+        # Get Bezier Curves
+        src_pos = batch["history_positions"][:,i*10:(i+1)*10+1,:]
+        src_yaw = batch["history_yaws"][:,i*10:(i+1)*10+1,:]
+
+        pos_curves = get_bezier(src_pos)
+        yaw_curves = get_bezier(src_yaw) 
+
+        fit_states, fit_inputs = get_fits(pos_curves, yaw_curves, T=T_sec)
+
+        states[:,i*10:(i+1)*10,:] = fit_states
+        inputs[:,i*10:(i+1)*10,:] = fit_inputs
+
+    # Add the final points
+    # T = batch["history_positions"].shape[1]-i*10
+    # i +=1 
+    # src_pos = batch["history_positions"][:,i*10:,:]
+    # src_yaw = batch["history_yaws"][:,i*10:,:]
+    # pos_curves = get_bezier(src_pos)
+    # yaw_curves = get_bezier(src_yaw)
+
+    # breakpoint()
+    # fit_states, fit_inputs = get_fits(pos_curves, yaw_curves, T, Last=True)
+
+    # states[:, i*10:, :] = fit_states
+    # inputs[:, i*10:, :] = fit_inputs
+    
+    # batch["states"] = states
+    # batch["inputs"] = inputs
+
+
+
+def scene_centric_batch_to_raw(data_batch, BEZ_TEST=False):
     """
         RYAN: 
             stacks ego with other agents history
@@ -88,17 +182,22 @@ def scene_centric_batch_to_raw(data_batch):
             - "history_availabilities"
             - "extents"
     """
-    N_future = data_batch["target_positions"].shape[-2]
 
     # Add target states (the next state in the trajectory), so that the input can be computed now 
-    src_pos = torch.cat([data_batch["history_positions"], data_batch["target_positions"]], axis = -2) # [B, A, T, D]
-    src_yaw = torch.cat([data_batch["history_yaws"], data_batch["target_yaws"]], axis=-2) # [B, A, T, D]
-    src_mask = torch.cat([data_batch["history_availabilities"], data_batch["target_availabilities"]], axis=-1)# [B, A, T]
+    if ("target_positions" in data_batch) and ("history_positions" in data_batch) and ("history_availabilities" in data_batch): 
+        N_future = data_batch["target_positions"].shape[-2]
+        src_pos = torch.cat([data_batch["history_positions"], data_batch["target_positions"]], axis = -2) # [B, A, T, D]
+        src_yaw = torch.cat([data_batch["history_yaws"], data_batch["target_yaws"]], axis=-2) # [B, A, T, D]
+        src_mask = torch.cat([data_batch["history_availabilities"], data_batch["target_availabilities"]], axis=-1)# [B, A, T]
+    else: 
+        src_pos = data_batch["history_positions"]
+        src_yaw = data_batch["history_yaws"]
+        src_mask = data_batch["history_availabilities"]
 
     # Estimate Velocity: 3 point method when possible and 2 point method when not
     if BEZ_TEST: # 1st order approximation for debugging
         src_vel = dynamics.Unicycle.calculate_vel(src_pos, src_yaw, data_batch["dt"][0] , src_mask)
-        src_vel[:, :, -1] = data_batch["curr_speed"].unsqueeze(-1) # replace calculated velocity with true velocity
+        src_vel[:, -1:,:] = data_batch["curr_speed"].unsqueeze(-1) # replace calculated velocity with true velocity
     
 
     """
@@ -108,12 +207,13 @@ def scene_centric_batch_to_raw(data_batch):
     yaw_curve, yaw_rate_curve, _ = get_bezier(src_yaw)    
     T = src_pos.shape[-2] 
     Taus = torch.linspace(0,1, T) 
-    dTaudt = 1.0/((T-1)*data_batch["dt"][0]) # remove one for the starting point
+    dTaudt = 1/((T-1)*data_batch["dt"][0]) # remove one for the starting point
     fit_poses = []
     fit_vels = []
     fit_yaws = []
     fit_yaw_rates = []
     fit_accels = []
+    print("Fitting Beziers")
     for tau in Taus: 
         # Fit poses, yaw rates, yaws and velocities
         yaws =  yaw_curve(tau)
@@ -152,15 +252,17 @@ def scene_centric_batch_to_raw(data_batch):
     if BEZ_TEST: # 1st order approximation for debugging
         from tbsim.safety_funcs.debug_utils import view_states_and_inputs
         states_1stord = torch.cat((src_pos, src_vel, src_yaw), axis =-1) 
-        inputs_1stord = (states_1stord[:,:,1:,2:] - states_1stord[:,:,:-1,2:])/data_batch["dt"][0]
+        inputs_1stord = (states_1stord[...,1:,2:] - states_1stord[...,:-1,2:])/data_batch["dt"][0]
         view_states_and_inputs(states, inputs, states_1stord, inputs_1stord)
-        breakpoint()
 
-    T_history = data_batch["history_positions"].shape[-2]
-    data_batch["states"] = states[:,:,:-N_future,:] # Remove the future state
-    data_batch["inputs"] = inputs[:,:,:-N_future,:] # Remove the future input
-    data_batch["image"]  = data_batch["image"][...,T_history-1:,:,:] # Remove Image Trajectory
-
+    if "target_positions" in data_batch: 
+        T_history = data_batch["history_positions"].shape[-2]
+        data_batch["states"] = states[:,:,:-N_future,:] # Remove the future state
+        data_batch["inputs"] = inputs[:,:,:-N_future,:] # Remove the future input
+        data_batch["image"]  = data_batch["image"][...,T_history-1:,:,:] # Remove Image Trajectory
+    else: 
+        data_batch["states"] = states
+        data_batch["inputs"] = inputs
     return data_batch 
 
 

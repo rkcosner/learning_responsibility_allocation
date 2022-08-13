@@ -194,7 +194,6 @@ class BackupBarrierCBF(CBF):
         agent_pos = batch["states"][:,1:,T_idx,:]
         agent_extent = batch["extent"][:,1:,:]
         dt = batch["dt"][0]
-
         data = torch.cat([ego_pos, agent_pos, ego_extent, agent_extent, dt * torch.ones_like(agent_extent[:,:,:1])], axis=-1)
 
         return data

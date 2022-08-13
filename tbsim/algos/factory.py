@@ -38,7 +38,7 @@ def algo_factory(config: ExperimentConfig, modality_shapes: dict):
         algo: pl.LightningModule
     """
     algo_config = config.algo
-    algo_name = algo_config.name
+    algo_name = algo_config["name"]
 
     if algo_name == "resp": 
         algo = Responsibility(algo_config=algo_config, modality_shapes=modality_shapes)
