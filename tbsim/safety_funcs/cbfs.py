@@ -159,8 +159,11 @@ def forward_project_states(ego_pos, agent_pos, backup_controller, N_tForward, dt
     next_ego_state = ego_pos
     next_agent_state = agent_pos
     for i in range(N_tForward): 
-        next_ego_state   = Unicycle.step(0, next_ego_state,   backup_controller, dt, bound = False)
-        next_agent_state = Unicycle.step(0, next_agent_state, backup_controller, dt, bound = False) 
+        # get controller input
+        ego_input = backup_controller(next_ego_state)
+        next_ego_state   = Unicycle.step(0, next_ego_state,   ego_input, dt, bound = False)
+        agent_input = backup_controller(next_agent_state)
+        next_agent_state = Unicycle.step(0, next_agent_state, agent_input, dt, bound = False) 
         ego_traj.append(next_ego_state[...,None])
         agent_traj.append(next_agent_state[...,None])
     ego_traj = torch.cat(ego_traj, axis=-1)
@@ -170,19 +173,33 @@ def forward_project_states(ego_pos, agent_pos, backup_controller, N_tForward, dt
 
     return ego_traj, agent_traj
 
+# Define backup controllers
+def idle_controller(state): 
+    B = state.shape[0]
+    A = state.shape[1]
+    return torch.zeros(B,A,2).to(state.device)
+
+def braking_controller(state): 
+    B = state.shape[0]
+    A = state.shape[1]
+    brake = -((torch.sigmoid(state[...,2]*4)-0.5)*2*9.0)[...,None] # 9.0 m/sec2, the sigmoid is chosen and shrunk so that braking is continuous
+    turn = torch.zeros(B,A,1).to(state.device)
+    input = torch.cat([brake, turn], axis = -1)    
+    return input
 
 class BackupBarrierCBF(CBF): 
     """
         Torch auto-grad compatible implementation of a norm ball cbf
     """
 
-    def __init__(self, safe_radius = 0, T_horizon = 1, alpha=1, veh_veh = True, saturate_cbf=True): 
+    def __init__(self, safe_radius = 0, T_horizon = 1, alpha=1, veh_veh = True, saturate_cbf=True, backup_controller_type="idle"): 
         super(BackupBarrierCBF, self).__init__() 
         self.safe_radius = safe_radius
         self.T_horizon = T_horizon
         self.alpha = alpha
         self.veh_veh = veh_veh
         self.saturate_cbf = saturate_cbf
+        self.backup_controller_type = backup_controller_type
 
     def process_batch(self, batch): 
         T_idx = -1 # Most recent time step 
@@ -212,30 +229,31 @@ class BackupBarrierCBF(CBF):
         agent_extent = data[...,11:14]
         dt = data[...,14,None]
 
-        # # TODO: Currently I'm ignoring the extents
-        # if self.veh_veh:
-        #     h1 = VEH_VEH_distance(ego_pos, agent_pos, ego_extent, agent_extent, offsetX=0, offsetY=0) 
-        # else: 
-        #     h = torch.linalg.norm(ego_pos[...,0:2] - agent_pos[...,0:2], axis=-1)
 
-        B = data.shape[0]
-        A = data.shape[1]
         N_tForward = int(self.T_horizon/dt[0,0])
-        backup_controller = torch.zeros(B, A, 2).to(ego_state.device)
-        ego_traj, agent_traj = forward_project_states(ego_state, agent_state, backup_controller, N_tForward, dt)
+
+
+        if self.backup_controller_type == "idle": 
+            backup_controller = idle_controller
+        elif self.backup_controller_type == "brake":
+            backup_controller = braking_controller
+        else: 
+            print("please specify one of the possible backup controllers [idle, brake]")
+            breakpoint()
+
+        ego_traj, agent_traj = forward_project_states(ego_state, agent_state,backup_controller, N_tForward, dt)
         ego_extent   = ego_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
         agent_extent = agent_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
         if self.veh_veh: 
             dist = VEH_VEH_distance(ego_traj[...,0:3],agent_traj[...,0:3],ego_extent, agent_extent )
             dist = dist.amin(-1)
         else: # ball norm 
-
             dist = torch.linalg.norm(ego_traj[...,0:2] - agent_traj[...,0:2], axis=-1) #VEH_VEH_collision(ego_traj, agent_traj, ego_extent, agent_extent, return_dis = False)
             dist = dist.amin(-1) 
-
+        breakpoint()
         h = dist 
         if self.saturate_cbf: 
-        # Adding sigmoid to h to focus on locality
-            h = (torch.sigmoid(h/5)-0.5)*10 # safety value can range (-5, 5) with 0 at 0, with real meaning within 20 meters
+            # Adding sigmoid to h to focus on locality
+            h = (torch.sigmoid(h/5)-0.5)*2*5 # safety value can range (-5, 5) with 0 at 0, with real meaning within ~20 meters
 
         return h 

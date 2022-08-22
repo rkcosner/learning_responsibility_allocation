@@ -113,7 +113,8 @@ class Responsibility(pl.LightningModule):
             self.cbf = BackupBarrierCBF(T_horizon = algo_config.cbf.T_horizon, 
                                         alpha=algo_config.cbf.alpha, 
                                         veh_veh=algo_config.cbf.veh_veh, 
-                                        saturate_cbf=algo_config.cbf.saturate_cbf
+                                        saturate_cbf=algo_config.cbf.saturate_cbf, 
+                                        backup_controller_type=algo_config.cbf.backup_controller_type
                                         )
         else: 
             raise Exception("Config Error: algo_config.cbf is not properly defined")

@@ -128,7 +128,7 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
     eval_scenes = eval_cfg.eval_scenes
     total_adjust_plan = dict()
     while scene_i < eval_cfg.num_scenes_to_evaluate:
-        scene_indices = eval_scenes[scene_i: scene_i + eval_cfg.num_scenes_per_batch]
+        scene_indices = eval_scenes[scene_i: scene_i + eval_cfg.num_scenes_per_batch ]
         scene_i += eval_cfg.num_scenes_per_batch
 
         stats, info, renderings, adjust_plans = rollout_episodes(

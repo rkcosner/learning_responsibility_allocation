@@ -213,7 +213,6 @@ def scene_centric_batch_to_raw(data_batch, BEZ_TEST=False):
     fit_yaws = []
     fit_yaw_rates = []
     fit_accels = []
-    print("Fitting Beziers")
     for tau in Taus: 
         # Fit poses, yaw rates, yaws and velocities
         yaws =  yaw_curve(tau)
@@ -544,11 +543,11 @@ def plot_static_gammas_inline(net, type):
         window = 20 
         rel_vel_max = 5
         if type == 2: 
-            with open("/workspace/static_scenes/batch2wayDivider.pickle", 'rb') as file: 
+            with open("/home/rkcosner/Documents/tbsim/tbsim/safety_funcs/static_scenes/batch2wayDivider.pickle", 'rb') as file: 
                 batch = pickle.load(file)
                 stateA = batch["states"][-1,:]
         else: 
-            with open("/workspace/static_scenes/batch4way.pickle", 'rb') as file: 
+            with open("/home/rkcosner/Documents/tbsim/tbsim/safety_funcs/static_scenes/batch4way.pickle", 'rb') as file: 
                 batch = pickle.load(file)
                 stateA = batch["states"][0,0,-1,:]
 
@@ -630,7 +629,7 @@ def plot_static_gammas_traj(net, type=4):
         rel_vel_max = 10
 
         if type == 4:
-            with open("/workspace/static_scenes/batch4way.pickle", 'rb') as file: 
+            with open("/home/rkcosner/Documents/tbsim/tbsim/safety_funcs/static_scenes/batch4way.pickle", 'rb') as file: 
                 batch = pickle.load(file)
             N_pxls = batch['image'][1:].cpu().detach().numpy().shape[-1]
             stateA = batch["states"][0,0,-1,:]
@@ -644,7 +643,7 @@ def plot_static_gammas_traj(net, type=4):
             y_traj = np.flip(y_traj)
             theta_traj = np.flip(theta_traj)
         else: 
-            with open("/workspace/static_scenes/batchRoundabout.pickle", 'rb') as file: 
+            with open("/home/rkcosner/Documents/tbsim/tbsim/safety_funcs/static_scenes/batchRoundabout.pickle", 'rb') as file: 
                 batch = pickle.load(file)
             N_pxls = batch['image'][1:].cpu().detach().numpy().shape[-1]
             stateA = batch["states"][-1,:]

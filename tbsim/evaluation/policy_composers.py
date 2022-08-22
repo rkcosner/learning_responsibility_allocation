@@ -467,7 +467,7 @@ class HierAgentAwareCVAE(Hierarchical):
         policy = SamplingPolicyWrapper(ego_action_sampler=sampler, agent_traj_predictor=predictor)
         return policy, exp_cfg
 
-
+# TODO: CBF-QP wrapper version of vvv
 class HierAgentAwareMPC(Hierarchical):
     def _get_predictor(self):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(

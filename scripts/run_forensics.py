@@ -64,7 +64,8 @@ if __name__=="__main__":
     cbf = BackupBarrierCBF(T_horizon = algo_cfg.algo.cbf.T_horizon, 
                         alpha=algo_cfg.algo.cbf.alpha, 
                         veh_veh=algo_cfg.algo.cbf.veh_veh, 
-                        saturate_cbf=algo_cfg.algo.cbf.saturate_cbf
+                        saturate_cbf=algo_cfg.algo.cbf.saturate_cbf, 
+                        backup_controller_type=algo_cfg.cbf.backup_controller_type
                         )
 
     # Iterate through evaluation recordings
@@ -206,7 +207,6 @@ if __name__=="__main__":
             ego_gammas = gammas["gammas_A"][:,0,0,0]
             col_gammas = gammas["gammas_B"][:,0,0,0]
 
-            breakpoint()
             data = cbf.process_batch(input_batch)
             data.requires_grad = True
             h_vals = cbf(data) 
@@ -222,7 +222,7 @@ if __name__=="__main__":
 
             natural_dynamics  = (LfhA + LfhB + cbf.alpha * h_vals[:,0])
             natural_dynamics  /= 2.0 
-            natural_dynamics  /= 10 # TODO There is some scaling issue going wrong somewhere!!!! 
+            natural_dynamics  /= 20 # TODO There is some scaling issue going wrong somewhere!!!! 
             
             ego_inputs = batch["inputs"][0,:,:,None]
             col_inputs = batch["inputs"][agent_idx+1,:,:,None]
@@ -231,7 +231,7 @@ if __name__=="__main__":
             LghBuB = torch.bmm(LghB, col_inputs).squeeze()
 
             constraintA = natural_dynamics + LghAuA - ego_gammas
-            constraintB = natural_dynamics + LghBuB - ego_gammas
+            constraintB = natural_dynamics + LghBuB - col_gammas
 
             plt.close()
             plt.figure()
