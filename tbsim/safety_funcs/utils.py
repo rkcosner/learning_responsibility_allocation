@@ -343,7 +343,6 @@ def batch_to_raw_all_agents(data_batch, step_time):
     }
 
 
-
 def plot_gammas(batch, net, relspeed=0.0, B=0, A=0):
     net.eval() 
     i = A
@@ -499,6 +498,15 @@ pxls_per_meter = 2
 white = [1.0, 1.0, 1.0]
 black = [0.0, 0.0, 0.0]
 
+path2way_ngc = "/workspace/static_scenes/batch2wayDivider.pickle"
+path4way_ngc = "/workspace/static_scenes/batch4way.pickle"
+pathRoundabout_ngc = "/workspace/static_scenes/batchRoundabout.pickle"
+
+path2way_local = "/home/rkcosner/Documents/tbsim/tbsim/safety_funcs/static_scenes/batch2wayDivider.pickle"
+path4way_local = "/home/rkcosner/Documents/tbsim/tbsim/safety_funcs/static_scenes/batch4way.pickle"
+pathRoundabout_local = "/home/rkcosner/Documents/tbsim/tbsim/safety_funcs/static_scenes/batchRoundabout.pickle"
+
+
 def generate_3channel_image(batch):  
     
     colors = [[0.5, 0.0, 0.0],[0.0, 0.5, 0.0],[0.0, 0.0, 0.5],[0.0, 0.4, 0.4],[0.5, 0.3, 0.0],[0.5, 0.5, 0.0],[0.5, 0.0, 0.5]]
@@ -535,7 +543,7 @@ def generate_static_gamma_plots(fig, visualizer_image, X, Y, gammas_A):
     return fig, ax_contour
 
 
-def plot_static_gammas_inline(net, type): 
+def plot_static_gammas_inline(net, type, on_ngc=True): 
     torch.cuda.empty_cache()
     net.eval()
     with torch.no_grad():
@@ -543,11 +551,19 @@ def plot_static_gammas_inline(net, type):
         window = 20 
         rel_vel_max = 5
         if type == 2: 
-            with open("/home/rkcosner/Documents/tbsim/tbsim/safety_funcs/static_scenes/batch2wayDivider.pickle", 'rb') as file: 
+            if on_ngc: 
+                path = path2way_local
+            else: 
+                path = path2way_ngc
+            with open(path, 'rb') as file: 
                 batch = pickle.load(file)
                 stateA = batch["states"][-1,:]
         else: 
-            with open("/home/rkcosner/Documents/tbsim/tbsim/safety_funcs/static_scenes/batch4way.pickle", 'rb') as file: 
+            if on_ngc: 
+                path = path4way_ngc 
+            else: 
+                path = path4way_local
+            with open(path, 'rb') as file:
                 batch = pickle.load(file)
                 stateA = batch["states"][0,0,-1,:]
 
@@ -620,7 +636,7 @@ def plot_static_gammas_inline(net, type):
 
 
 
-def plot_static_gammas_traj(net, type=4): 
+def plot_static_gammas_traj(net, type=4, on_ngc=True): 
     
     # net.eval()
     with torch.no_grad():
@@ -629,7 +645,11 @@ def plot_static_gammas_traj(net, type=4):
         rel_vel_max = 10
 
         if type == 4:
-            with open("/home/rkcosner/Documents/tbsim/tbsim/safety_funcs/static_scenes/batch4way.pickle", 'rb') as file: 
+            if on_ngc: 
+                path = path4way_ngc 
+            else: 
+                path = path4way_local
+            with open(path, 'rb') as file: 
                 batch = pickle.load(file)
             N_pxls = batch['image'][1:].cpu().detach().numpy().shape[-1]
             stateA = batch["states"][0,0,-1,:]
@@ -643,7 +663,11 @@ def plot_static_gammas_traj(net, type=4):
             y_traj = np.flip(y_traj)
             theta_traj = np.flip(theta_traj)
         else: 
-            with open("/home/rkcosner/Documents/tbsim/tbsim/safety_funcs/static_scenes/batchRoundabout.pickle", 'rb') as file: 
+            if on_ngc: 
+                path = pathRoundabout_ngc 
+            else: 
+                path = pathRoundabout_local
+            with open(path, 'rb') as file: 
                 batch = pickle.load(file)
             N_pxls = batch['image'][1:].cpu().detach().numpy().shape[-1]
             stateA = batch["states"][-1,:]

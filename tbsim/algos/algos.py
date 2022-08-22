@@ -63,7 +63,8 @@ class Responsibility(pl.LightningModule):
         self.algo_config = algo_config
         self.nets = nn.ModuleDict()
         self._do_log = do_log
-
+        self.on_ngc = algo_config.on_ngc
+        
         # RYAN: Traj Decoder is the Decoder portion of a train VAE
         #   - feature_dim : dimension of the input feature
         #   - state_dim : dimension of output trajectory at each step
@@ -270,10 +271,10 @@ class Responsibility(pl.LightningModule):
                     wandb.log({"val/plot_gamma_"+k: outputs[j]["plots"][k]})
 
         if wandb.run is not None: 
-            gammas2way = plot_static_gammas_inline(self.nets["policy"], 2)
-            gammas4way_samelane = plot_static_gammas_inline(self.nets["policy"], 4)
-            gammas4way_cross = plot_static_gammas_traj(self.nets["policy"], 4)
-            gammasRoundabout = plot_static_gammas_traj(self.nets["policy"],0)
+            gammas2way = plot_static_gammas_inline(self.nets["policy"], 2, self.on_ngc)
+            gammas4way_samelane = plot_static_gammas_inline(self.nets["policy"], 4, self.on_ngc)
+            gammas4way_cross = plot_static_gammas_traj(self.nets["policy"], 4, self.on_ngc)
+            gammasRoundabout = plot_static_gammas_traj(self.nets["policy"],0, self.on_ngc)
 
             wandb.log({"val/plot_gammas2way":gammas2way})
             wandb.log({"val/plot_gammas4way_samelane":gammas4way_samelane})

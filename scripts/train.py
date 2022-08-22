@@ -290,6 +290,7 @@ if __name__ == "__main__":
         default_config.name = default_config.name + "_" + ngc_job_id
 
     default_config.train.on_ngc = args.on_ngc
+    default_config.algo.on_ngc = args.on_ngc
 
     if args.debug:
         # Test policy rollout

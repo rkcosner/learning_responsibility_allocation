@@ -149,6 +149,9 @@ class PolicyWrapper(object):
     def wrap_planner(cls, model, **kwargs):
         return cls(model=model, get_plan_kwargs=kwargs)
 
+
+# TODO: CBF-QP version of refine wrapper
+
 class RefineWrapper(object):
     """A wrapper that feeds coarse motion plan to a optimization-based planner for refinement"""
     def __init__(self, initial_planner, refiner, device):
