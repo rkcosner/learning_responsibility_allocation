@@ -248,7 +248,8 @@ class BackupBarrierCBF(CBF):
             dist = VEH_VEH_distance(ego_traj[...,0:3],agent_traj[...,0:3],ego_extent, agent_extent )
             dist = dist.amin(-1)
         else: # ball norm 
-            dist = torch.linalg.norm(ego_traj[...,0:2] - agent_traj[...,0:2], axis=-1) #VEH_VEH_collision(ego_traj, agent_traj, ego_extent, agent_extent, return_dis = False)
+            veh_radius = 2
+            dist = torch.linalg.norm(ego_traj[...,0:2] - agent_traj[...,0:2], axis=-1) - veh_radius #VEH_VEH_collision(ego_traj, agent_traj, ego_extent, agent_extent, return_dis = False)
             dist = dist.amin(-1) 
         h = dist 
         if self.saturate_cbf: 

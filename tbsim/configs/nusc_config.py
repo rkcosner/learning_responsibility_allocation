@@ -22,7 +22,7 @@ class NuscTrainConfig(TrainConfig):
         self.rollout.every_n_steps = 5000
 
         # training config
-        self.training.batch_size = 20 # RYAN : changed batch size after switching to scene-centric
+        self.training.batch_size = 20  # RYAN : changed batch size after switching to scene-centric # trained on NGC with 20, switching down to 15 because Xinshou is also using the workstation 15
         self.training.num_steps = 200000
         self.training.num_data_workers = 8
 

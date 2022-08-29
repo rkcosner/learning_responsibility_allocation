@@ -52,7 +52,7 @@ class ResponsibilityConfig(AlgoConfig):
         self.cbf.type = "backup_barrier_cbf"
         self.cbf.T_horizon = 4
         self.cbf.alpha = 1
-        self.cbf.veh_veh = True
+        self.cbf.veh_veh = False#True
         self.cbf.normalize_constraint = False
         self.cbf.saturate_cbf = True
         self.cbf.backup_controller_type = "brake" # or "idle"
@@ -60,11 +60,11 @@ class ResponsibilityConfig(AlgoConfig):
         self.scene_centric = True
 
         self.loss_weights.constraint_loss = 1.0
-        self.loss_weights.max_likelihood_loss = 1e-2
+        self.loss_weights.max_likelihood_loss = 0.001
         self.loss_weights.sum_resp_loss = 10
 
-        self.constraint_loss.leaky_relu_negative_slope = 1e-1
-        self.sum_resp_loss.leaky_relu_negative_slope = 1e-2
+        self.constraint_loss.leaky_relu_negative_slope = 0.1
+        self.sum_resp_loss.leaky_relu_negative_slope = 0.01
 
         self.max_angle_diff = 100 # max angle diff away from 0 to consider, in degrees
 

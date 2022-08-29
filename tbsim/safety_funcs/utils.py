@@ -166,7 +166,7 @@ def get_bez_for_long_trajectories(batch, DeltaT=1):
 
 
 
-def scene_centric_batch_to_raw(data_batch, BEZ_TEST=False):
+def scene_centric_batch_to_raw(data_batch, BEZ_TEST=False, substeps=1):
     """
         RYAN: 
             stacks ego with other agents history
@@ -206,7 +206,7 @@ def scene_centric_batch_to_raw(data_batch, BEZ_TEST=False):
     pos_curve, pos_dot_curve, pos_ddot_curve = get_bezier(src_pos)
     yaw_curve, yaw_rate_curve, _ = get_bezier(src_yaw)    
     T = src_pos.shape[-2] 
-    Taus = torch.linspace(0,1, T) 
+    Taus = torch.linspace(0,1, T*substeps) 
     dTaudt = 1/((T-1)*data_batch["dt"][0]) # remove one for the starting point
     fit_poses = []
     fit_vels = []
@@ -552,9 +552,9 @@ def plot_static_gammas_inline(net, type, on_ngc=True):
         rel_vel_max = 5
         if type == 2: 
             if on_ngc: 
-                path = path2way_local
-            else: 
                 path = path2way_ngc
+            else: 
+                path = path2way_local
             with open(path, 'rb') as file: 
                 batch = pickle.load(file)
                 stateA = batch["states"][-1,:]

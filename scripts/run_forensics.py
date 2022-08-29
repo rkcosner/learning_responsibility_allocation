@@ -46,7 +46,7 @@ if __name__=="__main__":
 
 
     # Load Gamma Model
-    file = open("/home/rkcosner/Documents/tbsim/resp_trained_models/test/run15/config.json")
+    file = open("/home/rkcosner/Documents/tbsim/checkpoints/braking_checkpoint/run3/config.json")#open("/home/rkcosner/Documents/tbsim/resp_trained_models/test/run15/config.json")
     algo_cfg = AlgoConfig()
     algo_cfg.algo = ResponsibilityConfig()
     external_algo_cfg = json.load(file)
@@ -55,7 +55,7 @@ if __name__=="__main__":
     device = "cpu" 
     modality_shapes = dict()
     gamma_algo = algo_factory(algo_cfg, modality_shapes)
-    checkpoint_path = "/home/rkcosner/Documents/tbsim/resp_trained_models/test/run15/checkpoints/iter10000_ep1_valLoss0.00.ckpt"
+    checkpoint_path = "/home/rkcosner/Documents/tbsim/checkpoints/braking_checkpoint/run3/iter9000_ep1_valLoss0.00.ckpt"
     checkpoint = torch.load(checkpoint_path)
     gamma_algo.load_state_dict(checkpoint["state_dict"])
     gamma_net = gamma_algo.nets["policy"]
@@ -65,7 +65,7 @@ if __name__=="__main__":
                         alpha=algo_cfg.algo.cbf.alpha, 
                         veh_veh=algo_cfg.algo.cbf.veh_veh, 
                         saturate_cbf=algo_cfg.algo.cbf.saturate_cbf, 
-                        backup_controller_type=algo_cfg.cbf.backup_controller_type
+                        backup_controller_type=algo_cfg.algo.cbf.backup_controller_type
                         )
 
     # Iterate through evaluation recordings
@@ -94,14 +94,17 @@ if __name__=="__main__":
                 "history_availabilities"    : (0*yaw[:,indices] + 1).int(), 
                 "dt"                        : 0.5*torch.ones(1) 
             }
-            batch = scene_centric_batch_to_raw(batch, BEZ_TEST=False)
+            substeps = 1
+            batch = scene_centric_batch_to_raw(batch, BEZ_TEST=False, substeps = substeps)
 
             # Get Minimum Distance from Ego Vehicle In Trajectory
             A = batch["states"].shape[0]-1
             p1 = batch["states"][0:1,None,:,[0,1,3]].repeat_interleave(A, axis=1)
             S1 = extent[0:1,None,indices,:].repeat_interleave(A, axis=1)
+            S1 = S1.repeat_interleave(substeps, axis=-2)
             p2 = batch["states"][None, 1:,:,[0,1,3]]
             S2 = extent[None,1:,indices,:]
+            S2 = S2.repeat_interleave(substeps, axis=-2)
             dist = VEH_VEH_collision(p1, p2, S1, S2)#VEH_VEH_distance(p1, p2, S1, S2)
             dist_agents = dist.amin(-1)
 
@@ -222,7 +225,7 @@ if __name__=="__main__":
 
             natural_dynamics  = (LfhA + LfhB + cbf.alpha * h_vals[:,0])
             natural_dynamics  /= 2.0 
-            natural_dynamics  /= 20 # TODO There is some scaling issue going wrong somewhere!!!! 
+            # natural_dynamics  /= 20 # TODO There is some scaling issue going wrong somewhere!!!! 
             
             ego_inputs = batch["inputs"][0,:,:,None]
             col_inputs = batch["inputs"][agent_idx+1,:,:,None]
@@ -250,6 +253,19 @@ if __name__=="__main__":
             plt.plot(ego_gammas.cpu().detach().numpy())
             plt.plot(col_gammas.cpu().detach().numpy())
             plt.savefig("gammas.png")
+
+            plt.close()
+            plt.figure()
+            plt.plot(h_vals.cpu().detach().numpy())
+            plt.savefig("h_vals.png")
+
+            plt.close()
+            fig, axs = plt.subplots(2,1)
+            axs[0].plot(ego_inputs[:,0].cpu().detach().numpy())
+            axs[0].plot(col_inputs[:,0].cpu().detach().numpy())
+            axs[1].plot(ego_inputs[:,1].cpu().detach().numpy())
+            axs[1].plot(col_inputs[:,1].cpu().detach().numpy())
+            plt.savefig("inputs.png")
 
             breakpoint()
 
