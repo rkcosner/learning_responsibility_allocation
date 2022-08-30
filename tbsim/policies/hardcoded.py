@@ -5,6 +5,7 @@ import torch
 from torch.nn.utils.rnn import pad_sequence
 from typing import Tuple, Dict
 from copy import deepcopy
+import cvxpy as cp
 
 from tbsim.envs.base import BatchedEnv, BaseEnv
 import tbsim.utils.tensor_utils as TensorUtils
@@ -19,6 +20,8 @@ from tbsim.utils.planning_utils import ego_sample_planning
 from tbsim.policies.common import Action, Plan
 from tbsim.policies.base import Policy
 from tbsim.utils.ftocp import FTOCP
+from tbsim.safety_funcs.utils import scene_centric_batch_to_raw
+from tbsim.safety_funcs.cbfs import BackupBarrierCBF
 import matplotlib.pyplot as plt
 
 try:
@@ -518,6 +521,150 @@ class ContingencyPlanner(Policy):
         action_info["action_samples"] = {"positions":ego_traj_samples[...,:2],"yaws":ego_traj_samples[...,2:]}
         return action, action_info
 
+class CBFQPController(Policy):
+    def __init__(self, device, step_time, predictor, solver="casadi", *args, **kwargs):
+        super().__init__(device, *args, **kwargs)
+        self.device = device
+        self.step_time = step_time
+        self.predictor = predictor
+        self.solver=solver
+        self.cbf = BackupBarrierCBF(T_horizon=4, alpha=2, veh_veh=False, saturate_cbf=True, backup_controller_type="brake")
+
+    def eval(self):
+        self.predictor.eval()
+    
+    def get_action(self, obs_dict, **kwargs):
+        num_steps_to_act_on = 5
+        dt = obs_dict["dt"][0].item()
+
+        # Is there a coarse plan? 
+        if "coarse_plan" in kwargs:
+            coarse_plan = kwargs["coarse_plan"]
+            ref_positions = coarse_plan.positions
+            ref_yaws = coarse_plan.yaws
+            mask = torch.ones_like(ref_positions[...,0],dtype=np.bool)
+            ref_vel = dynamics.Unicycle.calculate_vel(ref_positions,ref_yaws,self.step_time,mask)
+            xref = torch.cat((ref_positions,ref_vel,ref_yaws),-1)
+        else:
+            xref = None
+        
+        if True: 
+            states = []
+            for idx in range(xref.shape[0]):
+                state_veh_idx = []
+                curr_yaw = obs_dict["curr_agent_state"][idx, -1]
+                curr_pos = obs_dict["curr_agent_state"][idx, :2]
+                curr_vel = obs_dict["curr_speed"][idx]
+                
+                # Get current state and rotation matrix
+                curr_state = curr_pos.tolist()
+                curr_state.append(curr_vel.item())
+                curr_state.append(curr_yaw.item())
+                state_veh_idx.append(curr_state)
+                world_from_agent = torch.tensor(
+                        [
+                            [torch.cos(curr_yaw), torch.sin(curr_yaw)],
+                            [-torch.sin(curr_yaw), torch.cos(curr_yaw)],
+                        ], 
+                        device = xref.device
+                    )
+                for t_step in range(xref.shape[1]): 
+                    next_state = torch.zeros(4)
+                    next_state[:2] = coarse_plan.positions[idx, t_step] @ world_from_agent + curr_pos
+                    next_state[2] = curr_vel + xref[idx, t_step,2]
+                    next_state[3] = curr_yaw + coarse_plan.yaws[idx, t_step, 0]
+                    state_veh_idx.append(next_state.tolist())
+                states.append(state_veh_idx)
+            
+            states = torch.tensor(states)
+            coarse_batch = {
+                "states" : states[None,...], 
+                "extent" : obs_dict["extent"][None,...], 
+                "dt"     : obs_dict["dt"],
+            }
+
+            yaw_rate = [xref[0,0,3].item()]
+            for i in range(1, xref.shape[1]): yaw_rate.append((xref[0,i,3] - xref[0,i-1,3] ).item())
+            yaw_rate = torch.tensor(yaw_rate)/dt
+
+            accel = [xref[0,0,2]-obs_dict["curr_speed"][0].item()]
+            for i in range(1, xref.shape[1]): accel.append((xref[0,i,2] - xref[0,i-1,2] ).item())
+            accel = torch.tensor(accel)/dt
+
+            # Build CBFQP for n time steps
+            safe_inputs = []
+            for t_step in range(num_steps_to_act_on): # TODO: figure out where this variable is coming from and point it here
+                # Current Batch 
+                current_batch ={
+                    "states" : (coarse_batch["states"][...,t_step:t_step+1,:]).to(coarse_batch["extent"].device), 
+                    "extent" : obs_dict["extent"][None,...], 
+                    "dt"     : obs_dict["dt"], 
+                }
+                # Set up problem 
+                ego_u = cp.Variable(2)
+                ego_des_input = np.array([accel[t_step], yaw_rate[t_step]])
+                objective = cp.Minimize(cp.atoms.norm(ego_des_input - ego_u)**2)
+                constraints = []
+                with torch.enable_grad():
+                    data = self.cbf.process_batch(current_batch)
+                    data.requires_grad_()
+                    h_vals = self.cbf(data)
+                    LfhA, LfhB, LghA, LghB = self.cbf.get_barrier_bits(h_vals, data)
+                h_vals = h_vals[0].cpu().detach().numpy()
+                LfhA = LfhA.cpu().detach().numpy()
+                LfhB = LfhB.cpu().detach().numpy()
+                LghA = LghA.cpu().detach().numpy()
+                LghB = LghB.cpu().detach().numpy()
+                for i in range(len(LfhA)): 
+                    # worst case is positive 1/2 g acceleration, negative 1 g braking and 4 second u turn 
+                    # worst_case = [[4.5,np.pi/4], [4.5,-np.pi/4], [-9,np.pi/4], [-9,-np.pi/4]] 
+                    worst_case = [[0,0]]
+                    for input in worst_case:
+                        u_worst_case = np.array(input)
+                        constraints.append(LfhA[i] + LfhB[i] + LghA[i]@ego_u + LghB[i]@u_worst_case >= -self.cbf.alpha * h_vals[i])
+
+                prob = cp.Problem(objective, constraints)
+                try:
+                    result = prob.solve()
+                    if prob.status == "optimal" or prob.status == "optimal_inaccurate": 
+                        ego_safe_input = ego_u.value
+                    else: 
+                        print(prob.status)
+                        ego_safe_input = np.zeros(2)
+                except:
+                    ego_safe_input = np.zeros(2)
+
+                #saturate: 
+                if ego_safe_input[0] >=9: ego_safe_input[0] = 9
+                if ego_safe_input[0] <=-9: ego_safe_input[0] = -9
+                if ego_safe_input[1] >= np.pi/4: ego_safe_input[1] = np.pi/4
+                if ego_safe_input[1] <= -np.pi/4: ego_safe_input[1] = -np.pi/4
+
+                print("des: ", ego_des_input, "\t safe: ", ego_safe_input, "\t norm: ", np.linalg.norm(ego_des_input-ego_safe_input))
+                coarse_batch["states"][0,0,t_step+1,:] = torch.tensor([
+                    coarse_batch["states"][0,0,t_step,0] + coarse_batch["states"][0,0,t_step,2]*torch.cos(coarse_batch["states"][0,0,t_step,3])*dt, 
+                    coarse_batch["states"][0,0,t_step,1] + coarse_batch["states"][0,0,t_step,2]*torch.sin(coarse_batch["states"][0,0,t_step,3])*dt, 
+                    coarse_batch["states"][0,0,t_step,2] + ego_safe_input[0]*dt, 
+                    coarse_batch["states"][0,0,t_step,3] + ego_safe_input[1]*dt   
+                ])
+                safe_inputs.append(ego_safe_input)
+
+        plan = xref.clone()
+        v = states[0,0,2]
+        theta = 0 
+        plan[0,0,0] =     v*np.cos(theta)*dt      
+        plan[0,0,1] =     v*np.sin(theta)*dt      
+        plan[0,0,2] = v + safe_inputs[0][0]*dt
+        plan[0,0,3] =     safe_inputs[0][1]*dt
+        for i in range(num_steps_to_act_on-1): 
+            plan[0,i+1,0]  =  plan[0,i,0] + plan[0,i,2]*torch.cos(plan[0,i,3])*dt      
+            plan[0,i+1,1]  =  plan[0,i,1] + plan[0,i,2]*torch.sin(plan[0,i,3])*dt      
+            plan[0,i+1,2]  =  plan[0,i,2] + safe_inputs[i+1][0]*dt
+            plan[0,i+1,3]  =  plan[0,i,3] + safe_inputs[i+1][1]*dt  
+
+        action = Action(positions=plan[...,:2], yaws=plan[...,3:])
+        return action, {}
+
 
 class ModelPredictiveController(Policy):
     def __init__(self, device, step_time, predictor, solver="casadi", *args, **kwargs):
@@ -586,7 +733,7 @@ class ModelPredictiveController(Policy):
             plan.append(TensorUtils.to_torch(xplan,device=self.device))
         plan = torch.stack(plan,0)
         action = Action(positions=plan[...,:2],yaws=plan[...,3:])
-
+        breakpoint()
         return action, {}
 
 

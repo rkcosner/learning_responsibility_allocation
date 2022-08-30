@@ -12,6 +12,26 @@ from tbsim.dynamics import (
     Unicycle
 )
 
+
+def unicycle_dynamics(stateA, stateB):
+        # states are [x, y, v, yaw]
+        N_datapoints = stateA.shape[0]
+        fA = torch.zeros(N_datapoints, 4,1, device = stateA.device)
+        fA[:,0] = (stateA[:,2] * torch.cos(stateA[:,3]))[:,None]
+        fA[:,1] = (stateA[:,2] * torch.sin(stateA[:,3]))[:,None]
+        fB = torch.zeros(N_datapoints, 4,1, device = stateA.device)
+        fB[:,0] = (stateB[:,2] * torch.cos(stateB[:,3]))[:,None]
+        fB[:,1] = (stateB[:,2] * torch.sin(stateB[:,3]))[:,None]
+        
+        gA = torch.zeros(N_datapoints, 4,2, device = stateA.device)
+        gA[:,2,0] = torch.ones(N_datapoints)
+        gA[:,3,1] = torch.ones(N_datapoints)
+
+        gB = torch.zeros(N_datapoints, 4,2, device = stateA.device)
+        gB[:,2,0] = torch.ones(N_datapoints)
+        gB[:,3,1] = torch.ones(N_datapoints)
+        return fA, fB, gA, gB
+
 class CBF(torch.nn.Module):
     """
         Differentiable Safety Function
@@ -257,3 +277,21 @@ class BackupBarrierCBF(CBF):
             h = (torch.sigmoid(h/5)-0.5)*2*5 # safety value can range (-5, 5) with 0 at 0, with real meaning within ~20 meters
 
         return h 
+
+
+    def get_barrier_bits(self, h_vals, data, dynamics=unicycle_dynamics): 
+
+        dhdx, = torch.autograd.grad(h_vals, inputs = data, grad_outputs = torch.ones_like(h_vals), create_graph=True)
+        stateA_masked = data[0,:,0:4]
+        stateB_masked = data[0,:,4:8]
+        dhdxA_masked =  dhdx[0,:,0:4]          # dhdx wrt ego agent
+        dhdxB_masked =  dhdx[0,:,4:8]          # dhdx wrt other agent
+        h_masked = h_vals                # minus 1 time step because hs and inputs are only computed for everything up to current, excluding current
+
+        (fA,fB,gA,gB) = dynamics(stateA_masked, stateB_masked)
+        LfhA = torch.bmm(dhdxA_masked[:,None,:], fA).squeeze() 
+        LfhB = torch.bmm(dhdxB_masked[:,None,:], fB).squeeze()
+        LghA = torch.bmm(dhdxA_masked[:,None,:], gA)
+        LghB = torch.bmm(dhdxB_masked[:,None,:], gB) 
+        
+        return [LfhA, LfhB, LghA, LghB] 

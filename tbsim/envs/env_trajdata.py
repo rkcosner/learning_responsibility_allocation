@@ -322,8 +322,6 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
             raise SimulationException("Cannot step in a finished episode")
 
         obs = self.get_observation()["agents"]   
-        # record metrics
-        # self._add_per_step_metrics(obs)
 
         action = step_actions.agents.to_dict()
         assert action["positions"].shape[0] == obs["centroid"].shape[0]

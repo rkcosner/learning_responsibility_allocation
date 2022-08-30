@@ -19,6 +19,7 @@ from tbsim.policies.hardcoded import (
     EC_sampling_controller, 
     ContingencyPlanner,
     ModelPredictiveController,
+    CBFQPController,
     HierSplineSamplingPolicy,
     )
 from tbsim.configs.base import ExperimentConfig
@@ -29,6 +30,7 @@ from tbsim.policies.wrappers import (
     HierarchicalSamplerWrapper,
     SamplingPolicyWrapper,
     RefineWrapper,
+    CBFQPWrapper,
 )
 from tbsim.configs.config import Dict
 from tbsim.utils.experiment_utils import get_checkpoint
@@ -403,6 +405,7 @@ class HierAgentAware(Hierarchical):
 
         policy = SamplingPolicyWrapper(ego_action_sampler=sampler, agent_traj_predictor=predictor)
         policy = PolicyWrapper.wrap_controller(policy, cost_weights=self.eval_config.policy.cost_weights)
+                
         return policy, exp_cfg
 
 
@@ -467,7 +470,8 @@ class HierAgentAwareCVAE(Hierarchical):
         policy = SamplingPolicyWrapper(ego_action_sampler=sampler, agent_traj_predictor=predictor)
         return policy, exp_cfg
 
-# TODO: CBF-QP wrapper version of vvv
+
+
 class HierAgentAwareMPC(Hierarchical):
     def _get_predictor(self):
         predictor_ckpt_path, predictor_config_path = get_checkpoint(
@@ -500,6 +504,32 @@ class HierAgentAwareMPC(Hierarchical):
         exp_cfg.env.data_generation_params.vectorize_lane = True
         policy = ModelPredictiveController(self.device, exp_cfg.algo.step_time, predictor)
         return policy, exp_cfg
+
+
+# TODO: CBF-QP wrapper version of vvv
+class HierAgentAwareCBFQP(HierAgentAwareMPC):
+    def _get_initial_planner(self):
+        composer = HierAgentAware(self.eval_config, self.device, self.ckpt_root_dir)
+        return composer.get_policy()
+    def get_policy(self, planner=None, predictor=None, initial_planner=None):
+        if planner is not None:
+            assert isinstance(planner, SpatialPlanner)
+        else:
+            planner, _ = self._get_planner()
+
+        if predictor is not None:
+            assert isinstance(predictor, MATrafficModel)
+            exp_cfg = None
+        else:
+            predictor, exp_cfg = self._get_predictor()
+            exp_cfg = exp_cfg.clone()
+        if initial_planner is None:
+            initial_planner, _ = self._get_initial_planner()
+        exp_cfg.env.data_generation_params.vectorize_lane = True
+        policy = CBFQPController(self.device, exp_cfg.algo.step_time, predictor)
+        policy = CBFQPWrapper(initial_planner=initial_planner,refiner=policy,device=self.device)
+        return policy, exp_cfg
+
 
 class GuidedHAAMPC(HierAgentAwareMPC):
     def _get_initial_planner(self):

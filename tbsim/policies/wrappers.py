@@ -150,6 +150,34 @@ class PolicyWrapper(object):
         return cls(model=model, get_plan_kwargs=kwargs)
 
 
+
+class CBFQPWrapper(object): 
+    """A wrapper that takes a coarse motion plan and filters it through a CBFQP"""
+    def __init__(self, initial_planner, refiner, device): 
+        """
+        planner: a policy that generates a coarse motion plan
+        refiner: a policy (optimization based) that takes the coarse motion plan and refines it
+        device: device for torch
+        """
+        self.initial_planner = initial_planner
+        self.refiner = refiner
+        self.device = device
+
+    def eval(self): 
+        self.inital_planner.eval()
+        self.refiner.eval()
+
+    def get_action(self, obs, **kwargs):
+
+        # Get Coarse Plan from BITS 
+        coarse_plan, _ = self.initial_planner.get_action(obs, **kwargs) 
+
+        # Filter Coarse Plan
+        action, action_info = self.refiner.get_action(obs, coarse_plan = coarse_plan)
+        return action, {"coarse_plan":coarse_plan.to_dict(), **action_info}
+
+    
+
 # TODO: CBF-QP version of refine wrapper
 
 class RefineWrapper(object):

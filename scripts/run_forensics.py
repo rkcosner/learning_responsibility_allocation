@@ -46,7 +46,7 @@ if __name__=="__main__":
 
 
     # Load Gamma Model
-    file = open("/home/rkcosner/Documents/tbsim/checkpoints/braking_checkpoint/run3/config.json")#open("/home/rkcosner/Documents/tbsim/resp_trained_models/test/run15/config.json")
+    file = open("/home/rkcosner/Documents/tbsim/checkpoints/braking_checkpoint/run5/config.json")#open("/home/rkcosner/Documents/tbsim/resp_trained_models/test/run15/config.json")
     algo_cfg = AlgoConfig()
     algo_cfg.algo = ResponsibilityConfig()
     external_algo_cfg = json.load(file)
@@ -55,7 +55,7 @@ if __name__=="__main__":
     device = "cpu" 
     modality_shapes = dict()
     gamma_algo = algo_factory(algo_cfg, modality_shapes)
-    checkpoint_path = "/home/rkcosner/Documents/tbsim/checkpoints/braking_checkpoint/run3/iter9000_ep1_valLoss0.00.ckpt"
+    checkpoint_path = "/home/rkcosner/Documents/tbsim/checkpoints/braking_checkpoint/run5/iter10000_ep1_valLoss0.00.ckpt"
     checkpoint = torch.load(checkpoint_path)
     gamma_algo.load_state_dict(checkpoint["state_dict"])
     gamma_net = gamma_algo.nets["policy"]
@@ -94,7 +94,7 @@ if __name__=="__main__":
                 "history_availabilities"    : (0*yaw[:,indices] + 1).int(), 
                 "dt"                        : 0.5*torch.ones(1) 
             }
-            substeps = 1
+            substeps = 2
             batch = scene_centric_batch_to_raw(batch, BEZ_TEST=False, substeps = substeps)
 
             # Get Minimum Distance from Ego Vehicle In Trajectory
