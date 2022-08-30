@@ -617,8 +617,12 @@ class CBFQPController(Policy):
                 LghB = LghB.cpu().detach().numpy()
                 for i in range(len(LfhA)): 
                     # worst case is positive 1/2 g acceleration, negative 1 g braking and 4 second u turn 
-                    # worst_case = [[4.5,np.pi/4], [4.5,-np.pi/4], [-9,np.pi/4], [-9,-np.pi/4]] 
-                    worst_case = [[0,0]]
+                    breakpoint()
+                    sign_agent_vel = torch.sign(current_batch["states"][0,i+1,0,2]).item()
+                    if True: # worst case other agents
+                        worst_case = [[4.5*sign_agent_vel,np.pi/4], [4.5*sign_agent_vel,-np.pi/4], [-9*sign_agent_vel,np.pi/4], [-9*sign_agent_vel,-np.pi/4]] 
+                    else: # ego_only 
+                      worst_case = [[0,0]]
                     for input in worst_case:
                         u_worst_case = np.array(input)
                         constraints.append(LfhA[i] + LfhB[i] + LghA[i]@ego_u + LghB[i]@u_worst_case >= -self.cbf.alpha * h_vals[i])
