@@ -179,7 +179,22 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 freeze_agents=True,
                 return_dict=True
             )
-            sim_scene.reset()
+
+            if True: # RYAN : FORCE OTHER AGENT'S STATE TODO: CLEAN THIS UP!!! 
+                sim_scene.reset()
+                obs = sim_scene.get_obs()
+                ego_state = obs["curr_agent_state"][0,[0,1,-1]].tolist()
+                new_states = dict()
+                for a, agent in enumerate(sim_scene.agents): 
+                    if a == 2: # move to on top of ego, plus some
+                        yaw = ego_state[2] 
+                        dist = 10
+                        offset  = 0.1
+                        new_states[agent.name] = np.array([ego_state[0]+dist*np.cos(yaw)-np.sin(yaw)*offset, ego_state[1] + dist*np.sin(yaw)+np.sin(yaw)*offset, yaw])
+                    else: # leave still
+                        new_states[agent.name] = np.array( obs["curr_agent_state"][a,[0,1,-1]].tolist())
+                sim_scene.step(new_states)
+        
             self._disable_offroad_agents(sim_scene)
             self._current_scenes.append(sim_scene)
 
@@ -200,6 +215,23 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
 
         for v in self._metrics.values():
             v.reset()
+
+        # scene_action = dict()
+        # obs = self.get_observation()
+        # for scene in self._current_scenes:
+        #     for a, agent in enumerate(scene.agents): 
+        #         state = np.zeros(3)
+        #         if a == 0: 
+        #             ego_pos = obs["agents"]["curr_agent_state"][a, :2]
+        #             ego_yaw = obs["agents"]["curr_agent_state"][a, -1]
+        #         state[:2] = ego_pos
+        #         state[2]  = ego_yaw 
+        #         scene_action[agent] = state
+        #     breakpoint()
+        #     scene.step(scene_action)
+        # obs = self.get_observation()
+
+
 
     def render(self, actions_to_take):
         scene_ims = []
@@ -364,7 +396,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                 scene.step(scene_action, return_obs=False)
 
         self._cached_observation = None
-
+        
         if self._frame_index + num_steps_to_take >= self.horizon:
             self._done = True
         else:

@@ -260,6 +260,7 @@ class RolloutWrapper(object):
             with torch.no_grad():
                 agents_action, agents_action_info = self.agents_policy.get_action(
                     obs["agents"], step_index = step_index)
+
         return RolloutAction(ego_action, ego_action_info, agents_action, agents_action_info)
 
 

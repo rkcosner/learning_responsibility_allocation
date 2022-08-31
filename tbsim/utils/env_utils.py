@@ -227,6 +227,7 @@ def rollout_episodes(
             start_frame_index = None
         
         env.reset(scene_indices=scene_indices, start_frame_index=start_frame_index)
+
         if adjust_plan_recipe is not None:
             if "random_init_plan" in adjust_plan_recipe:
                 # recipe provided
@@ -276,7 +277,7 @@ def rollout_episodes(
             with timers.timed("network"):
                 action = policy.get_action(obs_torch, step_index=counter)
 
-            if counter < skip_first_n:
+            if False: #  counter < skip_first_n: RYAN TODO, removed so I can force agent states
                 # use GT action for the first N steps to warm up environment state (velocity, etc.)
                 gt_action = env.get_gt_action(obs)
                 action.ego = gt_action.ego
@@ -332,6 +333,7 @@ def rollout_episodes(
     multi_episodes_metrics = env.get_multi_episode_metrics()
     stats.update(multi_episodes_metrics)
     env.reset_multi_episodes_metrics()
+
 
     return stats, info, renderings, adjust_plans
 

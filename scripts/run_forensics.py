@@ -46,7 +46,7 @@ if __name__=="__main__":
 
 
     # Load Gamma Model
-    file = open("/home/rkcosner/Documents/tbsim/checkpoints/braking_checkpoint/run5/config.json")#open("/home/rkcosner/Documents/tbsim/resp_trained_models/test/run15/config.json")
+    file = open("/home/rkcosner/Documents/tbsim/checkpoints/idling_checkpoint/run6/config.json")#open("/home/rkcosner/Documents/tbsim/resp_trained_models/test/run15/config.json")
     algo_cfg = AlgoConfig()
     algo_cfg.algo = ResponsibilityConfig()
     external_algo_cfg = json.load(file)
@@ -55,7 +55,7 @@ if __name__=="__main__":
     device = "cpu" 
     modality_shapes = dict()
     gamma_algo = algo_factory(algo_cfg, modality_shapes)
-    checkpoint_path = "/home/rkcosner/Documents/tbsim/checkpoints/braking_checkpoint/run5/iter10000_ep1_valLoss0.00.ckpt"
+    checkpoint_path = "/home/rkcosner/Documents/tbsim/checkpoints/idling_checkpoint/run6/iter9000_ep1_valLoss0.00.ckpt"
     checkpoint = torch.load(checkpoint_path)
     gamma_algo.load_state_dict(checkpoint["state_dict"])
     gamma_net = gamma_algo.nets["policy"]
@@ -152,7 +152,7 @@ if __name__=="__main__":
                 scene_action = dict()
                 for a, agent in enumerate(simscene.agents):
                     # print("agent name: ", agent, " \t agent id: ", a)
-                    scene_action[agent.name] =  np.array(states[a, time, :])
+                    scene_action[agent.name] =  np.array(states[a, time, [0,1,3]])
                 simscene.step(scene_action)
                 obs = parse_trajdata_batch(simscene.get_obs())
                 

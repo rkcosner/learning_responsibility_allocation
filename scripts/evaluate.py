@@ -97,7 +97,7 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
             rollout_policy = RolloutWrapper(ego_policy=policy, agents_policy=agent_policy)
         else:
             rollout_policy = RolloutWrapper(ego_policy=policy, agents_policy=policy)
-    
+
     print(exp_config.algo)
 
     # create env
@@ -130,6 +130,8 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
     while scene_i < eval_cfg.num_scenes_to_evaluate:
         scene_indices = eval_scenes[scene_i: scene_i + eval_cfg.num_scenes_per_batch ]
         scene_i += eval_cfg.num_scenes_per_batch
+
+
         stats, info, renderings, adjust_plans = rollout_episodes(
             env,
             rollout_policy,

@@ -265,10 +265,11 @@ class BackupBarrierCBF(CBF):
         ego_extent   = ego_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
         agent_extent = agent_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
         if self.veh_veh: 
-            dist = VEH_VEH_distance(ego_traj[...,0:3],agent_traj[...,0:3],ego_extent, agent_extent )
+            veh_radius = 0.5
+            dist = VEH_VEH_distance(ego_traj[...,0:3],agent_traj[...,0:3],ego_extent, agent_extent ) - veh_radius
             dist = dist.amin(-1)
         else: # ball norm 
-            veh_radius = 2
+            veh_radius = 6
             dist = torch.linalg.norm(ego_traj[...,0:2] - agent_traj[...,0:2], axis=-1) - veh_radius #VEH_VEH_collision(ego_traj, agent_traj, ego_extent, agent_extent, return_dis = False)
             dist = dist.amin(-1) 
         h = dist 

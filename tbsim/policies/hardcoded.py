@@ -528,7 +528,9 @@ class CBFQPController(Policy):
         self.step_time = step_time
         self.predictor = predictor
         self.solver=solver
-        self.cbf = BackupBarrierCBF(T_horizon=4, alpha=2, veh_veh=False, saturate_cbf=True, backup_controller_type="brake")
+        self.cbf = BackupBarrierCBF(T_horizon=4, alpha=3, veh_veh=True, saturate_cbf=True, backup_controller_type="idle")
+        self.firstStep = True
+        self.ego_vel = 7 
 
     def eval(self):
         self.predictor.eval()
@@ -548,14 +550,90 @@ class CBFQPController(Policy):
         else:
             xref = None
         
-        if True: 
-            states = []
+
+        states = []
+        if False: # Set Up Sim 
+            self.firstStep = False
+            ego_yaw = obs_dict["curr_agent_state"][0, -1]
+            ego_pos = obs_dict["curr_agent_state"][0, :2]
+            ego_vel = obs_dict["curr_speed"][0]
+            agent_yaw = obs_dict["curr_agent_state"][1, -1]
+            agent_pos = obs_dict["curr_agent_state"][1, :2]
+            agent_vel = obs_dict["curr_speed"][1]
+
+            dist = 0
+
+            from_agent_to_ego = [dist*torch.cos(ego_yaw)+ego_pos[0] - agent_pos[0], dist*torch.sin(ego_yaw)+ego_pos[1] - agent_pos[1], ego_yaw  - agent_yaw]
+
+            agent_from_ego = torch.tensor(
+                        [
+                            [torch.cos(agent_yaw - ego_yaw), torch.sin(agent_yaw - ego_yaw)],
+                            [-torch.sin(agent_yaw - ego_yaw), torch.cos(agent_yaw - ego_yaw)],
+                        ], 
+                        device = xref.device
+                    )
+
+            diff_agent_ref = agent_from_ego @ torch.tensor(from_agent_to_ego[0:2], device = xref.device)
+
+            plan = 0 * xref 
+            plan[1,:,0:2] = diff_agent_ref
+            # plan[1,:,2] = ego_vel
+            # plan[1,:,3] = ego_yaw - agent_yaw
+            print(plan[1,0,:])
+            print(ego_pos)
+            print(agent_pos)
+
+            action = Action(positions=plan[...,:2], yaws=plan[...,3:])
+            return action, {}
+
+
+        else: # Run Sim 
             for idx in range(xref.shape[0]):
                 state_veh_idx = []
                 curr_yaw = obs_dict["curr_agent_state"][idx, -1]
                 curr_pos = obs_dict["curr_agent_state"][idx, :2]
                 curr_vel = obs_dict["curr_speed"][idx]
-                
+
+                # Default Ego Controller
+                time_steps = torch.linspace(1,20,20, device = curr_pos.device)
+                if idx == 0 : 
+                    v_des = 7 
+                    vs = torch.linspace(curr_vel.item()+(v_des-curr_vel.item())/20 ,v_des,20, device = curr_pos.device)
+                    # thetas = torch.linspace((obs_dict["curr_agent_state"][2, -1]-curr_yaw.item())/20, obs_dict["curr_agent_state"][2, -1]-curr_yaw.item(), 20, device = curr_pos.device ) # track heading of forward vehicle
+                    xs = []
+                    for i in range(20): 
+                        xs.append(sum(vs[0:i+1])*dt)
+                    xs = torch.tensor(xs)
+                    xref[0,:,0] =  xs
+                    xref[0,:,1] = 0
+                    xref[0,:,2] = vs
+                    xref[0,:,3] = 0
+                elif idx == 2: 
+                    # default other agent
+                    if True:
+                        v = 3
+                        vs = v*torch.ones(20, device = curr_pos.device)
+                        xs = []
+                        for i in range(20): 
+                            xs.append(sum(vs[0:i+1])*dt)
+                        xs = torch.tensor(xs)
+                        xref[idx,:,0] = xs
+                        xref[idx,:,1] = 0
+                        xref[idx,:,2] = vs
+                        xref[idx,:,3] = 0
+                        self.firstStep=False
+                    else: 
+                        v_des = 0
+                        vs = torch.linspace(curr_vel.item()+(v_des-curr_vel.item())/20 ,v_des,20, device = curr_pos.device)
+                        xs = []
+                        for i in range(20): 
+                            xs.append(sum(vs[0:i+1])*dt)
+                        xs = torch.tensor(xs)
+                        xref[0,:,0] =  xs
+                        xref[0,:,1] = 0
+                        xref[0,:,2] = vs
+                        xref[0,:,3] = 0
+
                 # Get current state and rotation matrix
                 curr_state = curr_pos.tolist()
                 curr_state.append(curr_vel.item())
@@ -587,7 +665,7 @@ class CBFQPController(Policy):
             for i in range(1, xref.shape[1]): yaw_rate.append((xref[0,i,3] - xref[0,i-1,3] ).item())
             yaw_rate = torch.tensor(yaw_rate)/dt
 
-            accel = [xref[0,0,2]-obs_dict["curr_speed"][0].item()]
+            accel = [xref[0,0,2]-obs_dict["curr_speed"][0]]
             for i in range(1, xref.shape[1]): accel.append((xref[0,i,2] - xref[0,i-1,2] ).item())
             accel = torch.tensor(accel)/dt
 
@@ -603,7 +681,7 @@ class CBFQPController(Policy):
                 # Set up problem 
                 ego_u = cp.Variable(2)
                 ego_des_input = np.array([accel[t_step], yaw_rate[t_step]])
-                objective = cp.Minimize(cp.atoms.norm(ego_des_input - ego_u)**2)
+                objective = cp.Minimize((ego_des_input[0] - ego_u[0])**2 + 100*(ego_des_input[1] - ego_u[1])**2)
                 constraints = []
                 with torch.enable_grad():
                     data = self.cbf.process_batch(current_batch)
@@ -611,22 +689,27 @@ class CBFQPController(Policy):
                     h_vals = self.cbf(data)
                     LfhA, LfhB, LghA, LghB = self.cbf.get_barrier_bits(h_vals, data)
                 h_vals = h_vals[0].cpu().detach().numpy()
+                print("h_val = ", h_vals[1])
                 LfhA = LfhA.cpu().detach().numpy()
                 LfhB = LfhB.cpu().detach().numpy()
                 LghA = LghA.cpu().detach().numpy()
                 LghB = LghB.cpu().detach().numpy()
                 for i in range(len(LfhA)): 
                     # worst case is positive 1/2 g acceleration, negative 1 g braking and 4 second u turn 
-                    breakpoint()
                     sign_agent_vel = torch.sign(current_batch["states"][0,i+1,0,2]).item()
-                    if True: # worst case other agents
-                        worst_case = [[4.5*sign_agent_vel,np.pi/4], [4.5*sign_agent_vel,-np.pi/4], [-9*sign_agent_vel,np.pi/4], [-9*sign_agent_vel,-np.pi/4]] 
-                    else: # ego_only 
-                      worst_case = [[0,0]]
-                    for input in worst_case:
-                        u_worst_case = np.array(input)
-                        constraints.append(LfhA[i] + LfhB[i] + LghA[i]@ego_u + LghB[i]@u_worst_case >= -self.cbf.alpha * h_vals[i])
+                    if False: # Model worst case other agents 
+                        if False: # worst case other agents
+                            worst_case = [[4.5*sign_agent_vel,np.pi/4], [4.5*sign_agent_vel,-np.pi/4], [-9*sign_agent_vel,np.pi/4], [-9*sign_agent_vel,-np.pi/4]] 
+                        else: # ego_only 
+                            worst_case = [[0,0]]
+                        for input in worst_case:
+                            u_worst_case = np.array(input)
+                            constraints.append(LfhA[i] + LfhB[i] + LghA[i]@ego_u + LghB[i]@u_worst_case >= -self.cbf.alpha * h_vals[i])
+                    else: # even split decentralized
+                        constraints.append(1.0/2*(LfhA[i] + LfhB[i]) + LghA[i]@ego_u >= -1.0/2*self.cbf.alpha*h_vals[i])
 
+
+                sign_ego_vel = torch.sign(current_batch["states"][0,0,0,2]).item()
                 prob = cp.Problem(objective, constraints)
                 try:
                     result = prob.solve()
@@ -634,10 +717,10 @@ class CBFQPController(Policy):
                         ego_safe_input = ego_u.value
                     else: 
                         print(prob.status)
-                        ego_safe_input = np.zeros(2)
+                        ego_safe_input = np.array([-sign_ego_vel*9,0])
                 except:
-                    ego_safe_input = np.zeros(2)
-
+                    ego_safe_input = np.array([-sign_ego_vel*9,0])
+                
                 #saturate: 
                 if ego_safe_input[0] >=9: ego_safe_input[0] = 9
                 if ego_safe_input[0] <=-9: ego_safe_input[0] = -9
@@ -653,18 +736,18 @@ class CBFQPController(Policy):
                 ])
                 safe_inputs.append(ego_safe_input)
 
-        plan = xref.clone()
-        v = states[0,0,2]
-        theta = 0 
-        plan[0,0,0] =     v*np.cos(theta)*dt      
-        plan[0,0,1] =     v*np.sin(theta)*dt      
-        plan[0,0,2] = v + safe_inputs[0][0]*dt
-        plan[0,0,3] =     safe_inputs[0][1]*dt
-        for i in range(num_steps_to_act_on-1): 
-            plan[0,i+1,0]  =  plan[0,i,0] + plan[0,i,2]*torch.cos(plan[0,i,3])*dt      
-            plan[0,i+1,1]  =  plan[0,i,1] + plan[0,i,2]*torch.sin(plan[0,i,3])*dt      
-            plan[0,i+1,2]  =  plan[0,i,2] + safe_inputs[i+1][0]*dt
-            plan[0,i+1,3]  =  plan[0,i,3] + safe_inputs[i+1][1]*dt  
+            plan = xref.clone()
+            v = states[0,0,2]
+            theta = 0 
+            plan[0,0,0] =     v*np.cos(theta)*dt      
+            plan[0,0,1] =     v*np.sin(theta)*dt      
+            plan[0,0,2] = v + safe_inputs[0][0]*dt
+            plan[0,0,3] =     safe_inputs[0][1]*dt
+            for i in range(num_steps_to_act_on-1): 
+                plan[0,i+1,0]  =  plan[0,i,0] + plan[0,i,2]*torch.cos(plan[0,i,3])*dt      
+                plan[0,i+1,1]  =  plan[0,i,1] + plan[0,i,2]*torch.sin(plan[0,i,3])*dt      
+                plan[0,i+1,2]  =  plan[0,i,2] + safe_inputs[i+1][0]*dt
+                plan[0,i+1,3]  =  plan[0,i,3] + safe_inputs[i+1][1]*dt  
 
         action = Action(positions=plan[...,:2], yaws=plan[...,3:])
         return action, {}
