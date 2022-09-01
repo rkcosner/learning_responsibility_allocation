@@ -24,7 +24,7 @@ from tbsim.utils.geometry_utils import (
 
 from tbsim.safety_funcs.debug_utils import * 
 
-type_names = ["HierAgentAwareCBFQP_split_responsibility", "HierAgentAwareCBFQP_fullresp_worst_case"]
+type_names = ["HierAgentAwareCBFQP", "HierAgentAwareCBFQP_split_responsibility", "HierAgentAwareCBFQP_fullresp_worst_case"]
 
 if __name__=="__main__": 
     for type_name in type_names:
@@ -85,13 +85,11 @@ if __name__=="__main__":
                 track_id            = torch.tensor(file[scene_name]["track_id"])                # [A, T]
                 world_from_agent    = torch.tensor(file[scene_name]["world_from_agent"])        # [A, T, 3, 3]
 
-
                 # Get Relevant Data and Fit Bezier Curves
                 T = int(centroid.shape[1])
-                N_repeated_indeces = 5
-                indices = torch.arange(0, T, N_repeated_indeces)
+                # N_repeated_indeces = 5
                 h_vals = []
-                for idx in indices: 
+                for idx in range(T): 
                     batch = {
                         "history_positions"         : centroid[None, :,idx:idx+5,:], 
                         "history_yaws"              : yaw[None,:,idx:idx+5,None], 
@@ -119,4 +117,6 @@ if __name__=="__main__":
                 for i in range(A): 
                     plt.plot(centroid[i,:,0], centroid[i,:,1])
                 plt.savefig("./closed_loop_plots/" + type_name + scene_name+"trajectories.png")
+                plt.close()
+                
         print("Done")

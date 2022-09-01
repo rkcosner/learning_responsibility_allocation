@@ -13,7 +13,7 @@ class EvaluationConfig(Dict):
         self.eval_class = ""
         self.seed = 0
         self.num_scenes_per_batch = 1
-        self.num_scenes_to_evaluate = 5
+        self.num_scenes_to_evaluate = 1
 
         self.num_episode_repeats = 1
         self.start_frame_index_each_episode = None  # if specified, should be the same length as num_episode_repeats

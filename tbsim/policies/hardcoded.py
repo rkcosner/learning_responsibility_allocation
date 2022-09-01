@@ -528,7 +528,7 @@ class CBFQPController(Policy):
         self.step_time = step_time
         self.predictor = predictor
         self.solver=solver
-        self.cbf = BackupBarrierCBF(T_horizon=4, alpha=3, veh_veh=True, saturate_cbf=True, backup_controller_type="idle")
+        self.cbf = BackupBarrierCBF(T_horizon=4, alpha=2, veh_veh=True, saturate_cbf=True, backup_controller_type="idle")
         self.firstStep = True
         self.ego_vel = 7 
 
@@ -597,7 +597,7 @@ class CBFQPController(Policy):
                 # Default Ego Controller
                 time_steps = torch.linspace(1,20,20, device = curr_pos.device)
                 if idx == 0 : 
-                    v_des = 7 
+                    v_des = 10
                     vs = torch.linspace(curr_vel.item()+(v_des-curr_vel.item())/20 ,v_des,20, device = curr_pos.device)
                     # thetas = torch.linspace((obs_dict["curr_agent_state"][2, -1]-curr_yaw.item())/20, obs_dict["curr_agent_state"][2, -1]-curr_yaw.item(), 20, device = curr_pos.device ) # track heading of forward vehicle
                     xs = []
@@ -608,10 +608,10 @@ class CBFQPController(Policy):
                     xref[0,:,1] = 0
                     xref[0,:,2] = vs
                     xref[0,:,3] = 0
-                elif idx == 2: 
+                elif idx == xref.shape[0]-1: 
                     # default other agent
                     if True:
-                        v = 3
+                        v = curr_vel.item()
                         vs = v*torch.ones(20, device = curr_pos.device)
                         xs = []
                         for i in range(20): 
@@ -681,7 +681,7 @@ class CBFQPController(Policy):
                 # Set up problem 
                 ego_u = cp.Variable(2)
                 ego_des_input = np.array([accel[t_step], yaw_rate[t_step]])
-                objective = cp.Minimize((ego_des_input[0] - ego_u[0])**2 + 100*(ego_des_input[1] - ego_u[1])**2)
+                objective = cp.Minimize((ego_des_input[0] - ego_u[0])**2 + 200*(ego_des_input[1] - ego_u[1])**2)
                 constraints = []
                 with torch.enable_grad():
                     data = self.cbf.process_batch(current_batch)
@@ -689,7 +689,7 @@ class CBFQPController(Policy):
                     h_vals = self.cbf(data)
                     LfhA, LfhB, LghA, LghB = self.cbf.get_barrier_bits(h_vals, data)
                 h_vals = h_vals[0].cpu().detach().numpy()
-                print("h_val = ", h_vals[1])
+                print("h_val = ", h_vals[-1])
                 LfhA = LfhA.cpu().detach().numpy()
                 LfhB = LfhB.cpu().detach().numpy()
                 LghA = LghA.cpu().detach().numpy()
@@ -697,8 +697,8 @@ class CBFQPController(Policy):
                 for i in range(len(LfhA)): 
                     # worst case is positive 1/2 g acceleration, negative 1 g braking and 4 second u turn 
                     sign_agent_vel = torch.sign(current_batch["states"][0,i+1,0,2]).item()
-                    if False: # Model worst case other agents 
-                        if False: # worst case other agents
+                    if True: # Model worst case other agents 
+                        if True: # worst case other agents
                             worst_case = [[4.5*sign_agent_vel,np.pi/4], [4.5*sign_agent_vel,-np.pi/4], [-9*sign_agent_vel,np.pi/4], [-9*sign_agent_vel,-np.pi/4]] 
                         else: # ego_only 
                             worst_case = [[0,0]]
@@ -706,7 +706,7 @@ class CBFQPController(Policy):
                             u_worst_case = np.array(input)
                             constraints.append(LfhA[i] + LfhB[i] + LghA[i]@ego_u + LghB[i]@u_worst_case >= -self.cbf.alpha * h_vals[i])
                     else: # even split decentralized
-                        constraints.append(1.0/2*(LfhA[i] + LfhB[i]) + LghA[i]@ego_u >= -1.0/2*self.cbf.alpha*h_vals[i])
+                        constraints.append(1.0/2*(LfhA[i] + LfhB[i] + self.cbf.alpha*h_vals[i]) + LghA[i]@ego_u >= 0)
 
 
                 sign_ego_vel = torch.sign(current_batch["states"][0,0,0,2]).item()

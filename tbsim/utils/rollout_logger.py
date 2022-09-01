@@ -19,11 +19,12 @@ class RolloutLogger(object):
 
     def _combine_obs(self, obs):
         combined = dict()
+        excluded_keys = ["extras"]
         if "ego" in obs and obs["ego"] is not None:
             combined.update(obs["ego"])
         if "agents" in obs and obs["agents"] is not None:
             for k in obs["agents"].keys():
-                if k in combined:
+                if k in combined and k not in excluded_keys:
                     if obs["agents"][k] is not None:
                         if combined[k] is not None:
                             combined[k] = np.concatenate((combined[k], obs["agents"][k]), axis=0)
@@ -110,8 +111,8 @@ class RolloutLogger(object):
 
         # TODO: move this to __init__ as arg
         state = {k: obs[k] for k in self._obs_keys}
-        state["action_positions"] = action["action"]["positions"][:, [0]]
-        state["action_yaws"] = action["action"]["yaws"][:, [0]]
+        state["action_positions"] = action["action"]["positions"]
+        state["action_yaws"] = action["action"]["yaws"]
         if "action_samples" in action:
             # only collect up to 20 samples to save space
             # state["action_sample_positions"] = action["action_samples"]["positions"][:, :20]
@@ -164,7 +165,7 @@ class RolloutLogger(object):
                             else:
                                 padding_value = 0
                             ti_k = [x[0] for x in ti_k]
-                            ti_k_torch = TensorUtils.to_tensor(ti_k)
+                            ti_k_torch = TensorUtils.to_tensor(ti_k,ignore_if_unspecified=True)
 
                             ti_k_padded = pad_sequence(ti_k_torch,padding_value=padding_value,batch_first=True)
                             serialized[si][k].append(TensorUtils.to_numpy(ti_k_padded)[np.newaxis,:])
@@ -183,7 +184,7 @@ class RolloutLogger(object):
                         padding_value = 0
                     axes=[1,0]+np.arange(2,serialized[si][k][0].ndim-1).tolist()
                     mk_transpose = [np.transpose(x[0],axes) for x in serialized[si][k]]
-                    mk_torch = TensorUtils.to_tensor(mk_transpose)
+                    mk_torch = TensorUtils.to_tensor(mk_transpose,ignore_if_unspecified=True)
                     mk_padded = pad_sequence(mk_torch,padding_value=padding_value)
                     mk = TensorUtils.to_numpy(mk_padded)
                     axes=[1,2,0]+np.arange(3,mk.ndim).tolist()
@@ -222,3 +223,4 @@ class RolloutLogger(object):
         self._append_buffer(combined_obs, combined_action)
         for si in np.unique(combined_obs["scene_index"]):
             self._scene_ts[si]+=1
+        del combined_obs

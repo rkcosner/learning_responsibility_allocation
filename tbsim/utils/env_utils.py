@@ -1,3 +1,4 @@
+from copyreg import remove_extension
 from typing import OrderedDict
 import numpy as np
 import pytorch_lightning as pl
@@ -92,10 +93,60 @@ def random_placing_neighbors(simscene,num_neighbors,coll_check=True):
                                 executed=False))
     return agent_plan
 
+def infront_placing_neighbors(simscene,coll_check=True):
+    
+    offset_x = 6.0
+    offset_y = 0.1
+    vel = 4 
+    T = 10
+
+    dt = simscene.scene.dt
+    obs = simscene.get_obs()
+    if isinstance(simscene,SimulationScene):
+        obs = parse_trajdata_batch(obs)
+    obs = TensorUtils.to_numpy(obs)
+
+    num_new_agent = 0
+    agent_names = [agent.name for agent in simscene.agents]
+    while "agent"+str(num_new_agent) in agent_names:
+        num_new_agent+=1
+    agent_plan = list()
+
+
+    newagent_name="placed_agent"
+    newagent_extent=np.array([4.,2.5,2.])
+    newagent_type = 1
+    newagent_state = np.array([[offset_x,offset_y,0]]).repeat(T,0)
+    
+    newagent_state[:,0]+=np.arange(-T+1,1)*dt*vel
+
+    new_pos_global = GeoUtils.batch_nd_transform_points_np(newagent_state[:,:2],obs["world_from_agent"][0])
+    new_yaw_global = newagent_state[:,2:]+obs["yaw"][0]
+    newagent_state_global = np.hstack((new_pos_global,new_yaw_global))
+   
+    agent_plan.append(dict(name=newagent_name,
+                        agent_state=newagent_state_global.tolist(),
+                        initial_timestep=simscene.scene_ts-T+1,
+                        agent_type=newagent_type,
+                        extent=newagent_extent.tolist(),
+                        executed=False))
+
+    return agent_plan
+
+
+def infront_initial_adjust_plan(env,adjust_recipe):
+    adjust_plan = dict()
+    for simscene in env._current_scenes:
+        adjust_plan[simscene.scene.name] = dict(remove_existing_neighbors=dict(flag=adjust_recipe["remove_existing_neighbors"],executed=False),
+                                              agents=infront_placing_neighbors(simscene))
+
+    return adjust_plan
+
+
 def random_initial_adjust_plan(env,adjust_recipe):
     adjust_plan = dict()
     for simscene in env._current_scenes:
-        adjust_plan[simscene.scene_info.name] = dict(remove_existing_neighbors=dict(flag=adjust_recipe["remove_existing_neighbors"],executed=False),
+        adjust_plan[simscene.scene.name] = dict(remove_existing_neighbors=dict(flag=adjust_recipe["remove_existing_neighbors"],executed=False),
                                               agents=random_placing_neighbors(simscene,adjust_recipe["initial_num_neighbors"]))
 
     return adjust_plan
@@ -228,6 +279,8 @@ def rollout_episodes(
         
         env.reset(scene_indices=scene_indices, start_frame_index=start_frame_index)
 
+        # RYAN : Add agent in front
+        
         if adjust_plan_recipe is not None:
             if "random_init_plan" in adjust_plan_recipe:
                 # recipe provided
@@ -250,6 +303,9 @@ def rollout_episodes(
 
         if seed_each_episode is not None:
             env.update_random_seed(seed_each_episode[ei])
+
+        adjust_plan = infront_initial_adjust_plan(env, adjust_plan_recipe)
+        env.adjust_scene(adjust_plan)
 
         done = env.is_done()
         counter = 0
@@ -301,15 +357,15 @@ def rollout_episodes(
             
             if horizon is not None and counter >= horizon:
                 break
-        metrics = env.get_metrics()
+        # metrics = env.get_metrics()
 
-        for k, v in metrics.items():
-            if k not in stats:
-                stats[k] = []
-            if is_batched_env:  # concatenate by scene
-                stats[k] = np.concatenate([stats[k], v], axis=0)
-            else:
-                stats[k].append(v)
+        # for k, v in metrics.items():
+        #     if k not in stats:
+        #         stats[k] = []
+        #     if is_batched_env:  # concatenate by scene
+        #         stats[k] = np.concatenate([stats[k], v], axis=0)
+        #     else:
+        #         stats[k].append(v)
 
         env_info = env.get_info()
         for k, v in env_info.items():
@@ -330,9 +386,9 @@ def rollout_episodes(
             adjust_plans.append(adjust_plan)
 
 
-    multi_episodes_metrics = env.get_multi_episode_metrics()
-    stats.update(multi_episodes_metrics)
-    env.reset_multi_episodes_metrics()
+    # multi_episodes_metrics = env.get_multi_episode_metrics()
+    # stats.update(multi_episodes_metrics)
+    # env.reset_multi_episodes_metrics()
 
 
     return stats, info, renderings, adjust_plans
