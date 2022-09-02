@@ -6,7 +6,11 @@ from torch.nn.utils.rnn import pad_sequence
 from typing import Tuple, Dict
 from copy import deepcopy
 import cvxpy as cp
+import json
 
+from tbsim.algos.factory import algo_factory
+from tbsim.configs.algo_config import ResponsibilityConfig
+from tbsim.configs.base import AlgoConfig
 from tbsim.envs.base import BatchedEnv, BaseEnv
 import tbsim.utils.tensor_utils as TensorUtils
 import tbsim.dynamics as dynamics
@@ -528,9 +532,28 @@ class CBFQPController(Policy):
         self.step_time = step_time
         self.predictor = predictor
         self.solver=solver
-        self.cbf = BackupBarrierCBF(T_horizon=4, alpha=2, veh_veh=True, saturate_cbf=True, backup_controller_type="idle")
+        self.cbf = BackupBarrierCBF(T_horizon=1, alpha=2, veh_veh=True, saturate_cbf=True, backup_controller_type="idle")
         self.firstStep = True
         self.ego_vel = 7 
+
+
+        # Load Gamma Model
+        self.test_type = "worst_case"#"gammas"#"gammas" # "worst_case", "even_split"        
+        if self.test_type == "gammas":
+            file = open("/home/rkcosner/Documents/tbsim/checkpoints/idling_checkpoint/run7/config.json")
+            algo_cfg = AlgoConfig()
+            algo_cfg.algo = ResponsibilityConfig()
+            external_algo_cfg = json.load(file)
+            algo_cfg.update(**external_algo_cfg)
+            algo_cfg.algo.update(**external_algo_cfg["algo"])
+            device = "device" 
+            modality_shapes = dict()
+            gamma_algo = algo_factory(algo_cfg, modality_shapes)
+            checkpoint_path = "/home/rkcosner/Documents/tbsim/checkpoints/idling_checkpoint/run7/iter9000_ep1_valLoss0.00.ckpt"
+            checkpoint = torch.load(checkpoint_path)
+            gamma_algo.load_state_dict(checkpoint["state_dict"])
+            self.gamma_net = gamma_algo.nets["policy"].cuda()
+
 
     def eval(self):
         self.predictor.eval()
@@ -671,17 +694,34 @@ class CBFQPController(Policy):
 
             # Build CBFQP for n time steps
             safe_inputs = []
+            feas_flag = True
+    
+            # Get ego-centered states
+            ego_centered_states = coarse_batch["states"].clone()
+            ego_centered_states[:,:,:,[0,1]] -= ego_centered_states[0,0,0,[0,1]]
+            ego_yaw = ego_centered_states[0,0,0,3].item()
+            ego_centered_states[:,:,:,3] -= ego_yaw
+            R = torch.tensor([[np.cos(-ego_yaw), -np.sin(-ego_yaw)],[np.sin(-ego_yaw), np.cos(-ego_yaw)]], dtype=torch.float)
+            A = ego_centered_states.shape[1]
+            T = ego_centered_states.shape[2]
+            for i in range(A): 
+                for j in range(T): 
+                    ego_centered_states[0,i,j,[0,1]] = R@ego_centered_states[0,i,j,[0,1]]
+            ego_centered_states[:,:,:,3]
+
             for t_step in range(num_steps_to_act_on): # TODO: figure out where this variable is coming from and point it here
                 # Current Batch 
                 current_batch ={
-                    "states" : (coarse_batch["states"][...,t_step:t_step+1,:]).to(coarse_batch["extent"].device), 
+                    "states" : ego_centered_states[...,t_step:t_step+1,:].to(coarse_batch["extent"].device), #(coarse_batch["states"][...,t_step:t_step+1,:]).to(coarse_batch["extent"].device),  # Ego Centered State 
                     "extent" : obs_dict["extent"][None,...], 
                     "dt"     : obs_dict["dt"], 
+                    "image"  : obs_dict["image"][None,:,-8:,:,:], 
+                    "agents_from_center" : obs_dict["agent_from_world"][None, ...] # This is a dummy value since we're only using gamma for agent A
                 }
                 # Set up problem 
                 ego_u = cp.Variable(2)
                 ego_des_input = np.array([accel[t_step], yaw_rate[t_step]])
-                objective = cp.Minimize((ego_des_input[0] - ego_u[0])**2 + 200*(ego_des_input[1] - ego_u[1])**2)
+                objective = cp.Minimize((ego_des_input[0] - ego_u[0])**2 + 150*(ego_des_input[1] - ego_u[1])**2)
                 constraints = []
                 with torch.enable_grad():
                     data = self.cbf.process_batch(current_batch)
@@ -689,26 +729,36 @@ class CBFQPController(Policy):
                     h_vals = self.cbf(data)
                     LfhA, LfhB, LghA, LghB = self.cbf.get_barrier_bits(h_vals, data)
                 h_vals = h_vals[0].cpu().detach().numpy()
-                print("h_val = ", h_vals[-1])
                 LfhA = LfhA.cpu().detach().numpy()
                 LfhB = LfhB.cpu().detach().numpy()
                 LghA = LghA.cpu().detach().numpy()
                 LghB = LghB.cpu().detach().numpy()
+                if self.test_type=="gammas": 
+                    gammas = self.gamma_net(current_batch)["gammas_A"][0,:,0,0]
+
+                relevant_hs = []
                 for i in range(len(LfhA)): 
-                    # worst case is positive 1/2 g acceleration, negative 1 g braking and 4 second u turn 
-                    sign_agent_vel = torch.sign(current_batch["states"][0,i+1,0,2]).item()
-                    if True: # Model worst case other agents 
-                        if True: # worst case other agents
-                            worst_case = [[4.5*sign_agent_vel,np.pi/4], [4.5*sign_agent_vel,-np.pi/4], [-9*sign_agent_vel,np.pi/4], [-9*sign_agent_vel,-np.pi/4]] 
-                        else: # ego_only 
-                            worst_case = [[0,0]]
-                        for input in worst_case:
-                            u_worst_case = np.array(input)
-                            constraints.append(LfhA[i] + LfhB[i] + LghA[i]@ego_u + LghB[i]@u_worst_case >= -self.cbf.alpha * h_vals[i])
-                    else: # even split decentralized
-                        constraints.append(1.0/2*(LfhA[i] + LfhB[i] + self.cbf.alpha*h_vals[i]) + LghA[i]@ego_u >= 0)
+                    # Add the constraint if within +/100 degrees
+                    if abs(current_batch["states"][0,i+1,0,3].item())<=100.0/180*np.pi: # TODO THIS SEEMS TO BE BUGGY 
+                        relevant_hs.append(i)
+                        # worst case is positive 1/2 g acceleration, negative 1 g braking and 4 second u turn 
+                        sign_agent_vel = torch.sign(current_batch["states"][0,i+1,0,2]).item()
+                        if self.test_type == "worst_case": # Model worst case other agents 
+                            if self.test_type == "worst_case": # worst case other agents
+                                worst_case = [[4.5*sign_agent_vel,np.pi/4], [4.5*sign_agent_vel,-np.pi/4], [-9*sign_agent_vel,np.pi/4], [-9*sign_agent_vel,-np.pi/4]] 
+                            else: # ego_only 
+                                worst_case = [[0,0]]
+                            for input in worst_case:
+                                u_worst_case = np.array(input)
+                                constraints.append(LfhA[i] + LfhB[i] + LghA[i]@ego_u + LghB[i]@u_worst_case >= -self.cbf.alpha * h_vals[i])
+                        elif self.test_type == "even_split":  # even split decentralized
+                            constraints.append(1.0/2*(LfhA[i] + LfhB[i] + self.cbf.alpha*h_vals[i]) + LghA[i]@ego_u >= 0)
+                        elif self.test_type == "gammas": 
+                            constraints.append(1.0/2*(LghA[i] + LfhB[i] + self.cbf.alpha*h_vals[i])  + LghA[i]@ego_u >= gammas[i].item())
+                        else: 
+                            raise Exception("please select a valid constraint type")
 
-
+                print("h_val = ", np.min(h_vals[relevant_hs]))
                 sign_ego_vel = torch.sign(current_batch["states"][0,0,0,2]).item()
                 prob = cp.Problem(objective, constraints)
                 try:
@@ -718,16 +768,18 @@ class CBFQPController(Policy):
                     else: 
                         print(prob.status)
                         ego_safe_input = np.array([-sign_ego_vel*9,0])
+                        feas_flag = False
                 except:
                     ego_safe_input = np.array([-sign_ego_vel*9,0])
-                
+                    feas_flag = False
+
                 #saturate: 
                 if ego_safe_input[0] >=9: ego_safe_input[0] = 9
                 if ego_safe_input[0] <=-9: ego_safe_input[0] = -9
                 if ego_safe_input[1] >= np.pi/4: ego_safe_input[1] = np.pi/4
                 if ego_safe_input[1] <= -np.pi/4: ego_safe_input[1] = -np.pi/4
 
-                print("des: ", ego_des_input, "\t safe: ", ego_safe_input, "\t norm: ", np.linalg.norm(ego_des_input-ego_safe_input))
+                # print("des: ", ego_des_input, "\t safe: ", ego_safe_input, "\t norm: ", np.linalg.norm(ego_des_input-ego_safe_input))
                 coarse_batch["states"][0,0,t_step+1,:] = torch.tensor([
                     coarse_batch["states"][0,0,t_step,0] + coarse_batch["states"][0,0,t_step,2]*torch.cos(coarse_batch["states"][0,0,t_step,3])*dt, 
                     coarse_batch["states"][0,0,t_step,1] + coarse_batch["states"][0,0,t_step,2]*torch.sin(coarse_batch["states"][0,0,t_step,3])*dt, 
@@ -750,7 +802,7 @@ class CBFQPController(Policy):
                 plan[0,i+1,3]  =  plan[0,i,3] + safe_inputs[i+1][1]*dt  
 
         action = Action(positions=plan[...,:2], yaws=plan[...,3:])
-        return action, {}
+        return action, {"feas_flag":feas_flag}
 
 
 class ModelPredictiveController(Policy):

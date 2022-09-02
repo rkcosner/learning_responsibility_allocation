@@ -95,9 +95,9 @@ def random_placing_neighbors(simscene,num_neighbors,coll_check=True):
 
 def infront_placing_neighbors(simscene,coll_check=True):
     
-    offset_x = 6.0
+    offset_x = 12.0
     offset_y = 0.1
-    vel = 4 
+    vel = 6 
     T = 10
 
     dt = simscene.scene.dt
@@ -332,7 +332,8 @@ def rollout_episodes(
 
             with timers.timed("network"):
                 action = policy.get_action(obs_torch, step_index=counter)
-
+                feas_flag = action.agents_info["feas_flag"]
+                action.agents_info.pop("feas_flag",None)
             if False: #  counter < skip_first_n: RYAN TODO, removed so I can force agent states
                 # use GT action for the first N steps to warm up environment state (velocity, etc.)
                 gt_action = env.get_gt_action(obs)
@@ -352,9 +353,12 @@ def rollout_episodes(
                 step_since_last_update += n_step_action
             timers.toc("step")
             # print(timers)
+            if feas_flag == False or env.is_done(): 
+                done = True 
+                if feas_flag == False: 
+                    print("Rollout Ended due to Encountered Infeasibility")
 
-            done = env.is_done()
-            
+
             if horizon is not None and counter >= horizon:
                 break
         # metrics = env.get_metrics()

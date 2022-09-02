@@ -24,7 +24,7 @@ from tbsim.utils.geometry_utils import (
 
 from tbsim.safety_funcs.debug_utils import * 
 
-type_names = ["HierAgentAwareCBFQP", "HierAgentAwareCBFQP_split_responsibility", "HierAgentAwareCBFQP_fullresp_worst_case"]
+type_names = ["HierAgentAwareCBFQP_split_responsibility"]#["HierAgentAwareCBFQP", "HierAgentAwareCBFQP_split_responsibility", "HierAgentAwareCBFQP_fullresp_worst_case"]
 
 if __name__=="__main__": 
     for type_name in type_names:
@@ -109,7 +109,10 @@ if __name__=="__main__":
                 A = extent.shape[0]
                 plt.figure()
                 for i in range(A-1): 
-                    plt.plot(h_vals[:,i])
+                    if i < A-2: 
+                        plt.plot(h_vals[:,i], 'k')
+                    else: 
+                        plt.plot(h_vals[:,i], 'b')
                 plt.savefig("./closed_loop_plots/" +type_name +  scene_name+"h_vals.png")
                 plt.close()
 
@@ -118,5 +121,5 @@ if __name__=="__main__":
                     plt.plot(centroid[i,:,0], centroid[i,:,1])
                 plt.savefig("./closed_loop_plots/" + type_name + scene_name+"trajectories.png")
                 plt.close()
-                
+
         print("Done")

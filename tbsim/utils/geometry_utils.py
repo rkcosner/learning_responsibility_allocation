@@ -191,7 +191,7 @@ def VEH_VEH_distance(p1, p2, S1, S2, offsetX=0, offsetY=0):
             d3[...,i+4*j] = torch.linalg.norm(corners1[...,i,:] - corners2[...,j,:], axis=-1)
     # Get and return the minimum of all the calculated distances
     dists = torch.cat((d1,d2,d3), axis = -1)
-    dists = dists.amin(-1)
+    dists = dists.amin(-1) # maybe try replacing with softmin later
 
     return dists 
 

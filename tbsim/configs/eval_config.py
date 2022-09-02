@@ -13,7 +13,7 @@ class EvaluationConfig(Dict):
         self.eval_class = ""
         self.seed = 0
         self.num_scenes_per_batch = 1
-        self.num_scenes_to_evaluate = 1
+        self.num_scenes_to_evaluate = 10
 
         self.num_episode_repeats = 1
         self.start_frame_index_each_episode = None  # if specified, should be the same length as num_episode_repeats
@@ -80,7 +80,7 @@ class EvaluationConfig(Dict):
         self.cvae.rolling_horizon = [5,10,20]
 
         self.nusc.eval_scenes = np.arange(100).tolist() # where scene choice is made
-        self.nusc.n_step_action = 5
+        self.nusc.n_step_action = 10 # Set to 1 to find gammas, otherwise choose whatever
         self.nusc.num_simulation_steps = 100
         self.nusc.skip_first_n = 0
 

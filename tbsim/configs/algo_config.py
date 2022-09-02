@@ -40,7 +40,7 @@ class ResponsibilityConfig(AlgoConfig):
         # self.loss_weights.yaw_reg_loss = 0.1
 
 
-        self.optim_params.policy.learning_rate.initial = 1e-5  # policy learning rate
+        self.optim_params.policy.learning_rate.initial = 0.5e-5  # policy learning rate
         self.optim_params.policy.learning_rate.decay_factor = (
             0.1  # factor to decay LR by (if epoch schedule non-empty)
         )
@@ -50,12 +50,12 @@ class ResponsibilityConfig(AlgoConfig):
         self.optim_params.policy.regularization.L2 = 0.00  # L2 regularization strength
 
         self.cbf.type = "backup_barrier_cbf"
-        self.cbf.T_horizon = 4
-        self.cbf.alpha = 1
-        self.cbf.veh_veh = False#True
+        self.cbf.T_horizon = 1
+        self.cbf.alpha = 2
+        self.cbf.veh_veh = True#True
         self.cbf.normalize_constraint = False
         self.cbf.saturate_cbf = True
-        self.cbf.backup_controller_type = "brake" # or "idle"
+        self.cbf.backup_controller_type = "idle" # or "idle"
 
         self.scene_centric = True
 
