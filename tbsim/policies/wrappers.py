@@ -221,10 +221,11 @@ class Pos2YawWrapper(object):
 
     def get_action(self, obs, **kwargs):
         action, action_info = self.policy.get_action(obs, **kwargs)
-        curr_pos = torch.zeros_like(action.positions[..., [0], :])
-        pos_seq = torch.cat((curr_pos, action.positions), dim=-2)
-        yaws = yaw_from_pos(pos_seq, dt=self._dt, yaw_correction_speed=self._yaw_correction_speed)
-        action.yaws = yaws
+        # TODO WHY ARE WE OVERWRITING THE YAWS!!?!?!?!?s
+        # curr_pos = torch.zeros_like(action.positions[..., [0], :])
+        # pos_seq = torch.cat((curr_pos, action.positions), dim=-2)
+        # yaws = yaw_from_pos(pos_seq, dt=self._dt, yaw_correction_speed=self._yaw_correction_speed)
+        # action.yaws = yaws
         return action, action_info
 
 
@@ -260,7 +261,6 @@ class RolloutWrapper(object):
             with torch.no_grad():
                 agents_action, agents_action_info = self.agents_policy.get_action(
                     obs["agents"], step_index = step_index)
-
         return RolloutAction(ego_action, ego_action_info, agents_action, agents_action_info)
 
 

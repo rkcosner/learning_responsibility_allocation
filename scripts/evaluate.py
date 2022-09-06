@@ -7,6 +7,7 @@ import yaml
 import importlib
 from collections import Counter
 from pprint import pprint
+import pickle 
 
 import os
 from tbsim.utils.metrics import OrnsteinUhlenbeckPerturbation
@@ -127,11 +128,13 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
     scene_i = 0
     eval_scenes = eval_cfg.eval_scenes
     total_adjust_plan = dict()
+    cbf_data_log = dict()
+
     while scene_i < eval_cfg.num_scenes_to_evaluate:
         scene_indices = eval_scenes[scene_i: scene_i + eval_cfg.num_scenes_per_batch]
         scene_i += eval_cfg.num_scenes_per_batch
 
-        stats, info, renderings, adjust_plans = rollout_episodes(
+        stats, info, renderings, adjust_plans, cbf_data = rollout_episodes(
             env,
             rollout_policy,
             num_episodes=eval_cfg.num_episode_repeats,
@@ -145,11 +148,13 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
             horizon=eval_cfg.num_simulation_steps,
             adjust_plan_recipe=eval_cfg.adjustment.to_dict(),
         )
+        
         for ei,adjust_plan in enumerate(adjust_plans):
             for k,v in adjust_plan.items():
                 total_adjust_plan["{}_{}".format(k,ei)]=v 
 
-    
+        cbf_data_log[env.current_scene_names[0]] = cbf_data
+
 
         print(info["scene_index"])
         pprint(stats)
@@ -187,6 +192,10 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
                 h5_path=eval_cfg.experience_hdf5_path
             )
         torch.cuda.empty_cache()
+
+    with open("./" + eval_cfg.results_dir + "/run_data.pkl", 'wb') as file:  
+        pickle.dump(cbf_data_log, file)
+        
     if len(total_adjust_plan)>0:
         with open(os.path.join(eval_cfg.results_dir, "adjust_plan.json"),"w+") as fp:
             json.dump(total_adjust_plan,fp)
@@ -369,7 +378,8 @@ if __name__ == "__main__":
         cfg.env = args.env
     else:
         assert cfg.env is not None
-
+    
+    cfg.results_dir = cfg.results_dir + cfg.cbf.test_type
     cfg.experience_hdf5_path = os.path.join(cfg.results_dir, "data.hdf5")
 
     for k in cfg[cfg.env]:  # copy env-specific config to the global-level

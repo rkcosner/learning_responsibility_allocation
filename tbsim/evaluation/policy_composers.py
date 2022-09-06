@@ -526,7 +526,7 @@ class HierAgentAwareCBFQP(HierAgentAwareMPC):
         if initial_planner is None:
             initial_planner, _ = self._get_initial_planner()
         exp_cfg.env.data_generation_params.vectorize_lane = True
-        policy = CBFQPController(self.device, exp_cfg.algo.step_time, predictor)
+        policy = CBFQPController(self.device, exp_cfg.algo.step_time, predictor, exp_cfg)
         policy = CBFQPWrapper(initial_planner=initial_planner,refiner=policy,device=self.device)
         return policy, exp_cfg
 

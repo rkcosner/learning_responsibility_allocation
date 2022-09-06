@@ -7,6 +7,7 @@ from typing import Tuple, Dict
 from copy import deepcopy
 import cvxpy as cp
 import json
+import pickle
 
 from tbsim.algos.factory import algo_factory
 from tbsim.configs.algo_config import ResponsibilityConfig
@@ -526,21 +527,34 @@ class ContingencyPlanner(Policy):
         return action, action_info
 
 class CBFQPController(Policy):
-    def __init__(self, device, step_time, predictor, solver="casadi", *args, **kwargs):
+    def __init__(self, device, step_time, predictor, exp_cfg, solver="casadi", *args, **kwargs):
         super().__init__(device, *args, **kwargs)
         self.device = device
         self.step_time = step_time
         self.predictor = predictor
         self.solver=solver
-        self.cbf = BackupBarrierCBF(T_horizon=1, alpha=2, veh_veh=True, saturate_cbf=True, backup_controller_type="idle")
-        self.firstStep = True
-        self.ego_vel = 7 
+        self.cbf = BackupBarrierCBF(
+            T_horizon=exp_cfg["eval"]["cbf"]["T_horizon"], 
+            alpha=exp_cfg["eval"]["cbf"]["alpha"], 
+            veh_veh=exp_cfg["eval"]["cbf"]["veh_veh"], 
+            saturate_cbf=exp_cfg["eval"]["cbf"]["saturate_cbf"], 
+            backup_controller_type=exp_cfg["eval"]["cbf"]["backup_controller_type"]
+        )
+        self.angle_max_diff =  exp_cfg["eval"]["cbf"]["angle_max_diff"]
+        self.saturate = exp_cfg["eval"]["cbf"]["saturate_inputs"]
+        self.n_step_action = exp_cfg["eval"]["nusc"]["n_step_action"]
+        self.test_type = exp_cfg["eval"]["cbf"]["test_type"]
 
+        self.data_logging = {
+            "safe_inputs" : [],
+            "des_inputs"  : [],
+            "gammas"      : [],
+            "h_vals"      : [], 
+        }
 
         # Load Gamma Model
-        self.test_type = "worst_case"#"gammas"#"gammas" # "worst_case", "even_split"        
         if self.test_type == "gammas":
-            file = open("/home/rkcosner/Documents/tbsim/checkpoints/idling_checkpoint/run7/config.json")
+            file = open("/home/rkcosner/Documents/tbsim/checkpoints/idling_checkpoint/run10/run0/config.json")
             algo_cfg = AlgoConfig()
             algo_cfg.algo = ResponsibilityConfig()
             external_algo_cfg = json.load(file)
@@ -549,7 +563,7 @@ class CBFQPController(Policy):
             device = "device" 
             modality_shapes = dict()
             gamma_algo = algo_factory(algo_cfg, modality_shapes)
-            checkpoint_path = "/home/rkcosner/Documents/tbsim/checkpoints/idling_checkpoint/run7/iter9000_ep1_valLoss0.00.ckpt"
+            checkpoint_path = "/home/rkcosner/Documents/tbsim/checkpoints/idling_checkpoint/run10/run0/checkpoints/iter9000_ep1_valLoss0.00.ckpt"
             checkpoint = torch.load(checkpoint_path)
             gamma_algo.load_state_dict(checkpoint["state_dict"])
             self.gamma_net = gamma_algo.nets["policy"].cuda()
@@ -559,7 +573,7 @@ class CBFQPController(Policy):
         self.predictor.eval()
     
     def get_action(self, obs_dict, **kwargs):
-        num_steps_to_act_on = 5
+        num_steps_to_act_on = self.n_step_action
         dt = obs_dict["dt"][0].item()
 
         # Is there a coarse plan? 
@@ -574,235 +588,224 @@ class CBFQPController(Policy):
             xref = None
         
 
+        # Get Global States for each agent
         states = []
-        if False: # Set Up Sim 
-            self.firstStep = False
-            ego_yaw = obs_dict["curr_agent_state"][0, -1]
-            ego_pos = obs_dict["curr_agent_state"][0, :2]
-            ego_vel = obs_dict["curr_speed"][0]
-            agent_yaw = obs_dict["curr_agent_state"][1, -1]
-            agent_pos = obs_dict["curr_agent_state"][1, :2]
-            agent_vel = obs_dict["curr_speed"][1]
+        for idx in range(xref.shape[0]):
+            state_veh_idx = []
+            curr_yaw = obs_dict["curr_agent_state"][idx, -1]
+            curr_pos = obs_dict["curr_agent_state"][idx, :2]
+            curr_vel = obs_dict["curr_speed"][idx]
 
-            dist = 0
-
-            from_agent_to_ego = [dist*torch.cos(ego_yaw)+ego_pos[0] - agent_pos[0], dist*torch.sin(ego_yaw)+ego_pos[1] - agent_pos[1], ego_yaw  - agent_yaw]
-
-            agent_from_ego = torch.tensor(
-                        [
-                            [torch.cos(agent_yaw - ego_yaw), torch.sin(agent_yaw - ego_yaw)],
-                            [-torch.sin(agent_yaw - ego_yaw), torch.cos(agent_yaw - ego_yaw)],
-                        ], 
-                        device = xref.device
-                    )
-
-            diff_agent_ref = agent_from_ego @ torch.tensor(from_agent_to_ego[0:2], device = xref.device)
-
-            plan = 0 * xref 
-            plan[1,:,0:2] = diff_agent_ref
-            # plan[1,:,2] = ego_vel
-            # plan[1,:,3] = ego_yaw - agent_yaw
-            print(plan[1,0,:])
-            print(ego_pos)
-            print(agent_pos)
-
-            action = Action(positions=plan[...,:2], yaws=plan[...,3:])
-            return action, {}
-
-
-        else: # Run Sim 
-            for idx in range(xref.shape[0]):
-                state_veh_idx = []
-                curr_yaw = obs_dict["curr_agent_state"][idx, -1]
-                curr_pos = obs_dict["curr_agent_state"][idx, :2]
-                curr_vel = obs_dict["curr_speed"][idx]
-
-                # Default Ego Controller
-                time_steps = torch.linspace(1,20,20, device = curr_pos.device)
-                if idx == 0 : 
-                    v_des = 10
+            # Set Desired Ego Controller
+            time_steps = torch.linspace(1,20,20, device = curr_pos.device)
+            if idx == 0 : 
+                v_des = 10
+                vs = torch.linspace(curr_vel.item()+(v_des-curr_vel.item())/20 ,v_des,20, device = curr_pos.device)
+                # thetas = torch.linspace((obs_dict["curr_agent_state"][2, -1]-curr_yaw.item())/20, obs_dict["curr_agent_state"][2, -1]-curr_yaw.item(), 20, device = curr_pos.device ) # track heading of forward vehicle
+                xs = []
+                for i in range(20): 
+                    xs.append(sum(vs[0:i+1])*dt)
+                xs = torch.tensor(xs)
+                xref[0,:,0] =  xs
+                xref[0,:,1] = 0
+                xref[0,:,2] = vs
+                xref[0,:,3] = 0
+            elif idx == xref.shape[0]-1: 
+                # default other agent
+                if True:
+                    v_des = 5
+                    v = curr_vel.item()
                     vs = torch.linspace(curr_vel.item()+(v_des-curr_vel.item())/20 ,v_des,20, device = curr_pos.device)
-                    # thetas = torch.linspace((obs_dict["curr_agent_state"][2, -1]-curr_yaw.item())/20, obs_dict["curr_agent_state"][2, -1]-curr_yaw.item(), 20, device = curr_pos.device ) # track heading of forward vehicle
+                    # vs = v*torch.ones(20, device = curr_pos.device)
                     xs = []
                     for i in range(20): 
                         xs.append(sum(vs[0:i+1])*dt)
                     xs = torch.tensor(xs)
-                    xref[0,:,0] =  xs
-                    xref[0,:,1] = 0
-                    xref[0,:,2] = vs
-                    xref[0,:,3] = 0
-                elif idx == xref.shape[0]-1: 
-                    # default other agent
-                    if True:
-                        v = curr_vel.item()
-                        vs = v*torch.ones(20, device = curr_pos.device)
-                        xs = []
-                        for i in range(20): 
-                            xs.append(sum(vs[0:i+1])*dt)
-                        xs = torch.tensor(xs)
-                        xref[idx,:,0] = xs
-                        xref[idx,:,1] = 0
-                        xref[idx,:,2] = vs
-                        xref[idx,:,3] = 0
-                        self.firstStep=False
-                    else: 
-                        v_des = 0
-                        vs = torch.linspace(curr_vel.item()+(v_des-curr_vel.item())/20 ,v_des,20, device = curr_pos.device)
-                        xs = []
-                        for i in range(20): 
-                            xs.append(sum(vs[0:i+1])*dt)
-                        xs = torch.tensor(xs)
-                        xref[0,:,0] =  xs
-                        xref[0,:,1] = 0
-                        xref[0,:,2] = vs
-                        xref[0,:,3] = 0
+                    xref[idx,:,0] = xs
+                    xref[idx,:,1] = 0
+                    xref[idx,:,2] = vs
+                    xref[idx,:,3] = 0
+                    self.firstStep=False
 
-                # Get current state and rotation matrix
-                curr_state = curr_pos.tolist()
-                curr_state.append(curr_vel.item())
-                curr_state.append(curr_yaw.item())
-                state_veh_idx.append(curr_state)
-                world_from_agent = torch.tensor(
-                        [
-                            [torch.cos(curr_yaw), torch.sin(curr_yaw)],
-                            [-torch.sin(curr_yaw), torch.cos(curr_yaw)],
-                        ], 
-                        device = xref.device
-                    )
-                for t_step in range(xref.shape[1]): 
-                    next_state = torch.zeros(4)
-                    next_state[:2] = coarse_plan.positions[idx, t_step] @ world_from_agent + curr_pos
-                    next_state[2] = curr_vel + xref[idx, t_step,2]
-                    next_state[3] = curr_yaw + coarse_plan.yaws[idx, t_step, 0]
-                    state_veh_idx.append(next_state.tolist())
-                states.append(state_veh_idx)
-            
-            states = torch.tensor(states)
-            coarse_batch = {
-                "states" : states[None,...], 
+            # Get current state and rotation matrix
+            curr_state = curr_pos.tolist()
+            curr_state.append(curr_vel.item())
+            curr_state.append(curr_yaw.item())
+            state_veh_idx.append(curr_state)
+            world_from_agent = torch.tensor(
+                    [
+                        [torch.cos(curr_yaw), torch.sin(curr_yaw)],
+                        [-torch.sin(curr_yaw), torch.cos(curr_yaw)],
+                    ], 
+                    device = xref.device
+                )
+            for t_step in range(xref.shape[1]): 
+                next_state = torch.zeros(4)
+                next_state[:2] = coarse_plan.positions[idx, t_step] @ world_from_agent + curr_pos
+                next_state[2] = curr_vel + xref[idx, t_step,2]
+                next_state[3] = curr_yaw + coarse_plan.yaws[idx, t_step, 0]
+                state_veh_idx.append(next_state.tolist())
+            states.append(state_veh_idx)
+        
+        states = torch.tensor(states)
+        coarse_batch = {
+            "states" : states[None,...], 
+            "extent" : obs_dict["extent"][None,...], 
+            "dt"     : obs_dict["dt"],
+        }
+
+        # Determine Ego's Desired Inputs
+        yaw_rate = [xref[0,0,3].item()]
+        for i in range(1, xref.shape[1]): yaw_rate.append((xref[0,i,3] - xref[0,i-1,3] ).item())
+        yaw_rate = torch.tensor(yaw_rate)/dt
+        accel = [xref[0,0,2]-obs_dict["curr_speed"][0]]
+        for i in range(1, xref.shape[1]): accel.append((xref[0,i,2] - xref[0,i-1,2] ).item())
+        accel = torch.tensor(accel)/dt
+
+
+
+        # Get ego-centered states
+        ego_centered_states = coarse_batch["states"].clone()
+        ego_centered_states[:,:,:,[0,1]] -= ego_centered_states[0,0,0,[0,1]]
+        ego_yaw = ego_centered_states[0,0,0,3].item()
+        ego_centered_states[:,:,:,3] -= ego_yaw
+        R = torch.tensor([[np.cos(-ego_yaw), -np.sin(-ego_yaw)],[np.sin(-ego_yaw), np.cos(-ego_yaw)]], dtype=torch.float)
+        A = ego_centered_states.shape[1]
+        T = ego_centered_states.shape[2]
+        for i in range(A): 
+            for j in range(T): 
+                ego_centered_states[0,i,j,[0,1]] = R@ego_centered_states[0,i,j,[0,1]]
+        ego_centered_states[:,:,:,3]
+ 
+
+        # For each time step solve the CBFQP to find safe inputs
+        safe_inputs = []
+        feas_flag = True
+        for t_step in range(num_steps_to_act_on): # TODO: figure out where this variable is coming from and point it here
+            # Get Current Batch 
+            current_batch ={
+                "states" : ego_centered_states[...,t_step:t_step+1,:].to(coarse_batch["extent"].device), #(coarse_batch["states"][...,t_step:t_step+1,:]).to(coarse_batch["extent"].device),  # Ego Centered State 
                 "extent" : obs_dict["extent"][None,...], 
-                "dt"     : obs_dict["dt"],
+                "dt"     : obs_dict["dt"], 
+                "image"  : obs_dict["image"][None,:,-8:,:,:], 
+                "agents_from_center" : obs_dict["agent_from_world"][None, ...] # This is a dummy value since we're only using gamma for agent A
             }
 
-            yaw_rate = [xref[0,0,3].item()]
-            for i in range(1, xref.shape[1]): yaw_rate.append((xref[0,i,3] - xref[0,i-1,3] ).item())
-            yaw_rate = torch.tensor(yaw_rate)/dt
+            # Set up problem 
+            ego_u = cp.Variable(2)
+            ego_des_input = np.array([accel[t_step], yaw_rate[t_step]])
+            objective = cp.Minimize((ego_des_input[0] - ego_u[0])**2 + 10*(ego_des_input[1] - ego_u[1])**2)
+            constraints = []
+            with torch.enable_grad():
+                data = self.cbf.process_batch(current_batch)
+                data.requires_grad_()
+                h_vals = self.cbf(data)
+                LfhA, LfhB, LghA, LghB = self.cbf.get_barrier_bits(h_vals, data)
+            h_vals = h_vals[0].cpu().detach().numpy()
+            LfhA = LfhA.cpu().detach().numpy()
+            LfhB = LfhB.cpu().detach().numpy()
+            LghA = LghA.cpu().detach().numpy()
+            LghB = LghB.cpu().detach().numpy()
+            if self.test_type=="gammas": 
+                gammas = self.gamma_net(current_batch)["gammas_A"][0,:,0,0]
 
-            accel = [xref[0,0,2]-obs_dict["curr_speed"][0]]
-            for i in range(1, xref.shape[1]): accel.append((xref[0,i,2] - xref[0,i-1,2] ).item())
-            accel = torch.tensor(accel)/dt
 
-            # Build CBFQP for n time steps
-            safe_inputs = []
-            feas_flag = True
-    
-            # Get ego-centered states
-            ego_centered_states = coarse_batch["states"].clone()
-            ego_centered_states[:,:,:,[0,1]] -= ego_centered_states[0,0,0,[0,1]]
-            ego_yaw = ego_centered_states[0,0,0,3].item()
-            ego_centered_states[:,:,:,3] -= ego_yaw
-            R = torch.tensor([[np.cos(-ego_yaw), -np.sin(-ego_yaw)],[np.sin(-ego_yaw), np.cos(-ego_yaw)]], dtype=torch.float)
-            A = ego_centered_states.shape[1]
-            T = ego_centered_states.shape[2]
-            for i in range(A): 
-                for j in range(T): 
-                    ego_centered_states[0,i,j,[0,1]] = R@ego_centered_states[0,i,j,[0,1]]
-            ego_centered_states[:,:,:,3]
+            # Add Constraints
+            relevant_hs = []
+            gamma_log = []
+            h_log = []
+            for i in range(len(LfhA)): 
+                h_log.append(np.NaN)
+                if abs(current_batch["states"][0,i+1,0,3].item())<=self.angle_max_diff:
+                    relevant_hs.append(i)
+                    sign_agent_vel = torch.sign(current_batch["states"][0,i+1,0,2]).item()
+                    h_log[-1] = h_vals[i]
 
-            for t_step in range(num_steps_to_act_on): # TODO: figure out where this variable is coming from and point it here
-                # Current Batch 
-                current_batch ={
-                    "states" : ego_centered_states[...,t_step:t_step+1,:].to(coarse_batch["extent"].device), #(coarse_batch["states"][...,t_step:t_step+1,:]).to(coarse_batch["extent"].device),  # Ego Centered State 
-                    "extent" : obs_dict["extent"][None,...], 
-                    "dt"     : obs_dict["dt"], 
-                    "image"  : obs_dict["image"][None,:,-8:,:,:], 
-                    "agents_from_center" : obs_dict["agent_from_world"][None, ...] # This is a dummy value since we're only using gamma for agent A
-                }
-                # Set up problem 
-                ego_u = cp.Variable(2)
-                ego_des_input = np.array([accel[t_step], yaw_rate[t_step]])
-                objective = cp.Minimize((ego_des_input[0] - ego_u[0])**2 + 150*(ego_des_input[1] - ego_u[1])**2)
-                constraints = []
-                with torch.enable_grad():
-                    data = self.cbf.process_batch(current_batch)
-                    data.requires_grad_()
-                    h_vals = self.cbf(data)
-                    LfhA, LfhB, LghA, LghB = self.cbf.get_barrier_bits(h_vals, data)
-                h_vals = h_vals[0].cpu().detach().numpy()
-                LfhA = LfhA.cpu().detach().numpy()
-                LfhB = LfhB.cpu().detach().numpy()
-                LghA = LghA.cpu().detach().numpy()
-                LghB = LghB.cpu().detach().numpy()
-                if self.test_type=="gammas": 
-                    gammas = self.gamma_net(current_batch)["gammas_A"][0,:,0,0]
-
-                relevant_hs = []
-                for i in range(len(LfhA)): 
-                    # Add the constraint if within +/100 degrees
-                    if abs(current_batch["states"][0,i+1,0,3].item())<=100.0/180*np.pi: # TODO THIS SEEMS TO BE BUGGY 
-                        relevant_hs.append(i)
-                        # worst case is positive 1/2 g acceleration, negative 1 g braking and 4 second u turn 
-                        sign_agent_vel = torch.sign(current_batch["states"][0,i+1,0,2]).item()
-                        if self.test_type == "worst_case": # Model worst case other agents 
-                            if self.test_type == "worst_case": # worst case other agents
-                                worst_case = [[4.5*sign_agent_vel,np.pi/4], [4.5*sign_agent_vel,-np.pi/4], [-9*sign_agent_vel,np.pi/4], [-9*sign_agent_vel,-np.pi/4]] 
-                            else: # ego_only 
-                                worst_case = [[0,0]]
-                            for input in worst_case:
-                                u_worst_case = np.array(input)
-                                constraints.append(LfhA[i] + LfhB[i] + LghA[i]@ego_u + LghB[i]@u_worst_case >= -self.cbf.alpha * h_vals[i])
-                        elif self.test_type == "even_split":  # even split decentralized
-                            constraints.append(1.0/2*(LfhA[i] + LfhB[i] + self.cbf.alpha*h_vals[i]) + LghA[i]@ego_u >= 0)
-                        elif self.test_type == "gammas": 
-                            constraints.append(1.0/2*(LghA[i] + LfhB[i] + self.cbf.alpha*h_vals[i])  + LghA[i]@ego_u >= gammas[i].item())
-                        else: 
-                            raise Exception("please select a valid constraint type")
-
-                print("h_val = ", np.min(h_vals[relevant_hs]))
-                sign_ego_vel = torch.sign(current_batch["states"][0,0,0,2]).item()
-                prob = cp.Problem(objective, constraints)
-                try:
-                    result = prob.solve()
-                    if prob.status == "optimal" or prob.status == "optimal_inaccurate": 
-                        ego_safe_input = ego_u.value
+                    # Model worst case other agents
+                    if self.test_type == "worst_case":  
+                        worst_case = [[9,np.pi/4], [9,-np.pi/4], [-9,np.pi/4], [-9,-np.pi/4]] 
+                        for input in worst_case:
+                            u_worst_case = np.array(input)
+                            constraints.append(LfhA[i] + LfhB[i] + LghA[i]@ego_u + LghB[i]@u_worst_case >= -self.cbf.alpha * h_vals[i])                   
+                    # Even split decentralized
+                    elif self.test_type == "even_split": 
+                        constraints.append(1.0/2*(LfhA[i] + LfhB[i] + self.cbf.alpha*h_vals[i]) + LghA[i]@ego_u >= 0)
+                    # Use responsibility gammas
+                    elif self.test_type == "gammas": 
+                        print("gamma = ", gammas[i].item())
+                        gamma_log.append(gammas[i].item())
+                        h_log.append(h_vals[i].item())
+                        constraints.append(1.0/2*(LfhA[i] + LfhB[i] + self.cbf.alpha*h_vals[i])  + LghA[i]@ego_u >= gammas[i].item())
                     else: 
-                        print(prob.status)
-                        ego_safe_input = np.array([-sign_ego_vel*9,0])
-                        feas_flag = False
-                except:
+                        raise Exception("please select a valid constraint type")
+            
+            self.data_logging["h_vals"].append(h_log)
+            if self.test_type == "gammas": 
+                self.data_logging["gammas"].append(gamma_log)
+
+            if len(relevant_hs)>0: 
+                print("h_val = ", np.min(h_vals[relevant_hs]))
+            sign_ego_vel = torch.sign(current_batch["states"][0,0,0,2]).item()
+            prob = cp.Problem(objective, constraints)
+
+            # Try Solving the CBF-QP 
+            try:
+                result = prob.solve()
+                if prob.status == "optimal" or prob.status == "optimal_inaccurate": 
+                    ego_safe_input = ego_u.value
+                else: 
+                    print(prob.status)
                     ego_safe_input = np.array([-sign_ego_vel*9,0])
                     feas_flag = False
+            except:
+                ego_safe_input = np.array([-sign_ego_vel*9,0])
+                feas_flag = False
 
-                #saturate: 
+            # Saturate Inputs
+            if self.saturate:
                 if ego_safe_input[0] >=9: ego_safe_input[0] = 9
                 if ego_safe_input[0] <=-9: ego_safe_input[0] = -9
                 if ego_safe_input[1] >= np.pi/4: ego_safe_input[1] = np.pi/4
                 if ego_safe_input[1] <= -np.pi/4: ego_safe_input[1] = -np.pi/4
 
-                # print("des: ", ego_des_input, "\t safe: ", ego_safe_input, "\t norm: ", np.linalg.norm(ego_des_input-ego_safe_input))
-                coarse_batch["states"][0,0,t_step+1,:] = torch.tensor([
-                    coarse_batch["states"][0,0,t_step,0] + coarse_batch["states"][0,0,t_step,2]*torch.cos(coarse_batch["states"][0,0,t_step,3])*dt, 
-                    coarse_batch["states"][0,0,t_step,1] + coarse_batch["states"][0,0,t_step,2]*torch.sin(coarse_batch["states"][0,0,t_step,3])*dt, 
-                    coarse_batch["states"][0,0,t_step,2] + ego_safe_input[0]*dt, 
-                    coarse_batch["states"][0,0,t_step,3] + ego_safe_input[1]*dt   
-                ])
-                safe_inputs.append(ego_safe_input)
+            print("des: ", ego_des_input, "\t safe: ", ego_safe_input, "\t norm: ", np.linalg.norm(ego_des_input-ego_safe_input))
+            coarse_batch["states"][0,0,t_step+1,:] = torch.tensor([
+                coarse_batch["states"][0,0,t_step,0] + coarse_batch["states"][0,0,t_step,2]*torch.cos(coarse_batch["states"][0,0,t_step,3])*dt, 
+                coarse_batch["states"][0,0,t_step,1] + coarse_batch["states"][0,0,t_step,2]*torch.sin(coarse_batch["states"][0,0,t_step,3])*dt, 
+                coarse_batch["states"][0,0,t_step,2] + ego_safe_input[0]*dt, 
+                coarse_batch["states"][0,0,t_step,3] + ego_safe_input[1]*dt   
+            ])
+            safe_inputs.append(ego_safe_input)
 
-            plan = xref.clone()
-            v = states[0,0,2]
-            theta = 0 
-            plan[0,0,0] =     v*np.cos(theta)*dt      
-            plan[0,0,1] =     v*np.sin(theta)*dt      
-            plan[0,0,2] = v + safe_inputs[0][0]*dt
-            plan[0,0,3] =     safe_inputs[0][1]*dt
-            for i in range(num_steps_to_act_on-1): 
-                plan[0,i+1,0]  =  plan[0,i,0] + plan[0,i,2]*torch.cos(plan[0,i,3])*dt      
-                plan[0,i+1,1]  =  plan[0,i,1] + plan[0,i,2]*torch.sin(plan[0,i,3])*dt      
-                plan[0,i+1,2]  =  plan[0,i,2] + safe_inputs[i+1][0]*dt
-                plan[0,i+1,3]  =  plan[0,i,3] + safe_inputs[i+1][1]*dt  
-
+        plan = xref.clone()
+        v = states[0,0,2]
+        theta = 0 
+        plan[0,0,0] =     v*np.cos(theta)*dt      
+        plan[0,0,1] =     v*np.sin(theta)*dt      
+        plan[0,0,2] = v + safe_inputs[0][0]*dt
+        plan[0,0,3] =     safe_inputs[0][1]*dt
+        for i in range(num_steps_to_act_on-1): 
+            plan[0,i+1,0]  =  plan[0,i,0] + plan[0,i,2]*torch.cos(plan[0,i,3])*dt      
+            plan[0,i+1,1]  =  plan[0,i,1] + plan[0,i,2]*torch.sin(plan[0,i,3])*dt      
+            plan[0,i+1,2]  =  plan[0,i,2] + safe_inputs[i+1][0]*dt
+            plan[0,i+1,3]  =  plan[0,i,3] + safe_inputs[i+1][1]*dt  
         action = Action(positions=plan[...,:2], yaws=plan[...,3:])
+
+        self.data_logging["safe_inputs"].append(safe_inputs[0].tolist())
+        self.data_logging["des_inputs"].append(ego_des_input[0].tolist())
+
         return action, {"feas_flag":feas_flag}
+
+    def get_data_log(self): 
+        return self.data_logging
+    
+    def clear_data_log(self): 
+        self.data_logging = {
+            "safe_inputs" : [],
+            "des_inputs"  : [],
+            "gammas"      : [],
+            "h_vals"      : [], 
+        }
 
 
 class ModelPredictiveController(Policy):

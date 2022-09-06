@@ -95,9 +95,9 @@ def random_placing_neighbors(simscene,num_neighbors,coll_check=True):
 
 def infront_placing_neighbors(simscene,coll_check=True):
     
-    offset_x = 12.0
-    offset_y = 0.1
-    vel = 6 
+    offset_x = 10.45
+    offset_y = 0
+    vel = 9
     T = 10
 
     dt = simscene.scene.dt
@@ -271,12 +271,12 @@ def rollout_episodes(
     if start_frame_index_each_episode is not None:
         assert len(start_frame_index_each_episode) == num_episodes
 
+
     for ei in range(num_episodes):
         if start_frame_index_each_episode is not None:
             start_frame_index = start_frame_index_each_episode[ei]
         else:
             start_frame_index = None
-        
         env.reset(scene_indices=scene_indices, start_frame_index=start_frame_index)
 
         # RYAN : Add agent in front
@@ -304,8 +304,9 @@ def rollout_episodes(
         if seed_each_episode is not None:
             env.update_random_seed(seed_each_episode[ei])
 
-        adjust_plan = infront_initial_adjust_plan(env, adjust_plan_recipe)
-        env.adjust_scene(adjust_plan)
+        if True:
+            adjust_plan = infront_initial_adjust_plan(env, adjust_plan_recipe)
+            env.adjust_scene(adjust_plan)
 
         done = env.is_done()
         counter = 0
@@ -355,6 +356,8 @@ def rollout_episodes(
             # print(timers)
             if feas_flag == False or env.is_done(): 
                 done = True 
+                cbf_data_log = policy.agents_policy.policy.refiner.get_data_log()
+                policy.agents_policy.policy.refiner.clear_data_log()
                 if feas_flag == False: 
                     print("Rollout Ended due to Encountered Infeasibility")
 
@@ -395,7 +398,8 @@ def rollout_episodes(
     # env.reset_multi_episodes_metrics()
 
 
-    return stats, info, renderings, adjust_plans
+
+    return stats, info, renderings, adjust_plans, cbf_data_log
 
 
 class RolloutCallback(pl.Callback):
