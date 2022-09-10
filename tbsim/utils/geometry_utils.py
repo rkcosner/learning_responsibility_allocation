@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from tbsim.utils.tensor_utils import round_2pi
 from enum import IntEnum
+softmin = torch.nn.Softmin(dim = -1)
 
 
 def get_box_agent_coords(pos, yaw, extent):
@@ -191,7 +192,10 @@ def VEH_VEH_distance(p1, p2, S1, S2, offsetX=0, offsetY=0):
             d3[...,i+4*j] = torch.linalg.norm(corners1[...,i,:] - corners2[...,j,:], axis=-1)
     # Get and return the minimum of all the calculated distances
     dists = torch.cat((d1,d2,d3), axis = -1)
-    dists = dists.amin(-1) # maybe try replacing with softmin later
+    softmin_idx = softmin(dists)
+    dists[torch.where(dists==torch.inf)] = 0 
+    dists = (dists*softmin_idx).sum(dim=-1) # switched to softmin to ensure gradient
+    # dists = dists.amin(-1) # maybe try replacing with softmin later
 
     return dists 
 

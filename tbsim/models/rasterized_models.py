@@ -140,13 +140,12 @@ class RasterizedResponsibilityModel(nn.Module):
         gamma_B = gamma_preds["gammas_B"]
         gamma_preds["gammas_A"] = torch.squeeze(gamma_A[ii,jj,:,:])
         gamma_preds["gammas_B"] = torch.squeeze(gamma_B[ii,jj,:,:])
-
         for mask in other_masks: 
             gamma_preds["gammas_A"] = gamma_preds["gammas_A"][mask]
             gamma_preds["gammas_B"] = gamma_preds["gammas_B"][mask]
 
         # Get losses
-        loss_constraint, loss_resp_sum, _, _ = self.compute_cbf_constraint_loss(cbf, gamma_preds, batch)
+        loss_constraint, loss_resp_sum, _, _,_,_ = self.compute_cbf_constraint_loss(cbf, gamma_preds, batch)
         loss_max_likelihood = self.compute_max_likelihood_loss(gamma_preds)
         # loss_resp_sum = self.compute_resp_sum_loss(gamma_preds)
 
@@ -199,7 +198,7 @@ class RasterizedResponsibilityModel(nn.Module):
         stateB_masked = data[batch_ii,batch_jj,4:8]
         thetasA = stateA_masked[:,3]
         thetasB = stateB_masked[:,3]
-        dtheta = torch.abs(thetasA - thetasB)
+        dtheta = torch.remainder(torch.abs(thetasA - thetasB), 2* torch.pi)
         heading_mask, = torch.where(dtheta<=self.max_angle*3.14/180)
         other_masks.append(heading_mask)
 
@@ -261,12 +260,21 @@ class RasterizedResponsibilityModel(nn.Module):
         else: 
             constraint_A = natural_dynamics + LghAuA - gamma_preds["gammas_A"] 
             constraint_B = natural_dynamics + LghBuB - gamma_preds["gammas_B"] 
+            evensplit_constraint_A = natural_dynamics + LghAuA
+            evensplit_constraint_B = natural_dynamics + LghBuB
+            worstcase_LghAuA= torch.abs(LghA[:,0,0]*9) + torch.abs(LghA[:,0,1]*torch.pi/4)
+            worstcase_LghBuB= torch.abs(LghB[:,0,0]*9) + torch.abs(LghB[:,0,1]*torch.pi/4)
+            worstcase_constraint_A = natural_dynamics*2 + LghAuA - worstcase_LghBuB
+            worstcase_constraint_B = natural_dynamics*2 + LghBuB - worstcase_LghAuA
 
-        # TODO: decide leaky vs standard relu 
+
         loss_constraint  = torch.sum(torch.nn.functional.leaky_relu(-constraint_A-eps, negative_slope = leaky_relu_negative_slope)) / (1e-5 + constraint_A.shape[0])
         loss_constraint += torch.sum(torch.nn.functional.leaky_relu(-constraint_B-eps, negative_slope = leaky_relu_negative_slope)) / (1e-5 + constraint_B.shape[0])
     
         percent_violations = (sum(constraint_A<0).item() + sum(constraint_B<0).item()) / (constraint_A.shape[0] + constraint_B.shape[0])
+        evensplit_percent_violations = (sum(evensplit_constraint_A<0).item() + sum(evensplit_constraint_B<0).item()) / (evensplit_constraint_A.shape[0] + evensplit_constraint_B.shape[0])
+        worstcase_percent_violations = (sum(worstcase_constraint_A<0).item() + sum(worstcase_constraint_B<0).item()) / (worstcase_constraint_A.shape[0] + worstcase_constraint_B.shape[0])
+        
         if self.normalize_constraint: 
             max_violations = min(constraint_A.min() * normLghA, constraint_B.min() * normLghB).item()
         else: 
@@ -289,7 +297,7 @@ class RasterizedResponsibilityModel(nn.Module):
             loss_resp_sum = torch.tensor(0)
 
 
-        return loss_constraint, loss_resp_sum, percent_violations, max_violations
+        return loss_constraint, loss_resp_sum, percent_violations, max_violations, evensplit_percent_violations, worstcase_percent_violations
 
     def unicycle_dynamics(self, stateA, stateB):
         # states are [x, y, v, yaw]

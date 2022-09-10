@@ -33,7 +33,7 @@ def random_placing_neighbors(simscene,num_neighbors,coll_check=True):
     offset_y = 4.0
     T = 10
     v_sigma=0.3
-    dt = simscene.scene_info.dt
+    dt = simscene.scene.dt
     obs = simscene.get_obs()
     if isinstance(simscene,SimulationScene):
         obs = parse_trajdata_batch(obs)
@@ -236,6 +236,7 @@ def rollout_episodes(
     adjust_plan_recipe=None,
     horizon=None,
     seed_each_episode=None,
+    add_in_front = False, 
     save_collision_data=False
 ):
     """
@@ -289,8 +290,9 @@ def rollout_episodes(
                     adjust_plan = random_initial_adjust_plan(env,adjust_recipe)
                     
                 else:
-                    adjust_plan = None
-                    adjust_recipe = None
+                    adjust_recipe = adjust_plan_recipe
+                    adjust_plan = random_initial_adjust_plan(env, adjust_recipe)
+
                 
             else:
                 # explicit plan provided
@@ -304,7 +306,7 @@ def rollout_episodes(
         if seed_each_episode is not None:
             env.update_random_seed(seed_each_episode[ei])
 
-        if True:
+        if add_in_front:
             adjust_plan = infront_initial_adjust_plan(env, adjust_plan_recipe)
             env.adjust_scene(adjust_plan)
 
@@ -312,18 +314,24 @@ def rollout_episodes(
         counter = 0
         step_since_last_update = 0
         frames = []  
+        FirstStep = True
         while not done:
+            # breakpoint() # check this adjust recipe, adding new agents stuff
             if adjust_recipe is not None:
                 if step_since_last_update>adjust_recipe["num_frame_per_new_agent"]:
                     for simscene in env._current_scenes:
-                        if simscene.scene_ts<simscene.scene_info.length_timesteps-10:
-                            extra_agent = random_placing_neighbors(simscene,1)
-                            adjust_plan[simscene.scene_info.name]["agents"]+=extra_agent
+                        # if simscene.scene_ts<simscene.scene_info.length_timesteps-10:
+                        print("PLACING AGENT! \n\n")
+                        extra_agent = random_placing_neighbors(simscene,1)
+                        adjust_plan[simscene.scene_name]["agents"]+=extra_agent
                     env.adjust_scene(adjust_plan)
                     step_since_last_update=0
             timers.tic("step")
             with timers.timed("obs"):
                 obs = env.get_observation()
+            if FirstStep:
+                obs["agents"]["curr_speed"][0] = 7 
+                FirstStep = False
             with timers.timed("to_torch"):
                 if obs_to_torch:
                     device = policy.device if device is None else device
@@ -333,8 +341,8 @@ def rollout_episodes(
 
             with timers.timed("network"):
                 action = policy.get_action(obs_torch, step_index=counter)
-                feas_flag = action.agents_info["feas_flag"]
-                action.agents_info.pop("feas_flag",None)
+                safety_violation_flag = action.agents_info["safety_violation_flag"]
+                action.agents_info.pop("safety_violation_flag",None)
             if False: #  counter < skip_first_n: RYAN TODO, removed so I can force agent states
                 # use GT action for the first N steps to warm up environment state (velocity, etc.)
                 gt_action = env.get_gt_action(obs)
@@ -354,12 +362,12 @@ def rollout_episodes(
                 step_since_last_update += n_step_action
             timers.toc("step")
             # print(timers)
-            if feas_flag == False or env.is_done(): 
+            if safety_violation_flag == True or env.is_done(): 
                 done = True 
                 cbf_data_log = policy.agents_policy.policy.refiner.get_data_log()
                 policy.agents_policy.policy.refiner.clear_data_log()
-                if feas_flag == False: 
-                    print("Rollout Ended due to Encountered Infeasibility")
+                if safety_violation_flag == True: 
+                    print("Safety Violation Occurred!")
 
 
             if horizon is not None and counter >= horizon:

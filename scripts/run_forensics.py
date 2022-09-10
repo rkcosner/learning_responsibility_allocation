@@ -225,7 +225,6 @@ if __name__=="__main__":
 
             natural_dynamics  = (LfhA + LfhB + cbf.alpha * h_vals[:,0])
             natural_dynamics  /= 2.0 
-            # natural_dynamics  /= 20 # TODO There is some scaling issue going wrong somewhere!!!! 
             
             ego_inputs = batch["inputs"][0,:,:,None]
             col_inputs = batch["inputs"][agent_idx+1,:,:,None]

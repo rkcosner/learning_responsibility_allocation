@@ -506,7 +506,6 @@ class HierAgentAwareMPC(Hierarchical):
         return policy, exp_cfg
 
 
-# TODO: CBF-QP wrapper version of vvv
 class HierAgentAwareCBFQP(HierAgentAwareMPC):
     def _get_initial_planner(self):
         composer = HierAgentAware(self.eval_config, self.device, self.ckpt_root_dir)

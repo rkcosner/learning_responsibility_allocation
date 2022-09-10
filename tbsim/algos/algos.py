@@ -161,10 +161,12 @@ class Responsibility(pl.LightningModule):
         return plotted_metrics
 
     def _compute_metrics(self, batch, gammas):
-        _, _, percent_violations, max_violations = self.nets["policy"].compute_cbf_constraint_loss(self.cbf, gammas, batch)
+        _, _, percent_violations, max_violations, evensplit_percent_violations, worstcase_percent_violations = self.nets["policy"].compute_cbf_constraint_loss(self.cbf, gammas, batch)
         metrics = {
             "percent_constraint_violations" : percent_violations, 
-            "max_constraint_violations" : max_violations
+            "max_constraint_violations" : max_violations, 
+            "even_split_percent_violations" : evensplit_percent_violations, 
+            "worst_case_percent_violations": worstcase_percent_violations
             }
 
         return metrics

@@ -147,12 +147,12 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
             seed_each_episode=eval_cfg.seed_each_episode,
             horizon=eval_cfg.num_simulation_steps,
             adjust_plan_recipe=eval_cfg.adjustment.to_dict(),
+            add_in_front = eval_cfg.add_vehicle.infront,
         )
         
         for ei,adjust_plan in enumerate(adjust_plans):
             for k,v in adjust_plan.items():
                 total_adjust_plan["{}_{}".format(k,ei)]=v 
-
         cbf_data_log[env.current_scene_names[0]] = cbf_data
 
 
@@ -379,7 +379,7 @@ if __name__ == "__main__":
     else:
         assert cfg.env is not None
     
-    cfg.results_dir = cfg.results_dir + cfg.cbf.test_type
+    cfg.results_dir = cfg.results_dir + cfg.cbf.test_type + cfg.suffix
     cfg.experience_hdf5_path = os.path.join(cfg.results_dir, "data.hdf5")
 
     for k in cfg[cfg.env]:  # copy env-specific config to the global-level

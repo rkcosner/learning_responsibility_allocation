@@ -8,6 +8,7 @@ from copy import deepcopy
 import cvxpy as cp
 import json
 import pickle
+from tqdm import tqdm 
 
 from tbsim.algos.factory import algo_factory
 from tbsim.configs.algo_config import ResponsibilityConfig
@@ -544,38 +545,43 @@ class CBFQPController(Policy):
         self.saturate = exp_cfg["eval"]["cbf"]["saturate_inputs"]
         self.n_step_action = exp_cfg["eval"]["nusc"]["n_step_action"]
         self.test_type = exp_cfg["eval"]["cbf"]["test_type"]
+        
+        self.set_ego_des   = exp_cfg["eval"]["cbf"]["set_ego_des"]
+        self.set_agent_des = exp_cfg["eval"]["cbf"]["set_agent_des"]
 
-        self.data_logging = {
-            "safe_inputs" : [],
-            "des_inputs"  : [],
-            "gammas"      : [],
-            "h_vals"      : [], 
-        }
+        self.first_step_flag_current_speed = True
+        self.current_speed = None # We have to store the current speed, otherwise it is overwritten by tbsim!!!
+
+        self.clear_data_log()
 
         # Load Gamma Model
-        if self.test_type == "gammas":
-            file = open("/home/rkcosner/Documents/tbsim/checkpoints/idling_checkpoint/run10/run0/config.json")
-            algo_cfg = AlgoConfig()
-            algo_cfg.algo = ResponsibilityConfig()
-            external_algo_cfg = json.load(file)
-            algo_cfg.update(**external_algo_cfg)
-            algo_cfg.algo.update(**external_algo_cfg["algo"])
-            device = "device" 
-            modality_shapes = dict()
-            gamma_algo = algo_factory(algo_cfg, modality_shapes)
-            checkpoint_path = "/home/rkcosner/Documents/tbsim/checkpoints/idling_checkpoint/run10/run0/checkpoints/iter9000_ep1_valLoss0.00.ckpt"
-            checkpoint = torch.load(checkpoint_path)
-            gamma_algo.load_state_dict(checkpoint["state_dict"])
-            self.gamma_net = gamma_algo.nets["policy"].cuda()
+        #   do this regardless of test_type to save the data
+        file = open("/home/rkcosner/Documents/tbsim/resp_trained_models/test/run0/config.json")
+        algo_cfg = AlgoConfig()
+        algo_cfg.algo = ResponsibilityConfig()
+        external_algo_cfg = json.load(file)
+        algo_cfg.update(**external_algo_cfg)
+        algo_cfg.algo.update(**external_algo_cfg["algo"])
+        device = "device" 
+        modality_shapes = dict()
+        gamma_algo = algo_factory(algo_cfg, modality_shapes)
+        checkpoint_path = "/home/rkcosner/Documents/tbsim/resp_trained_models/test/run0/checkpoints/iter40000.ckpt"
+        checkpoint = torch.load(checkpoint_path)
+        gamma_algo.load_state_dict(checkpoint["state_dict"])
+        self.gamma_net = gamma_algo.nets["policy"].cuda()
 
 
     def eval(self):
         self.predictor.eval()
     
     def get_action(self, obs_dict, **kwargs):
+        if self.first_step_flag_current_speed: 
+            self.current_speed = obs_dict["curr_speed"].clone()
+            self.first_step_flag_current_speed = False
+        obs_dict["curr_speed"][0:len(self.current_speed)] = self.current_speed # overwrite current speed to use the actual value instead of the one approximated by tbsim
+
         num_steps_to_act_on = self.n_step_action
         dt = obs_dict["dt"][0].item()
-
         # Is there a coarse plan? 
         if "coarse_plan" in kwargs:
             coarse_plan = kwargs["coarse_plan"]
@@ -587,18 +593,17 @@ class CBFQPController(Policy):
         else:
             xref = None
         
-
-        # Get Global States for each agent
-        states = []
+        # Get world States for each agent
+        world_states = []
         for idx in range(xref.shape[0]):
             state_veh_idx = []
-            curr_yaw = obs_dict["curr_agent_state"][idx, -1]
-            curr_pos = obs_dict["curr_agent_state"][idx, :2]
+            curr_yaw = obs_dict["yaw"][idx]
+            curr_pos = obs_dict["centroid"][idx]
             curr_vel = obs_dict["curr_speed"][idx]
 
             # Set Desired Ego Controller
             time_steps = torch.linspace(1,20,20, device = curr_pos.device)
-            if idx == 0 : 
+            if idx == 0 and self.set_ego_des: 
                 v_des = 10
                 vs = torch.linspace(curr_vel.item()+(v_des-curr_vel.item())/20 ,v_des,20, device = curr_pos.device)
                 # thetas = torch.linspace((obs_dict["curr_agent_state"][2, -1]-curr_yaw.item())/20, obs_dict["curr_agent_state"][2, -1]-curr_yaw.item(), 20, device = curr_pos.device ) # track heading of forward vehicle
@@ -610,7 +615,7 @@ class CBFQPController(Policy):
                 xref[0,:,1] = 0
                 xref[0,:,2] = vs
                 xref[0,:,3] = 0
-            elif idx == xref.shape[0]-1: 
+            elif idx == xref.shape[0]-1 and self.set_agent_des: 
                 # default other agent
                 if True:
                     v_des = 5
@@ -642,14 +647,16 @@ class CBFQPController(Policy):
             for t_step in range(xref.shape[1]): 
                 next_state = torch.zeros(4)
                 next_state[:2] = coarse_plan.positions[idx, t_step] @ world_from_agent + curr_pos
-                next_state[2] = curr_vel + xref[idx, t_step,2]
+                next_state[2] =  xref[idx, t_step,2]
                 next_state[3] = curr_yaw + coarse_plan.yaws[idx, t_step, 0]
                 state_veh_idx.append(next_state.tolist())
-            states.append(state_veh_idx)
+            world_states.append(state_veh_idx)
         
-        states = torch.tensor(states)
+
+
+        world_states = torch.tensor(world_states)
         coarse_batch = {
-            "states" : states[None,...], 
+            "states" : world_states[None,...], 
             "extent" : obs_dict["extent"][None,...], 
             "dt"     : obs_dict["dt"],
         }
@@ -664,23 +671,15 @@ class CBFQPController(Policy):
 
 
 
-        # Get ego-centered states
-        ego_centered_states = coarse_batch["states"].clone()
-        ego_centered_states[:,:,:,[0,1]] -= ego_centered_states[0,0,0,[0,1]]
-        ego_yaw = ego_centered_states[0,0,0,3].item()
-        ego_centered_states[:,:,:,3] -= ego_yaw
-        R = torch.tensor([[np.cos(-ego_yaw), -np.sin(-ego_yaw)],[np.sin(-ego_yaw), np.cos(-ego_yaw)]], dtype=torch.float)
-        A = ego_centered_states.shape[1]
-        T = ego_centered_states.shape[2]
-        for i in range(A): 
-            for j in range(T): 
-                ego_centered_states[0,i,j,[0,1]] = R@ego_centered_states[0,i,j,[0,1]]
-        ego_centered_states[:,:,:,3]
- 
-
         # For each time step solve the CBFQP to find safe inputs
         safe_inputs = []
-        feas_flag = True
+        safety_violation_flag = False
+        # Initialize plan
+        plan = xref.clone()
+        v = world_states[0,0,2]
+        ego_world_state = world_states[None,0:1,0:1,:].clone() # to update
+        ego_original_world_state =  world_states[None,0:1,0:1,:].clone() # keep this constant to get plan wrt original state
+        ego_centered_states = self.get_ego_centered_states(ego_world_state, world_states[None,...])
         for t_step in range(num_steps_to_act_on): # TODO: figure out where this variable is coming from and point it here
             # Get Current Batch 
             current_batch ={
@@ -690,123 +689,182 @@ class CBFQPController(Policy):
                 "image"  : obs_dict["image"][None,:,-8:,:,:], 
                 "agents_from_center" : obs_dict["agent_from_world"][None, ...] # This is a dummy value since we're only using gamma for agent A
             }
+            if t_step == 0 : 
+                plan[0,0,[0,1,3]] = 0 # Set the initial state and yaw to be zero, then accumulate  
+                plan[0,0,2] = v
+            else: 
+                plan[0,t_step,0] = plan[0,t_step-1,0]
+                plan[0,t_step,1] = plan[0,t_step-1,1]
+                plan[0,t_step,2] = plan[0,t_step-1,2]
+                plan[0,t_step,3] = plan[0,t_step-1,3]
 
-            # Set up problem 
-            ego_u = cp.Variable(2)
-            ego_des_input = np.array([accel[t_step], yaw_rate[t_step]])
-            objective = cp.Minimize((ego_des_input[0] - ego_u[0])**2 + 10*(ego_des_input[1] - ego_u[1])**2)
-            constraints = []
-            with torch.enable_grad():
-                data = self.cbf.process_batch(current_batch)
-                data.requires_grad_()
-                h_vals = self.cbf(data)
-                LfhA, LfhB, LghA, LghB = self.cbf.get_barrier_bits(h_vals, data)
-            h_vals = h_vals[0].cpu().detach().numpy()
-            LfhA = LfhA.cpu().detach().numpy()
-            LfhB = LfhB.cpu().detach().numpy()
-            LghA = LghA.cpu().detach().numpy()
-            LghB = LghB.cpu().detach().numpy()
-            if self.test_type=="gammas": 
+
+            speedup_multiplier = 2
+            for substep in range(speedup_multiplier): # increase contol frequency by factor of 10 
+                # log current_state:
+                self.data_logging["states"].append(current_batch["states"])
+
+                # Set up problem 
+                ego_u = cp.Variable(2)
+                ego_des_input = np.array([accel[t_step], yaw_rate[t_step]])
+                constraints = []
+                with torch.enable_grad():
+                    data = self.cbf.process_batch(current_batch)
+                    data.requires_grad_()
+                    h_vals = self.cbf(data)
+                    LfhA, LfhB, LghA, LghB = self.cbf.get_barrier_bits(h_vals, data)
+                h_vals = h_vals[0].cpu().detach().numpy()
+                LfhA = LfhA.cpu().detach().numpy()
+                LfhB = LfhB.cpu().detach().numpy()
+                LghA = LghA.cpu().detach().numpy()
+                LghB = LghB.cpu().detach().numpy()
                 gammas = self.gamma_net(current_batch)["gammas_A"][0,:,0,0]
 
+                # Add Constraints
+                relevant_hs = []
+                gamma_log = []
+                h_log = []
+                slack_vars = []
+                for i in range(len(LfhA)): 
+                    if abs(current_batch["states"][0,i+1,0,3].item()) % 2* torch.pi <=self.angle_max_diff:
+                        slack_vars.append(cp.Variable(1))
 
-            # Add Constraints
-            relevant_hs = []
-            gamma_log = []
-            h_log = []
-            for i in range(len(LfhA)): 
-                h_log.append(np.NaN)
-                if abs(current_batch["states"][0,i+1,0,3].item())<=self.angle_max_diff:
-                    relevant_hs.append(i)
-                    sign_agent_vel = torch.sign(current_batch["states"][0,i+1,0,2]).item()
-                    h_log[-1] = h_vals[i]
-
-                    # Model worst case other agents
-                    if self.test_type == "worst_case":  
-                        worst_case = [[9,np.pi/4], [9,-np.pi/4], [-9,np.pi/4], [-9,-np.pi/4]] 
-                        for input in worst_case:
-                            u_worst_case = np.array(input)
-                            constraints.append(LfhA[i] + LfhB[i] + LghA[i]@ego_u + LghB[i]@u_worst_case >= -self.cbf.alpha * h_vals[i])                   
-                    # Even split decentralized
-                    elif self.test_type == "even_split": 
-                        constraints.append(1.0/2*(LfhA[i] + LfhB[i] + self.cbf.alpha*h_vals[i]) + LghA[i]@ego_u >= 0)
-                    # Use responsibility gammas
-                    elif self.test_type == "gammas": 
-                        print("gamma = ", gammas[i].item())
+                        relevant_hs.append(i)
+                        sign_agent_vel = torch.sign(current_batch["states"][0,i+1,0,2]).item()
+                        h_log.append(h_vals[i])
                         gamma_log.append(gammas[i].item())
-                        h_log.append(h_vals[i].item())
-                        constraints.append(1.0/2*(LfhA[i] + LfhB[i] + self.cbf.alpha*h_vals[i])  + LghA[i]@ego_u >= gammas[i].item())
-                    else: 
-                        raise Exception("please select a valid constraint type")
-            
-            self.data_logging["h_vals"].append(h_log)
-            if self.test_type == "gammas": 
+
+                        # Model worst case other agents
+                        if self.test_type == "worst_case":  
+                            worst_case = [[9,np.pi/4], [9,-np.pi/4], [-9,np.pi/4], [-9,-np.pi/4]] 
+                            for input in worst_case:
+                                u_worst_case = np.array(input)
+                                constraints.append(LfhA[i] + LfhB[i] + LghA[i]@ego_u + LghB[i]@u_worst_case + slack_vars[-1] >= -self.cbf.alpha * h_vals[i])                   
+                        # Even split decentralized
+                        elif self.test_type == "even_split": 
+                            constraints.append(1.0/2*(LfhA[i] + LfhB[i] + self.cbf.alpha*h_vals[i]) + LghA[i]@ego_u + slack_vars[-1] >= 0)
+                        # Use responsibility gammas
+                        elif self.test_type == "gammas": 
+                            # print("gamma = ", gammas[i].item())
+                            constraints.append(1.0/2*(LfhA[i] + LfhB[i] + self.cbf.alpha*h_vals[i])  + LghA[i]@ego_u + slack_vars[-1]  >= gammas[i].item())
+                        else: 
+                            raise Exception("please select a valid constraint type")
+                
+                cost = (ego_des_input[0] - ego_u[0])**2 + 10*(ego_des_input[1] - ego_u[1])**2
+                for var in slack_vars: 
+                    cost += 1e4*var**2
+                objective = cp.Minimize(cost)
+                self.data_logging["h_vals"].append(h_log)
                 self.data_logging["gammas"].append(gamma_log)
 
-            if len(relevant_hs)>0: 
-                print("h_val = ", np.min(h_vals[relevant_hs]))
-            sign_ego_vel = torch.sign(current_batch["states"][0,0,0,2]).item()
-            prob = cp.Problem(objective, constraints)
+                if len(relevant_hs)>0: 
+                    print("h_val = ", np.min(h_vals[relevant_hs]), " wrt agent ", np.argmin(h_vals) + 1)
+                    if np.min(h_vals[relevant_hs]) < 0: 
+                        safety_violation_flag = True
+                    self.data_logging["safety_violation"].append(safety_violation_flag)
 
-            # Try Solving the CBF-QP 
-            try:
-                result = prob.solve()
-                if prob.status == "optimal" or prob.status == "optimal_inaccurate": 
-                    ego_safe_input = ego_u.value
-                else: 
-                    print(prob.status)
+                sign_ego_vel = torch.sign(current_batch["states"][0,0,0,2]).item()
+                prob = cp.Problem(objective, constraints)
+
+                # Try Solving the CBF-QP 
+                try:
+                    result = prob.solve()
+                    if prob.status == "optimal" or prob.status == "optimal_inaccurate": 
+                        ego_safe_input = ego_u.value[0:2]
+                        slacks = ego_u.value[2:]
+                        self.data_logging["slack_sum"].append(np.sum(slacks))
+                    else: 
+                        print(prob.status)
+                        ego_safe_input = np.array([-sign_ego_vel*9,0])
+                except:
                     ego_safe_input = np.array([-sign_ego_vel*9,0])
-                    feas_flag = False
-            except:
-                ego_safe_input = np.array([-sign_ego_vel*9,0])
-                feas_flag = False
 
-            # Saturate Inputs
-            if self.saturate:
-                if ego_safe_input[0] >=9: ego_safe_input[0] = 9
-                if ego_safe_input[0] <=-9: ego_safe_input[0] = -9
-                if ego_safe_input[1] >= np.pi/4: ego_safe_input[1] = np.pi/4
-                if ego_safe_input[1] <= -np.pi/4: ego_safe_input[1] = -np.pi/4
+                # Saturate Inputs
+                if self.saturate:
+                    if ego_safe_input[0] >=9: ego_safe_input[0] = 9
+                    if ego_safe_input[0] <=-9: ego_safe_input[0] = -9
+                    if ego_safe_input[1] >= np.pi/4: ego_safe_input[1] = np.pi/4
+                    if ego_safe_input[1] <= -np.pi/4: ego_safe_input[1] = -np.pi/4
 
-            print("des: ", ego_des_input, "\t safe: ", ego_safe_input, "\t norm: ", np.linalg.norm(ego_des_input-ego_safe_input))
-            coarse_batch["states"][0,0,t_step+1,:] = torch.tensor([
-                coarse_batch["states"][0,0,t_step,0] + coarse_batch["states"][0,0,t_step,2]*torch.cos(coarse_batch["states"][0,0,t_step,3])*dt, 
-                coarse_batch["states"][0,0,t_step,1] + coarse_batch["states"][0,0,t_step,2]*torch.sin(coarse_batch["states"][0,0,t_step,3])*dt, 
-                coarse_batch["states"][0,0,t_step,2] + ego_safe_input[0]*dt, 
-                coarse_batch["states"][0,0,t_step,3] + ego_safe_input[1]*dt   
-            ])
-            safe_inputs.append(ego_safe_input)
+                # Update ego world state
+                ego_world_state[0,0,0,:]= torch.tensor([
+                    ego_world_state[0,0,0,0] + ego_world_state[0,0,0,2] * torch.cos(ego_world_state[0,0,0,3]) * dt / speedup_multiplier,
+                    ego_world_state[0,0,0,1] + ego_world_state[0,0,0,2] * torch.sin(ego_world_state[0,0,0,3]) * dt / speedup_multiplier,
+                    ego_world_state[0,0,0,2] + ego_safe_input[0] * dt / speedup_multiplier,
+                    ego_world_state[0,0,0,3] + ego_safe_input[1] * dt / speedup_multiplier,
+                ])
 
-        plan = xref.clone()
-        v = states[0,0,2]
-        theta = 0 
-        plan[0,0,0] =     v*np.cos(theta)*dt      
-        plan[0,0,1] =     v*np.sin(theta)*dt      
-        plan[0,0,2] = v + safe_inputs[0][0]*dt
-        plan[0,0,3] =     safe_inputs[0][1]*dt
-        for i in range(num_steps_to_act_on-1): 
-            plan[0,i+1,0]  =  plan[0,i,0] + plan[0,i,2]*torch.cos(plan[0,i,3])*dt      
-            plan[0,i+1,1]  =  plan[0,i,1] + plan[0,i,2]*torch.sin(plan[0,i,3])*dt      
-            plan[0,i+1,2]  =  plan[0,i,2] + safe_inputs[i+1][0]*dt
-            plan[0,i+1,3]  =  plan[0,i,3] + safe_inputs[i+1][1]*dt  
+                # # Filtered Plan, update ego state relative to ego initial
+                # plan[0,t_step,0] += plan[0,t_step,2] * torch.cos(plan[0,t_step,3]) * dt / speedup_multiplier    
+                # plan[0,t_step,1] += plan[0,t_step,2] * torch.sin(plan[0,t_step,3]) * dt / speedup_multiplier
+                # plan[0,t_step,2] += ego_safe_input[0] * dt / speedup_multiplier                                             
+                # plan[0,t_step,3] += ego_safe_input[1] * dt / speedup_multiplier
+
+                # Recenter
+                ego_centered_states = self.get_ego_centered_states(ego_world_state, world_states[None,...])
+
+
+                # print("des: ", ego_des_input, "\t safe: ", ego_safe_input, "\t norm: ", np.linalg.norm(ego_des_input-ego_safe_input))
+                safe_inputs.append(ego_safe_input)
+
+                # Linearly interpolate for the other agents
+                # we only have to do this if we're running faster than regular time. Otherwise we just use the recorded states
+                if speedup_multiplier > 1: 
+                    for other_agents_idx in range(1, len(current_batch["states"][0,1:,0,0])): 
+                            current_batch["states"][0,other_agents_idx,0,:] = (speedup_multiplier - 1 - substep) / (speedup_multiplier-1)*  ego_centered_states[0,other_agents_idx,t_step,:] + substep / (speedup_multiplier-1) * ego_centered_states[0,other_agents_idx,t_step+1,:]
+
+            # We want the current ego_centered_state with respect to the original ego state 
+            plan[0,t_step,:] = self.get_ego_centered_states(ego_original_world_state, ego_world_state)
+            
+                      
+
+
+        # theta = 0 
+        # plan[0,0,0] =     v*np.cos(theta)*dt      
+        # plan[0,0,1] =     v*np.sin(theta)*dt      
+        # plan[0,0,2] = v + safe_inputs[0][0]*dt
+        # plan[0,0,3] =     safe_inputs[0][1]*dt
+        # for i in range(num_steps_to_act_on-1): 
+        #     plan[0,i+1,0]  =  plan[0,i,0] + plan[0,i,2]*torch.cos(plan[0,i,3])*dt      
+        #     plan[0,i+1,1]  =  plan[0,i,1] + plan[0,i,2]*torch.sin(plan[0,i,3])*dt      
+        #     plan[0,i+1,2]  =  plan[0,i,2] + safe_inputs[i+1][0]*dt
+        #     plan[0,i+1,3]  =  plan[0,i,3] + safe_inputs[i+1][1]*dt  
         action = Action(positions=plan[...,:2], yaws=plan[...,3:])
-
+        self.current_speed = plan[:,t_step,2]        # store current speed to avoid tbsim approximation
         self.data_logging["safe_inputs"].append(safe_inputs[0].tolist())
         self.data_logging["des_inputs"].append(ego_des_input[0].tolist())
-
-        return action, {"feas_flag":feas_flag}
+        return action, {"safety_violation_flag":safety_violation_flag}
 
     def get_data_log(self): 
         return self.data_logging
     
     def clear_data_log(self): 
+        self.first_step_flag_current_speed = True
         self.data_logging = {
             "safe_inputs" : [],
             "des_inputs"  : [],
             "gammas"      : [],
             "h_vals"      : [], 
+            "states"      : [],
+            "slack_sum"   : [], 
+            "safety_violation":[], 
         }
 
+    def get_ego_centered_states(self, ego_state, world_states):
+        # Get ego-centered states
+        ego_centered_states = world_states.clone()
+        ego_centered_states[:,:,:,[0,1]] -= ego_state[0,0,0,[0,1]]
+        ego_yaw = ego_state[0,0,0,3]
+        ego_centered_states[:,:,:,3] -= ego_yaw
+        R = torch.tensor([[np.cos(ego_yaw), np.sin(ego_yaw)],
+                          [-np.sin(ego_yaw), np.cos(ego_yaw)]], dtype=torch.float)
+        A = ego_centered_states.shape[1]
+        T = ego_centered_states.shape[2]
+        for i in range(A): 
+            for j in range(T): 
+                ego_centered_states[0,i,j,[0,1]] = R@ego_centered_states[0,i,j,[0,1]]
+
+        return ego_centered_states
 
 class ModelPredictiveController(Policy):
     def __init__(self, device, step_time, predictor, solver="casadi", *args, **kwargs):
@@ -875,7 +933,6 @@ class ModelPredictiveController(Policy):
             plan.append(TensorUtils.to_torch(xplan,device=self.device))
         plan = torch.stack(plan,0)
         action = Action(positions=plan[...,:2],yaws=plan[...,3:])
-        breakpoint()
         return action, {}
 
 

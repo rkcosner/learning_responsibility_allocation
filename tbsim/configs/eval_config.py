@@ -13,7 +13,7 @@ class EvaluationConfig(Dict):
         self.eval_class = ""
         self.seed = 0
         self.num_scenes_per_batch = 1
-        self.num_scenes_to_evaluate = 2
+        self.num_scenes_to_evaluate = 5
 
         self.num_episode_repeats = 1
         self.start_frame_index_each_episode = None  # if specified, should be the same length as num_episode_repeats
@@ -79,10 +79,13 @@ class EvaluationConfig(Dict):
         self.cvae.rolling = True
         self.cvae.rolling_horizon = [5,10,20]
 
-        self.nusc.eval_scenes = [4,17]#2,6,17]#np.arange(100).tolist() # where scene choice is made
+        self.nusc.eval_scenes = np.arange(5,10).tolist()#[17,18]#[4,17]#[87,97,99] #2,6,17]#np.arange(100).tolist() # where scene choice is made
+        # Same Lane Index = [4,17]
+        # Intersection Indices = [0,26,41,53,76,82,87,97,99]
+
         self.nusc.n_step_action = 1 # Set to 1 to find gammas, otherwise choose whatever
-        self.nusc.num_simulation_steps = 100
-        self.nusc.skip_first_n = 0
+        self.nusc.num_simulation_steps = 200
+        self.nusc.skip_first_n = 4
 
         self.l5kit.eval_scenes = [9058, 5232, 14153, 8173, 10314, 7027, 9812, 1090, 9453, 978, 10263, 874, 5563, 9613, 261, 2826, 2175, 9977, 6423, 1069, 1836, 8198, 5034, 6016, 2525, 927, 3634, 11806, 4911, 6192, 11641, 461, 142, 15493, 4919, 8494, 14572, 2402, 308, 1952, 13287, 15614, 6529, 12, 11543, 4558, 489, 6876, 15279, 6095, 5877, 8928, 10599, 16150, 11296, 9382, 13352, 1794, 16122, 12429, 15321, 8614, 12447, 4502, 13235, 2919, 15893, 12960, 7043, 9278, 952, 4699, 768, 13146, 8827, 16212, 10777, 15885, 11319, 9417, 14092, 14873, 6740, 11847, 15331, 15639, 11361, 14784, 13448, 10124, 4872, 3567, 5543, 2214, 7624, 10193, 7297, 1308, 3951, 14001]
         self.l5kit.n_step_action = 1
@@ -94,8 +97,10 @@ class EvaluationConfig(Dict):
         self.adjustment.remove_existing_neighbors = False
         self.adjustment.initial_num_neighbors = 4
         self.adjustment.num_frame_per_new_agent = 20
+        self.add_vehicle.infront = False
 
-        self.cbf.test_type = "worst_case" # worst_case, even_split, gammas
+        self.suffix = "second_5"
+        self.cbf.test_type = "gammas" # worst_case, even_split, gammas
         self.cbf.T_horizon=1
         self.cbf.alpha=0.5
         self.cbf.veh_veh=True
@@ -103,6 +108,8 @@ class EvaluationConfig(Dict):
         self.cbf.backup_controller_type="idle"
         self.cbf.saturate_inputs = True
         self.cbf.angle_max_diff = 100.0/180*np.pi
+        self.cbf.set_ego_des = False
+        self.cbf.set_agent_des = False
 
     def clone(self):
         return deepcopy(self)

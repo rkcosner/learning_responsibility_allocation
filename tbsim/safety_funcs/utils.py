@@ -543,13 +543,13 @@ def generate_static_gamma_plots(fig, visualizer_image, X, Y, gammas_A):
     return fig, ax_contour
 
 
-def plot_static_gammas_inline(net, type, on_ngc=True): 
+def plot_static_gammas_inline(net, type, on_ngc=True, return_data = False): 
     torch.cuda.empty_cache()
     net.eval()
     with torch.no_grad():
         datapoints_per_meter = 0.5 
         window = 20 
-        rel_vel_max = 5
+        rel_vel_max = 12
         if type == 2: 
             if on_ngc: 
                 path = path2way_ngc
@@ -573,7 +573,7 @@ def plot_static_gammas_inline(net, type, on_ngc=True):
         x_window = torch.arange(-window, window + 1.0/datapoints_per_meter, step=1.0/datapoints_per_meter)
         window_pxls = (x_window * pxls_per_meter).int()
         
-        v_window = torch.arange(0, stateA[2].item() + rel_vel_max, step = 1)
+        v_window = torch.arange(-1, rel_vel_max, step = 1)
 
         # Fill Batch 
         Bprime = len(x_window) * len(v_window) 
@@ -625,6 +625,11 @@ def plot_static_gammas_inline(net, type, on_ngc=True):
     ax_contour.plot([-ego_extent[0]/2, -ego_extent[0]/2], [v_window.min(), v_window.max()], color='k', linestyle='--', linewidth=0.5)
     ax_contour.set_ylabel("Agent Velocity")
     ax_contour.set_xlabel("Agent Relative $x$ Position")
+    plt.savefig("test2.png")
+
+    if return_data: 
+        return X, Y, gammas_A, visualizer_image
+
     img = wandb.Image(fig)
 
     return img
@@ -636,13 +641,13 @@ def plot_static_gammas_inline(net, type, on_ngc=True):
 
 
 
-def plot_static_gammas_traj(net, type=4, on_ngc=True): 
+def plot_static_gammas_traj(net, type=4, on_ngc=True, return_data=False): 
     
     # net.eval()
     with torch.no_grad():
         datapoints_per_meter = 0.5 
         window = 20 
-        rel_vel_max = 10
+        rel_vel_max = 12
 
         if type == 4:
             if on_ngc: 
@@ -683,8 +688,8 @@ def plot_static_gammas_traj(net, type=4, on_ngc=True):
             theta2 = np.arctan2(y_traj[13:].min()- y_traj[13:].max(), x_traj.max()-x_traj.min())
             theta_traj = np.concatenate([theta1*np.ones(13), theta2*np.ones(len(x_traj[13:]))])
 
-        pos_idx_window = torch.arange(0, len(x_traj)-1).int()
-        v_window = torch.arange(0, stateA[2].item() + rel_vel_max, step = 1)
+        pos_idx_window = torch.arange(0, len(x_traj)).int()
+        v_window = torch.arange(-1, stateA[2].item() + rel_vel_max, step = 1)
 
         # Fill Batch 
         Bprime = len(pos_idx_window) * len(v_window) 
@@ -727,7 +732,8 @@ def plot_static_gammas_traj(net, type=4, on_ngc=True):
     
 
     # Generate Contour Plot  
-    X, Y = torch.meshgrid(pos_idx_window.float()/ (len(pos_idx_window)-1), v_window, indexing='xy')
+    y_rel_coords = torch.tensor((y_traj -112)/2).float()
+    X, Y = torch.meshgrid(y_rel_coords, v_window, indexing='xy')
     gammas_A = gamma_preds["gammas_A"]
     gammas_A = gammas_A.reshape(len(v_window), len(pos_idx_window))
 
@@ -742,9 +748,13 @@ def plot_static_gammas_traj(net, type=4, on_ngc=True):
     ax_contour.set_ylabel("Agent Velocity")
     ax_contour.set_xlabel("Agent Trajectory Completion")
 
+    if return_data: 
+        return X, Y, gammas_A, visualizer_image
+
     img = wandb.Image(fig)
 
     return img
+
 
 if __name__ == "__main__": 
     plot_static_gammas_4way(net = 1, type = 0 )
