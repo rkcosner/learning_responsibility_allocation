@@ -13,8 +13,9 @@ plt.rcParams["font.family"] = "serif"
 
 HERO_PLOT = True 
 GAMMA_SURFACE = False
-SAME_LANE_CL = True
-INTERSECTION_CL = True 
+SAME_LANE_CL = False
+INTERSECTION_CL = False
+CL_STATS = True
 
 pxls_per_meter = 2
 pxl_center = [56, 112]
@@ -544,3 +545,37 @@ if SAME_LANE_CL:
 
 if INTERSECTION_CL: 
     pass 
+
+
+if CL_STATS: 
+    
+    path_sets = [
+        ["/home/rkcosner/Documents/tbsim/results/HierAgentAwareCBFQPeven_splitfirst_5/run_data.pkl",
+        "/home/rkcosner/Documents/tbsim/results/HierAgentAwareCBFQPeven_splitsecond_5/run_data.pkl"], 
+        ["/home/rkcosner/Documents/tbsim/results/HierAgentAwareCBFQPgammasfirst_5/run_data.pkl", 
+        "/home/rkcosner/Documents/tbsim/results/HierAgentAwareCBFQPgammassecond_5/run_data.pkl"], 
+        ["/home/rkcosner/Documents/tbsim/results/HierAgentAwareCBFQPworst_casefirst_5/run_data.pkl", 
+        "/home/rkcosner/Documents/tbsim/results/HierAgentAwareCBFQPworst_casesecond_5/run_data.pkl"]
+    ]
+
+    if False:
+        total_violations = []
+        for paths in path_sets: 
+            num_scenes = 0 
+            for path in paths: 
+                num_scenes+=1 
+                # path = "/home/rkcosner/Documents/tbsim/results/HierAgentAwareCBFQPgammassecond_5/run_data.pkl"
+                file = open(path, "rb")
+                data = pickle.load(file)
+                file.close()
+                safety_violations = 0 
+                for scene_name in data.keys(): 
+                    safety_violations += sum(data[scene_name]["safety_violation"])
+            
+            total_violations.append(safety_violations)
+
+
+    path = "/home/rkcosner/Documents/tbsim/results/HierAgentAwareCBFQPeven_split_20_thru_39/run_data.pkl"
+    file = open(path, "rb")
+    data = pickle.load(file)
+    breakpoint()

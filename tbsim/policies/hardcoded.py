@@ -548,11 +548,14 @@ class CBFQPController(Policy):
         
         self.set_ego_des   = exp_cfg["eval"]["cbf"]["set_ego_des"]
         self.set_agent_des = exp_cfg["eval"]["cbf"]["set_agent_des"]
+        self.aggression_add = exp_cfg["eval"]["cbf"]["aggression_add"]
+
 
         self.first_step_flag_current_speed = True
         self.current_speed = None # We have to store the current speed, otherwise it is overwritten by tbsim!!!
 
         self.clear_data_log()
+        
 
         # Load Gamma Model
         #   do this regardless of test_type to save the data
@@ -701,6 +704,15 @@ class CBFQPController(Policy):
 
             speedup_multiplier = 2
             for substep in range(speedup_multiplier): # increase contol frequency by factor of 10 
+                # Recenter
+                ego_centered_states = self.get_ego_centered_states(ego_world_state, world_states[None,...])
+ 
+                # Linearly interpolate for the other agents
+                # we only have to do this if we're running faster than regular time. Otherwise we just use the recorded states
+                if speedup_multiplier > 1: 
+                    for other_agents_idx in range(1, len(current_batch["states"][0,1:,0,0])): 
+                        current_batch["states"][0,other_agents_idx,0,:] = (speedup_multiplier - 1 - substep) / (speedup_multiplier - 1)*  ego_centered_states[0,other_agents_idx,t_step,:] + (substep) / (speedup_multiplier-1) * ego_centered_states[0,other_agents_idx,t_step+1,:]
+
                 # log current_state:
                 self.data_logging["states"].append(current_batch["states"])
 
@@ -750,15 +762,15 @@ class CBFQPController(Policy):
                         else: 
                             raise Exception("please select a valid constraint type")
                 
-                cost = (ego_des_input[0] - ego_u[0])**2 + 10*(ego_des_input[1] - ego_u[1])**2
+                cost = (self.aggression_add + ego_des_input[0] - ego_u[0])**2 + 1000*(ego_des_input[1] - ego_u[1])**2
                 for var in slack_vars: 
-                    cost += 1e4*var**2
+                    cost += 1e5*var**2
                 objective = cp.Minimize(cost)
                 self.data_logging["h_vals"].append(h_log)
                 self.data_logging["gammas"].append(gamma_log)
 
                 if len(relevant_hs)>0: 
-                    print("h_val = ", np.min(h_vals[relevant_hs]), " wrt agent ", np.argmin(h_vals) + 1)
+                    # print("h_val = ", np.min(h_vals[relevant_hs]), " wrt agent ", np.argmin(h_vals) + 1)
                     if np.min(h_vals[relevant_hs]) < 0: 
                         safety_violation_flag = True
                     self.data_logging["safety_violation"].append(safety_violation_flag)
@@ -800,22 +812,12 @@ class CBFQPController(Policy):
                 # plan[0,t_step,2] += ego_safe_input[0] * dt / speedup_multiplier                                             
                 # plan[0,t_step,3] += ego_safe_input[1] * dt / speedup_multiplier
 
-                # Recenter
-                ego_centered_states = self.get_ego_centered_states(ego_world_state, world_states[None,...])
-
 
                 # print("des: ", ego_des_input, "\t safe: ", ego_safe_input, "\t norm: ", np.linalg.norm(ego_des_input-ego_safe_input))
                 safe_inputs.append(ego_safe_input)
 
-                # Linearly interpolate for the other agents
-                # we only have to do this if we're running faster than regular time. Otherwise we just use the recorded states
-                if speedup_multiplier > 1: 
-                    for other_agents_idx in range(1, len(current_batch["states"][0,1:,0,0])): 
-                            current_batch["states"][0,other_agents_idx,0,:] = (speedup_multiplier - 1 - substep) / (speedup_multiplier-1)*  ego_centered_states[0,other_agents_idx,t_step,:] + substep / (speedup_multiplier-1) * ego_centered_states[0,other_agents_idx,t_step+1,:]
-
             # We want the current ego_centered_state with respect to the original ego state 
             plan[0,t_step,:] = self.get_ego_centered_states(ego_original_world_state, ego_world_state)
-            
                       
 
 

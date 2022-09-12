@@ -32,7 +32,7 @@ def random_placing_neighbors(simscene,num_neighbors,coll_check=True):
     offset_x = 12.0
     offset_y = 4.0
     T = 10
-    v_sigma=0.3
+    v_sigma=1
     dt = simscene.scene.dt
     obs = simscene.get_obs()
     if isinstance(simscene,SimulationScene):
@@ -63,7 +63,7 @@ def random_placing_neighbors(simscene,num_neighbors,coll_check=True):
         elif init_modes[i] == 4:
             # two vehicle length ahead of the ego vehicle
             newagent_state = np.array([[2*offset_x,0,0]]).repeat(T,0)
-        vel = np.clip(ego_vel+np.random.randn()*v_sigma,0.,40.)
+        vel = np.clip(ego_vel+np.random.randn()*v_sigma,0.,40.) - 4
         newagent_state[:,0]+=np.arange(-T+1,1)*dt*vel
 
         add_flag = True
@@ -97,8 +97,14 @@ def infront_placing_neighbors(simscene,coll_check=True):
     
     offset_x = 10.45
     offset_y = 0
-    vel = 9
     T = 10
+    
+    obs = simscene.get_obs()
+    if isinstance(simscene,SimulationScene):
+        obs = parse_trajdata_batch(obs)
+    obs = TensorUtils.to_numpy(obs)  
+    ego_vel = obs["curr_speed"][0]
+    vel = ego_vel - 2
 
     dt = simscene.scene.dt
     obs = simscene.get_obs()
@@ -321,7 +327,8 @@ def rollout_episodes(
                 if step_since_last_update>adjust_recipe["num_frame_per_new_agent"]:
                     for simscene in env._current_scenes:
                         # if simscene.scene_ts<simscene.scene_info.length_timesteps-10:
-                        print("PLACING AGENT! \n\n")
+                        # print("PLACING AGENT! \n\n")
+                        # extra_agent = infront_placing_neighbors(simscene,coll_check=True)
                         extra_agent = random_placing_neighbors(simscene,1)
                         adjust_plan[simscene.scene_name]["agents"]+=extra_agent
                     env.adjust_scene(adjust_plan)
@@ -329,9 +336,9 @@ def rollout_episodes(
             timers.tic("step")
             with timers.timed("obs"):
                 obs = env.get_observation()
-            if FirstStep:
-                obs["agents"]["curr_speed"][0] = 7 
-                FirstStep = False
+            # if FirstStep:
+            #     obs["agents"]["curr_speed"][0] = 7 
+            #     FirstStep = False
             with timers.timed("to_torch"):
                 if obs_to_torch:
                     device = policy.device if device is None else device
