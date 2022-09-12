@@ -79,11 +79,11 @@ class EvaluationConfig(Dict):
         self.cvae.rolling = True
         self.cvae.rolling_horizon = [5,10,20]
 
-        self.nusc.eval_scenes = np.arange(0,100).tolist()#[17,18]#[4,17]#[87,97,99] #2,6,17]#np.arange(100).tolist() # where scene choice is made
+        self.nusc.eval_scenes = np.arange(40,60).tolist()#[17,18]#[4,17]#[87,97,99] #2,6,17]#np.arange(100).tolist() # where scene choice is made
         # Same Lane Index = [4,17]
         # Intersection Indices = [0,26,41,53,76,82,87,97,99]
 
-        self.nusc.n_step_action = 1 # Set to 1 to find gammas, otherwise choose whatever
+        self.nusc.n_step_action = 5 # Set to 1 to find gammas, otherwise choose whatever
         self.nusc.num_simulation_steps = 100
         self.nusc.skip_first_n = 0
 
@@ -99,18 +99,18 @@ class EvaluationConfig(Dict):
         self.adjustment.num_frame_per_new_agent = 40
         self.add_vehicle.infront = False
 
-        self.suffix = "_0_thru_99_d5"
-        self.cbf.test_type = "even_split" # worst_case, even_split, gammas
+        self.suffix = "test_40_60"
+        self.cbf.test_type = "gammas" # worst_case, even_split, gammas
         self.cbf.T_horizon=1
         self.cbf.alpha=0.5
         self.cbf.veh_veh=True
         self.cbf.saturate_cbf=False
         self.cbf.backup_controller_type="idle"
-        self.cbf.saturate_inputs = False
+        self.cbf.saturate_inputs = True
         self.cbf.angle_max_diff = 100.0/180*np.pi
         self.cbf.set_ego_des = False
         self.cbf.set_agent_des = False
-        self.cbf.aggression_add = 3
+        self.cbf.aggression_add = 2
 
     def clone(self):
         return deepcopy(self)

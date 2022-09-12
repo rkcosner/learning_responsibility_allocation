@@ -327,7 +327,7 @@ def rollout_episodes(
                 if step_since_last_update>adjust_recipe["num_frame_per_new_agent"]:
                     for simscene in env._current_scenes:
                         # if simscene.scene_ts<simscene.scene_info.length_timesteps-10:
-                        # print("PLACING AGENT! \n\n")
+                        print("Placing agent")
                         # extra_agent = infront_placing_neighbors(simscene,coll_check=True)
                         extra_agent = random_placing_neighbors(simscene,1)
                         adjust_plan[simscene.scene_name]["agents"]+=extra_agent
@@ -374,7 +374,7 @@ def rollout_episodes(
                 cbf_data_log = policy.agents_policy.policy.refiner.get_data_log()
                 policy.agents_policy.policy.refiner.clear_data_log()
                 if safety_violation_flag == True: 
-                    print("Safety Violation Occurred!")
+                    print("SAFETY VIOLATION! SAFETY VIOLATION! SAFETY VIOLATION! SAFETY VIOLATION! SAFETY VIOLATION! SAFETY VIOLATION!")
 
 
             if horizon is not None and counter >= horizon:

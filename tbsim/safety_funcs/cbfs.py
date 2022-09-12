@@ -262,12 +262,14 @@ class BackupBarrierCBF(CBF):
             print("please specify one of the possible backup controllers [idle, brake]")
             breakpoint()
 
-        ego_traj, agent_traj = forward_project_states(ego_state, agent_state,backup_controller, N_tForward, dt)
-        ego_extent   = ego_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
-        agent_extent = agent_extent[..., None,:].repeat_interleave(N_tForward, axis=-2)
+        speed_up = 10 
+        ego_traj, agent_traj = forward_project_states(ego_state, agent_state,backup_controller, N_tForward*speed_up, dt/speed_up)
+        ego_extent   = ego_extent[..., None,:].repeat_interleave(N_tForward*speed_up, axis=-2)
+        agent_extent = agent_extent[..., None,:].repeat_interleave(N_tForward*speed_up, axis=-2)
         if self.veh_veh: 
             veh_radius = 0.5
             dist = VEH_VEH_distance(ego_traj[...,0:3],agent_traj[...,0:3],ego_extent, agent_extent ) - veh_radius
+            test = VEH_VEH_collision(ego_traj[...,0:3],agent_traj[...,0:3],ego_extent, agent_extent )
             dist = (dist * softmin(dist)).sum(dim=-1) # switched to softmin to ensure gradient
             # dist = dist.amin(-1)
         else: # ball norm 

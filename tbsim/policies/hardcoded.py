@@ -568,7 +568,7 @@ class CBFQPController(Policy):
         device = "device" 
         modality_shapes = dict()
         gamma_algo = algo_factory(algo_cfg, modality_shapes)
-        checkpoint_path = "/home/rkcosner/Documents/tbsim/resp_trained_models/test/run0/checkpoints/iter40000.ckpt"
+        checkpoint_path = "/home/rkcosner/Documents/tbsim/resp_trained_models/test/run0/checkpoints/iter9000_ep1_valLoss0.00.ckpt"
         checkpoint = torch.load(checkpoint_path)
         gamma_algo.load_state_dict(checkpoint["state_dict"])
         self.gamma_net = gamma_algo.nets["policy"].cuda()
@@ -702,7 +702,7 @@ class CBFQPController(Policy):
                 plan[0,t_step,3] = plan[0,t_step-1,3]
 
 
-            speedup_multiplier = 2
+            speedup_multiplier = 1
             for substep in range(speedup_multiplier): # increase contol frequency by factor of 10 
                 # Recenter
                 ego_centered_states = self.get_ego_centered_states(ego_world_state, world_states[None,...])
@@ -745,7 +745,7 @@ class CBFQPController(Policy):
                         sign_agent_vel = torch.sign(current_batch["states"][0,i+1,0,2]).item()
                         h_log.append(h_vals[i])
                         gamma_log.append(gammas[i].item())
-
+                        
                         # Model worst case other agents
                         if self.test_type == "worst_case":  
                             worst_case = [[9,np.pi/4], [9,-np.pi/4], [-9,np.pi/4], [-9,-np.pi/4]] 
@@ -761,10 +761,11 @@ class CBFQPController(Policy):
                             constraints.append(1.0/2*(LfhA[i] + LfhB[i] + self.cbf.alpha*h_vals[i])  + LghA[i]@ego_u + slack_vars[-1]  >= gammas[i].item())
                         else: 
                             raise Exception("please select a valid constraint type")
-                
-                cost = (self.aggression_add + ego_des_input[0] - ego_u[0])**2 + 1000*(ego_des_input[1] - ego_u[1])**2
+
+                # selected_constraint_idx = np.argmin(h_vals[relevant_hs]) # only enforcing the smallest constraint
+                cost = (self.aggression_add + ego_des_input[0] - ego_u[0])**2 + 100*(ego_des_input[1] - ego_u[1])**2
                 for var in slack_vars: 
-                    cost += 1e5*var**2
+                    cost += 1e4*var**2
                 objective = cp.Minimize(cost)
                 self.data_logging["h_vals"].append(h_log)
                 self.data_logging["gammas"].append(gamma_log)
@@ -777,18 +778,18 @@ class CBFQPController(Policy):
 
                 sign_ego_vel = torch.sign(current_batch["states"][0,0,0,2]).item()
                 prob = cp.Problem(objective, constraints)
-
                 # Try Solving the CBF-QP 
                 try:
                     result = prob.solve()
                     if prob.status == "optimal" or prob.status == "optimal_inaccurate": 
                         ego_safe_input = ego_u.value[0:2]
-                        slacks = ego_u.value[2:]
-                        self.data_logging["slack_sum"].append(np.sum(slacks))
+                        slacks = sum([var.value for var in slack_vars])
+                        self.data_logging["slack_sum"].append(slacks)
                     else: 
                         print(prob.status)
                         ego_safe_input = np.array([-sign_ego_vel*9,0])
                 except:
+                    print("infeasible!\n\n")
                     ego_safe_input = np.array([-sign_ego_vel*9,0])
 
                 # Saturate Inputs
@@ -820,17 +821,6 @@ class CBFQPController(Policy):
             plan[0,t_step,:] = self.get_ego_centered_states(ego_original_world_state, ego_world_state)
                       
 
-
-        # theta = 0 
-        # plan[0,0,0] =     v*np.cos(theta)*dt      
-        # plan[0,0,1] =     v*np.sin(theta)*dt      
-        # plan[0,0,2] = v + safe_inputs[0][0]*dt
-        # plan[0,0,3] =     safe_inputs[0][1]*dt
-        # for i in range(num_steps_to_act_on-1): 
-        #     plan[0,i+1,0]  =  plan[0,i,0] + plan[0,i,2]*torch.cos(plan[0,i,3])*dt      
-        #     plan[0,i+1,1]  =  plan[0,i,1] + plan[0,i,2]*torch.sin(plan[0,i,3])*dt      
-        #     plan[0,i+1,2]  =  plan[0,i,2] + safe_inputs[i+1][0]*dt
-        #     plan[0,i+1,3]  =  plan[0,i,3] + safe_inputs[i+1][1]*dt  
         action = Action(positions=plan[...,:2], yaws=plan[...,3:])
         self.current_speed = plan[:,t_step,2]        # store current speed to avoid tbsim approximation
         self.data_logging["safe_inputs"].append(safe_inputs[0].tolist())

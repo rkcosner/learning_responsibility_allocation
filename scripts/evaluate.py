@@ -62,6 +62,8 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
     composer = composer_class(eval_cfg, device, ckpt_root_dir=eval_cfg.ckpt_root_dir)
     policy, exp_config = composer.get_policy()
 
+    policy.refiner.test_type = eval_cfg.cbf.test_type
+    
     if eval_cfg.policy.pos_to_yaw:
         policy = Pos2YawWrapper(
             policy,
@@ -333,6 +335,12 @@ if __name__ == "__main__":
         default=None,
     )
 
+    parser.add_argument(
+        "--cbf_constraint_type",
+        type=str,
+        default=None,
+    )
+
     args = parser.parse_args()
 
     cfg = EvaluationConfig()
@@ -379,7 +387,10 @@ if __name__ == "__main__":
     else:
         assert cfg.env is not None
     
-    cfg.results_dir = cfg.results_dir + cfg.cbf.test_type + cfg.suffix
+    if args.cbf_constraint_type is not None: 
+        cfg.cbf.test_type =  args.cbf_constraint_type
+
+    cfg.results_dir = cfg.results_dir + "_" + cfg.cbf.test_type + "_" + cfg.suffix
     cfg.experience_hdf5_path = os.path.join(cfg.results_dir, "data.hdf5")
 
     for k in cfg[cfg.env]:  # copy env-specific config to the global-level
