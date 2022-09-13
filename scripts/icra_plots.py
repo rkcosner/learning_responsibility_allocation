@@ -548,44 +548,76 @@ if INTERSECTION_CL:
 
 
 if CL_STATS: 
-    
+
     path_sets = [
-        ["/home/rkcosner/Documents/tbsim/paper_results/cl1/even_split/HierAgentAwareCBFQP_even_split_test_0_20_d05/run_data.pkl",
-        "/home/rkcosner/Documents/tbsim/paper_results/cl1/even_split/HierAgentAwareCBFQP_even_split_test_20_40_d05/run_data.pkl",
-        "/home/rkcosner/Documents/tbsim/paper_results/cl1/even_split/HierAgentAwareCBFQP_even_split_test_40_60_d05/run_data.pkl",
-        "/home/rkcosner/Documents/tbsim/paper_results/cl1/even_split/HierAgentAwareCBFQP_even_split_test_60_80_d05/run_data.pkl",
-        # "/home/rkcosner/Documents/tbsim/paper_results/cl1/even_split/HierAgentAwareCBFQP_even_split_test_80_100_d05/run_data.pkl",
-        # "/home/rkcosner/Documents/tbsim/paper_results/cl1/even_split/HierAgentAwareCBFQP_even_split_test_100_120_d05/run_data.pkl"
+        [
+            "/home/rkcosner/Documents/tbsim/paper_results/cl1/even_split/HierAgentAwareCBFQP_even_split_test_0_20_d05/run_data.pkl",
+            "/home/rkcosner/Documents/tbsim/paper_results/cl1/even_split/HierAgentAwareCBFQP_even_split_test_20_40_d05/run_data.pkl",
+            "/home/rkcosner/Documents/tbsim/paper_results/cl1/even_split/HierAgentAwareCBFQP_even_split_test_40_60_d05/run_data.pkl",
+            "/home/rkcosner/Documents/tbsim/paper_results/cl1/even_split/HierAgentAwareCBFQP_even_split_test_60_80_d05/run_data.pkl",
+            "/home/rkcosner/Documents/tbsim/paper_results/cl1/even_split/HierAgentAwareCBFQP_even_split_test_80_100_d05/run_data.pkl",
+            "/home/rkcosner/Documents/tbsim/paper_results/cl1/even_split/HierAgentAwareCBFQP_even_split_test_100_120_d05/run_data.pkl"
         ], 
-        ["/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_0_20_d05/run_data.pkl", 
-        "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_20_40_d05/run_data.pkl", 
-        "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_40_60_d05/run_data.pkl", 
-        "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_60_70_d05/run_data.pkl",
-        "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_70_80_d05/run_data.pkl",
-        "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_80_100_d05/run_data.pkl", # there's only one sample in here!!!
-        # "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_100_110_d05/run_data.pkl",
-        # "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_110_120_d05/run_data.pkl",
+        [
+            "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_0_20_d05/run_data.pkl",
+            "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_20_40_d05/run_data.pkl",
+            "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_40_60_d05/run_data.pkl",
+            "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_60_70_d05/run_data.pkl",
+            "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_70_80_d05/run_data.pkl",
+            "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_80_100_d05/run_data.pkl",
+            "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_100_110_d05/run_data.pkl",
+            "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_110_120_d05/run_data.pkl"
         ]
     ]
+
+
+    # path_sets = [
+    #     [
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl2/HierAgentAwareCBFQP_even_split_pleasework2_0_40_30u_5step_2speedup/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl2/HierAgentAwareCBFQP_even_split_pleasework2_40_80_30u_5step_2speedup/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl2/HierAgentAwareCBFQP_even_split_pleasework2_80_120_30u_5step_2speedup/run_data.pkl"        
+    #     ], 
+    #     [
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl2/HierAgentAwareCBFQP_gammas_pleasework2_0_40_30u_5step_2speedup/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl2/HierAgentAwareCBFQP_gammas_pleasework2_40_80_30u_5step_2speedup/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl2/HierAgentAwareCBFQP_gammas_pleasework2_80_120_30u_5step_2speedup/run_data.pkl"
+    #     ]
+    # ]
+
+    # path_sets = [
+    #     ["/home/rkcosner/Documents/tbsim/paper_results/cl3/HierAgentAwareCBFQP_even_split_pleasework3_0_120_100u_speedup1_steps1satT/run_data.pkl"], 
+    #     ["/home/rkcosner/Documents/tbsim/paper_results/cl3/HierAgentAwareCBFQP_gammas_pleasework3_0_120_100u_speedup1_steps1satT/run_data.pkl"]
+    # ]
+
+    unsafe_from_start = []
+    unsafe_scenes = []
 
     if True:
         total_violations = []
         for paths in path_sets: 
-            num_scenes = 0 
-            safety_violations = 0 
-            for path in paths: 
+            scenes = []
+            total_scenes = 0
+            for path in paths:
                 file = open(path, "rb")
                 data = pickle.load(file)
                 file.close()
-                for scene_name in data.keys(): 
-                    num_scenes+=1 
-                    if sum(data[scene_name]["safety_violation"])> 0: 
-                        safety_violations += 1  
-                print(num_scenes)
-            print("\n")
-            total_violations.append(safety_violations)
-
-    total_violations = np.array(total_violations)
+                for scene_name in data.keys():
+                    total_scenes += 1 
+                    if sum(data[scene_name]["safety_violation"][0:5])>0 and scene_name not in unsafe_from_start:
+                        unsafe_from_start.append(scene_name)
+                    
+                    if sum(data[scene_name]["safety_violation"])>0: 
+                        scenes.append(scene_name)
+            unsafe_scenes.append(scenes)
+    total_violations = [0,0]
+    for idx, paths in enumerate(path_sets): 
+        for scene in unsafe_scenes[idx]:
+            if scene not in unsafe_from_start: 
+                total_violations[idx] +=1 
+    
+    print(total_violations)
+    total_percent_violations = np.array(total_violations)/(total_scenes - len(unsafe_from_start))
+    print(total_percent_violations)
     breakpoint()
     # path = "/home/rkcosner/Documents/tbsim/results/HierAgentAwareCBFQPeven_split_20_thru_39/run_data.pkl"
     # file = open(path, "rb")

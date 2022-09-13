@@ -745,25 +745,25 @@ class CBFQPController(Policy):
                         sign_agent_vel = torch.sign(current_batch["states"][0,i+1,0,2]).item()
                         h_log.append(h_vals[i])
                         gamma_log.append(gammas[i].item())
-                        
+                        discrete_time_compensation = 0.0
                         # Model worst case other agents
                         if self.test_type == "worst_case":  
                             worst_case = [[9,np.pi/4], [9,-np.pi/4], [-9,np.pi/4], [-9,-np.pi/4]] 
                             for input in worst_case:
                                 u_worst_case = np.array(input)
-                                constraints.append(LfhA[i] + LfhB[i] + LghA[i]@ego_u + LghB[i]@u_worst_case + slack_vars[-1] >= -self.cbf.alpha * h_vals[i])                   
+                                constraints.append(LfhA[i] + LfhB[i] + LghA[i]@ego_u + LghB[i]@u_worst_case + slack_vars[-1] >= -self.cbf.alpha * h_vals[i] + discrete_time_compensation)                   
                         # Even split decentralized
                         elif self.test_type == "even_split": 
-                            constraints.append(1.0/2*(LfhA[i] + LfhB[i] + self.cbf.alpha*h_vals[i]) + LghA[i]@ego_u + slack_vars[-1] >= 0)
+                            constraints.append(1.0/2*(LfhA[i] + LfhB[i] + self.cbf.alpha*h_vals[i]) + LghA[i]@ego_u + slack_vars[-1] >= 0 + discrete_time_compensation)
                         # Use responsibility gammas
                         elif self.test_type == "gammas": 
                             # print("gamma = ", gammas[i].item())
-                            constraints.append(1.0/2*(LfhA[i] + LfhB[i] + self.cbf.alpha*h_vals[i])  + LghA[i]@ego_u + slack_vars[-1]  >= gammas[i].item())
+                            constraints.append(1.0/2*(LfhA[i] + LfhB[i] + self.cbf.alpha*h_vals[i])  + LghA[i]@ego_u + slack_vars[-1]  >= gammas[i].item() + discrete_time_compensation)
                         else: 
                             raise Exception("please select a valid constraint type")
 
                 # selected_constraint_idx = np.argmin(h_vals[relevant_hs]) # only enforcing the smallest constraint
-                cost = (self.aggression_add + ego_des_input[0] - ego_u[0])**2 + 30*(ego_des_input[1] - ego_u[1])**2
+                cost = (self.aggression_add + ego_des_input[0] - ego_u[0])**2 + 200*(ego_des_input[1] - ego_u[1])**2
                 for var in slack_vars: 
                     cost += 1e4*var**2
                 objective = cp.Minimize(cost)
