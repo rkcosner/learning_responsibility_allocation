@@ -702,7 +702,7 @@ class CBFQPController(Policy):
                 plan[0,t_step,3] = plan[0,t_step-1,3]
 
 
-            speedup_multiplier = 1
+            speedup_multiplier = 1 # far left is currently 10 speedup
             for substep in range(speedup_multiplier): # increase contol frequency by factor of 10 
                 # Recenter
                 ego_centered_states = self.get_ego_centered_states(ego_world_state, world_states[None,...])
@@ -763,7 +763,7 @@ class CBFQPController(Policy):
                             raise Exception("please select a valid constraint type")
 
                 # selected_constraint_idx = np.argmin(h_vals[relevant_hs]) # only enforcing the smallest constraint
-                cost = (self.aggression_add + ego_des_input[0] - ego_u[0])**2 + 100*(ego_des_input[1] - ego_u[1])**2
+                cost = (self.aggression_add + ego_des_input[0] - ego_u[0])**2 + 30*(ego_des_input[1] - ego_u[1])**2
                 for var in slack_vars: 
                     cost += 1e4*var**2
                 objective = cp.Minimize(cost)

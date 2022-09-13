@@ -374,7 +374,7 @@ def rollout_episodes(
                 cbf_data_log = policy.agents_policy.policy.refiner.get_data_log()
                 policy.agents_policy.policy.refiner.clear_data_log()
                 if safety_violation_flag == True: 
-                    print("SAFETY VIOLATION! SAFETY VIOLATION! SAFETY VIOLATION! SAFETY VIOLATION! SAFETY VIOLATION! SAFETY VIOLATION!")
+                    print("SAFETY VIOLATION! SAFETY VIOLATION! SAFETY VIOLATION! SAFETY VIOLATION! SAFETY VIOLATION! SAFETY VIOLATION!\n\n")
 
 
             if horizon is not None and counter >= horizon:
@@ -403,7 +403,7 @@ def rollout_episodes(
             if is_batched_env:
                 # [step, scene] -> [scene, step]
                 frames = frames.transpose((1, 0, 2, 3, 4))
-            renderings.append(frames)
+            renderings.append(frames) # saving runtime data
         if adjust_plan is not None:
             adjust_plans.append(adjust_plan)
 

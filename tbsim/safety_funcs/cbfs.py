@@ -269,13 +269,15 @@ class BackupBarrierCBF(CBF):
         if self.veh_veh: 
             veh_radius = 0.5
             dist = VEH_VEH_distance(ego_traj[...,0:3],agent_traj[...,0:3],ego_extent, agent_extent ) - veh_radius
-            test = VEH_VEH_collision(ego_traj[...,0:3],agent_traj[...,0:3],ego_extent, agent_extent )
-            dist = (dist * softmin(dist)).sum(dim=-1) # switched to softmin to ensure gradient
+            # test = VEH_VEH_collision(ego_traj[...,0:3],agent_traj[...,0:3],ego_extent, agent_extent )
+            softmin_scaling = 20
+            dist = (dist * softmin(dist * softmin_scaling)).sum(dim=-1) # switched to softmin to ensure gradient
             # dist = dist.amin(-1)
         else: # ball norm 
             veh_radius = 6
             dist = torch.linalg.norm(ego_traj[...,0:2] - agent_traj[...,0:2], axis=-1) - veh_radius #VEH_VEH_collision(ego_traj, agent_traj, ego_extent, agent_extent, return_dis = False)
             dist = dist.amin(-1) 
+            breakpoint()
         h = dist 
         if self.saturate_cbf: 
             # Adding sigmoid to h to focus on locality
