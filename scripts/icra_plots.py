@@ -11,11 +11,12 @@ from tbsim.utils.trajdata_utils import parse_trajdata_batch
 plt.rcParams["text.usetex"] = True
 plt.rcParams["font.family"] = "serif"
 
-HERO_PLOT = True 
-GAMMA_SURFACE = False
+HERO_PLOT = False
+GAMMA_SURFACE = True
 SAME_LANE_CL = False
 INTERSECTION_CL = False
-CL_STATS = True
+CL_STATS = False
+CL_FROM_BATCH_1 = True
 
 pxls_per_meter = 2
 pxl_center = [56, 112]
@@ -170,7 +171,7 @@ if GAMMA_SURFACE:
     import matplotlib.ticker as mtick
 
 
-    LABEL_CONTOUR = False
+    LABEL_CONTOUR = True
 
     ego_vel = 7 
     axis_font_size = 6 
@@ -180,7 +181,7 @@ if GAMMA_SURFACE:
     path4way_local = "/home/rkcosner/Documents/tbsim/tbsim/safety_funcs/static_scenes/batch4way.pickle"
 
     # Load Gamma Model
-    file = open("/home/rkcosner/Documents/tbsim/checkpoints/idling_checkpoint/run10/run0/config.json")
+    file = open("/home/rkcosner/Documents/tbsim/resp_trained_models/test/run0/config.json")
     algo_cfg = AlgoConfig()
     algo_cfg.algo = ResponsibilityConfig()
     external_algo_cfg = json.load(file)
@@ -189,7 +190,7 @@ if GAMMA_SURFACE:
     device = "device" 
     modality_shapes = dict()
     gamma_algo = algo_factory(algo_cfg, modality_shapes)
-    checkpoint_path = "/home/rkcosner/Documents/tbsim/checkpoints/idling_checkpoint/run10/run0/checkpoints/iter9000_ep1_valLoss0.00.ckpt"
+    checkpoint_path = "/home/rkcosner/Documents/tbsim/resp_trained_models/test/run0/checkpoints/iter9000_ep1_valLoss0.00.ckpt"
     checkpoint = torch.load(checkpoint_path)
     gamma_algo.load_state_dict(checkpoint["state_dict"])
     net = gamma_algo.nets["policy"].cuda()
@@ -211,9 +212,9 @@ if GAMMA_SURFACE:
     axes[0].set_xlabel("Scene 1")
 
 
-    out_2way = axes[1].contourf(X_2way, Y_2way,gammas_A_2way.cpu().numpy(), cmap=cm.coolwarm, vmin=vmin, vmax=vmax)#, levels = levels, vmin = vmin, vmax = vmax)
+    out_2way = axes[1].contour(X_2way, Y_2way,gammas_A_2way.cpu().numpy(), cmap=cm.coolwarm, vmin=vmin, vmax=vmax)#, levels = levels, vmin = vmin, vmax = vmax)
     if LABEL_CONTOUR:
-        axes[1].clabel(out_2way, inline=1, fontsize=5)
+        axes[1].clabel(out_2way, inline=1, fontsize=2, colors ="k", rightside_up = False, inline_spacing = 0) 
     # fig.colorbar(out_cont, ax=axes[1], label="$\gamma(x_A, x_B, e_A)$")
     axes[1].set_aspect((X_2way.max()-X_2way.min())/(Y_2way.max()-Y_2way.min()))
     axes[1].yaxis.tick_right()   
@@ -234,9 +235,9 @@ if GAMMA_SURFACE:
     axes[2].set_xlabel("Scene 2")
 
 
-    out_line = axes[3].contourf(X_line, Y_line, gammas_A_line.cpu().numpy(), cmap=cm.coolwarm, vmin=vmin, vmax=vmax)
+    out_line = axes[3].contour(X_line, Y_line, gammas_A_line.cpu().numpy(), cmap=cm.coolwarm, vmin=vmin, vmax=vmax)
     if LABEL_CONTOUR:
-        axes[3].clabel(out_line, inline=1, fontsize=5)
+        axes[3].clabel(out_line, inline=1, fontsize=2, colors="k", rightside_up = False, inline_spacing = 0) 
     axes[3].set_aspect((X_line.max()-X_line.min())/(Y_line.max()-Y_line.min()))
     axes[3].plot([X_line.min(), X_line.max()], [0,0], color='k', linestyle="--", linewidth=1)
     # fig.colorbar(out_cont, ax=axes[3], label="$\gamma(x_A, x_B, e_A)$")
@@ -246,9 +247,9 @@ if GAMMA_SURFACE:
     axes[3].plot([extent[0]/2, extent[0]/2],   [Y_line.min(), Y_line.max()],  color='k', linestyle="--", linewidth=0.25)
     axes[3].set_xlabel("$(x_j - x_i)$ [m]", fontsize=6)
 
-    out_cont = axes[4].contourf(X, Y, gammas_A.cpu().numpy(), cmap=cm.coolwarm, vmin=vmin, vmax=vmax)#, levels = levels, vmin = vmin, vmax = vmax)
+    out_cont = axes[4].contour(X, Y, gammas_A.cpu().numpy(), cmap=cm.coolwarm, vmin=vmin, vmax=vmax)#, levels = levels, vmin = vmin, vmax = vmax)
     if LABEL_CONTOUR:
-        axes[4].clabel(out_cont, inline=1, fontsize=5)
+        axes[4].clabel(out_cont, inline=1, fontsize=2, colors="k", rightside_up = False, inline_spacing = 0) 
     axes[4].set_aspect((X.max()-X.min())/(Y.max()-Y.min()))
     axes[4].tick_params(axis='both', which='major', labelsize=axis_font_size)
     axes[4].yaxis.tick_right() 
@@ -272,9 +273,10 @@ if GAMMA_SURFACE:
     cbar = fig.colorbar(scalar_map, cax=fig.add_axes([0.90, 0, 0.01, 0.21]), label="$\gamma(\mathbf{x})$")
     cbar.ax.tick_params(axis='both', which='major', labelsize=axis_font_size)
 
-    plt.savefig("./paper_figures/visualize_gammas_with_colorbar.svg")
+    plt.savefig("./paper_figures/visualize_gammas_with_colorbar_labeled.svg")
 
-    # breakpoint()
+    breakpoint()
+
 if SAME_LANE_CL: 
 
     torch.cuda.empty_cache()
@@ -550,25 +552,47 @@ if INTERSECTION_CL:
 if CL_STATS: 
 
     path_sets = [
-        [
-            "/home/rkcosner/Documents/tbsim/paper_results/cl1/even_split/HierAgentAwareCBFQP_even_split_test_0_20_d05/run_data.pkl",
-            "/home/rkcosner/Documents/tbsim/paper_results/cl1/even_split/HierAgentAwareCBFQP_even_split_test_20_40_d05/run_data.pkl",
-            "/home/rkcosner/Documents/tbsim/paper_results/cl1/even_split/HierAgentAwareCBFQP_even_split_test_40_60_d05/run_data.pkl",
-            "/home/rkcosner/Documents/tbsim/paper_results/cl1/even_split/HierAgentAwareCBFQP_even_split_test_60_80_d05/run_data.pkl",
-            "/home/rkcosner/Documents/tbsim/paper_results/cl1/even_split/HierAgentAwareCBFQP_even_split_test_80_100_d05/run_data.pkl",
-            "/home/rkcosner/Documents/tbsim/paper_results/cl1/even_split/HierAgentAwareCBFQP_even_split_test_100_120_d05/run_data.pkl"
-        ], 
-        [
-            "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_0_20_d05/run_data.pkl",
-            "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_20_40_d05/run_data.pkl",
-            "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_40_60_d05/run_data.pkl",
-            "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_60_70_d05/run_data.pkl",
-            "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_70_80_d05/run_data.pkl",
-            "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_80_100_d05/run_data.pkl",
-            "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_100_110_d05/run_data.pkl",
-            "/home/rkcosner/Documents/tbsim/paper_results/cl1/gammas/HierAgentAwareCBFQP_gammas_test_110_120_d05/run_data.pkl"
-        ]
+        ["/home/rkcosner/Documents/tbsim/paper_results/time_compensated/HierAgentAwareCBFQP_even_split_everything_time_compensated/run_data.pkl"],
+        ["/home/rkcosner/Documents/tbsim/paper_results/time_compensated/HierAgentAwareCBFQP_gammas_everything_time_compensated/run_data.pkl"],
+        ["/home/rkcosner/Documents/tbsim/paper_results/time_compensated/HierAgentAwareCBFQP_worst_case_everything_time_compensated/run_data.pkl"]
     ]
+
+    # path_sets = [
+    #     [
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/even_split/HierAgentAwareCBFQP_even_split_baymax2_0_30/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/even_split/HierAgentAwareCBFQP_even_split_baymax2_30_60/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/even_split/HierAgentAwareCBFQP_even_split_baymax2_60_80/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/even_split/HierAgentAwareCBFQP_even_split_baymax2_80_100/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/even_split/HierAgentAwareCBFQP_even_split_baymax2_100_120/run_data.pkl"
+    #     ], 
+    #     [
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/worst_case/HierAgentAwareCBFQP_worst_case_baymax3_0_20/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/worst_case/HierAgentAwareCBFQP_worst_case_baymax3_20_40/run_data.pkl", 
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/worst_case/HierAgentAwareCBFQP_worst_case_baymax3_40_60/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/worst_case/HierAgentAwareCBFQP_worst_case_baymax3_60_80/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/worst_case/HierAgentAwareCBFQP_worst_case_baymax3_80_100/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/worst_case/HierAgentAwareCBFQP_worst_case_baymax3_100_120/run_data.pkl"
+    #     ],
+    #     [
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/gammas/HierAgentAwareCBFQP_gammas_baymax3_0_20/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/gammas/HierAgentAwareCBFQP_gammas_baymax3_20_40/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/gammas/HierAgentAwareCBFQP_gammas_baymax3_40_60/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/gammas/HierAgentAwareCBFQP_gammas_baymax3_60_80/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/gammas/HierAgentAwareCBFQP_gammas_baymax3_80_100/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/gammas/HierAgentAwareCBFQP_gammas_baymax3_100_120/run_data.pkl"
+    #     ]
+    # ]
+
+    # path_sets = [
+    #     [
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/even_split/HierAgentAwareCBFQP_even_split_baymax_0_20/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/even_split/HierAgentAwareCBFQP_even_split_baymax_20_40/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/even_split/HierAgentAwareCBFQP_even_split_baymax_40_60/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/even_split/HierAgentAwareCBFQP_even_split_baymax_60_80/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/even_split/HierAgentAwareCBFQP_even_split_baymax_80_100/run_data.pkl",
+    #         "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/even_split/HierAgentAwareCBFQP_even_split_baymax_100_120/run_data.pkl"
+    #     ]
+    # ]
 
 
     # path_sets = [
@@ -594,8 +618,10 @@ if CL_STATS:
 
     if True:
         total_violations = []
+        slacker_tracker = []
         for paths in path_sets: 
             scenes = []
+            slacks = []
             total_scenes = 0
             for path in paths:
                 file = open(path, "rb")
@@ -603,23 +629,278 @@ if CL_STATS:
                 file.close()
                 for scene_name in data.keys():
                     total_scenes += 1 
-                    if sum(data[scene_name]["safety_violation"][0:5])>0 and scene_name not in unsafe_from_start:
-                        unsafe_from_start.append(scene_name)
-                    
-                    if sum(data[scene_name]["safety_violation"])>0: 
+                    slacks.append(np.hstack(data[scene_name]["slack_sum"]))
+                    if sum(data[scene_name]["safety_violation"])>0 and sum(data[scene_name]["safety_violation"][0:10])==0: # Don't count if it starts unsafe
                         scenes.append(scene_name)
             unsafe_scenes.append(scenes)
-    total_violations = [0,0]
+            slacker_tracker.append(slacks)
+
+    for i, _ in enumerate(path_sets): 
+        all_in_pathset = np.hstack(slacker_tracker[i])
+        num_slacks = len(all_in_pathset)
+        slacker_tracker[i] = sum(all_in_pathset)/num_slacks
+
+    total_violations = [0,0,0]
     for idx, paths in enumerate(path_sets): 
         for scene in unsafe_scenes[idx]:
             if scene not in unsafe_from_start: 
                 total_violations[idx] +=1 
     
-    print(total_violations)
     total_percent_violations = np.array(total_violations)/(total_scenes - len(unsafe_from_start))
     print(total_percent_violations)
+    print(slacker_tracker)
+
+
+if CL_FROM_BATCH_1: 
+    # Even Split Unsafe: [scene-0395, scene-0448, scene-0517, scene-0534, scene-0544]
+    # Gammas Unsafe: [scene-0395, scene-0591]
+
+
+    torch.cuda.empty_cache()
+
+    # Imports
+    from tbsim.utils.batch_utils import set_global_batch_type
+    from tbsim.safety_funcs.cbfs import BackupBarrierCBF
+    from tbsim.safety_funcs.utils import scene_centric_batch_to_raw
+    from tbsim.configs.eval_config import EvaluationConfig
+    from tbsim.evaluation.env_builders import EnvNuscBuilder
+    from tbsim.configs.algo_config import ResponsibilityConfig
+    from tbsim.utils.trajdata_utils import parse_trajdata_batch
+    from tbsim.algos.factory import algo_factory
+    from tbsim.configs.base import AlgoConfig
+    import importlib
+    import h5py
+    import json
+    import matplotlib.patches as patches
+    from matplotlib.transforms import Affine2D
+
+    device = "cuda"
+    substeps = 1
+
+    # Load Evaluation Scene
+    set_global_batch_type("trajdata")
+    file = open("./results/ClosedLoopWorking/HierAgentAwareCBFQPgammas/config.json")
+    eval_cfg = EvaluationConfig()
+    external_cfg = json.load(file)
+    eval_cfg.update(**external_cfg)
+    policy_composers = importlib.import_module("tbsim.evaluation.policy_composers")
+    composer_class = getattr(policy_composers, eval_cfg.eval_class)
+    composer = composer_class(eval_cfg, device, ckpt_root_dir=eval_cfg.ckpt_root_dir)
+
+
+    policy, exp_config = composer.get_policy()
+    # Set to scene_centric
+    exp_config.algo.scene_centric = True
+    env_builder = EnvNuscBuilder(eval_config=eval_cfg, exp_config=exp_config, device=device)
+    env = env_builder.get_env(split_ego=False,parse_obs=True)
+
+
+
+    # Load Gamma Model
+    file = open("/home/rkcosner/Documents/tbsim/checkpoints/idling_checkpoint/run10/run0/config.json")
+    algo_cfg = AlgoConfig()
+    algo_cfg.algo = ResponsibilityConfig()
+    external_algo_cfg = json.load(file)
+    algo_cfg.update(**external_algo_cfg)
+    algo_cfg.algo.update(**external_algo_cfg["algo"])
+    device = "device" 
+    modality_shapes = dict()
+    gamma_algo = algo_factory(algo_cfg, modality_shapes)
+    checkpoint_path = "/home/rkcosner/Documents/tbsim/checkpoints/idling_checkpoint/run10/run0/checkpoints/iter9000_ep1_valLoss0.00.ckpt"
+    checkpoint = torch.load(checkpoint_path)
+    gamma_algo.load_state_dict(checkpoint["state_dict"])
+    net = gamma_algo.nets["policy"].cuda()
+
+    # Load CBF
+    cbf = BackupBarrierCBF(T_horizon = algo_cfg.algo.cbf.T_horizon, 
+                        alpha=algo_cfg.algo.cbf.alpha, 
+                        veh_veh=algo_cfg.algo.cbf.veh_veh, 
+                        saturate_cbf=algo_cfg.algo.cbf.saturate_cbf, 
+                        backup_controller_type=algo_cfg.algo.cbf.backup_controller_type
+                        )
+
+
+
+    names = [ "even_split"]#, "gammas"]
+    scene_name = "scene-0517"
+    data = dict()
+    h_vals = dict()
+    gammas = dict()
+    for name in names:
+        data_path = "/home/rkcosner/Documents/tbsim/results/HierAgentAwareCBFQP_"+ name + "_baymax3_60_80/run_data.pkl"
+        file = open(data_path, "rb")    
+        data[name] = pickle.load(file)[scene_name]
+        h_vals[name] = np.array(data[name]["h_vals"])
+        gammas[name] = np.array(data[name]["gammas"])
+
+        h5_path = "/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/"+name+"/HierAgentAwareCBFQP_"+name+"_baymax3_60_80/data.hdf5"
+        with h5py.File(h5_path, "r") as file: 
+            extent             = torch.tensor(file[scene_name+"_0"]["extent"])                  # [A, T, 3]
+            action_pos         = torch.tensor(file[scene_name+"_0"]["action_positions"])        # [A, T, 1, 2]
+            action_yaws        = torch.tensor(file[scene_name+"_0"]["action_yaws"])             # [A, T]
+            centroid           = torch.tensor(file[scene_name+"_0"]["centroid"])                # [A, T, 2]
+            yaw                = torch.tensor(file[scene_name+"_0"]["yaw"])                     # [A, T]
+            scene_index        = torch.tensor(file[scene_name+"_0"]["scene_index"])             # [A, T]
+            track_id           = torch.tensor(file[scene_name+"_0"]["track_id"])                # [A, T]
+            world_from_agent   = torch.tensor(file[scene_name+"_0"]["world_from_agent"])        # [A, T, 3, 3]
+    
+        T = int(centroid.shape[1])
+        N_repeated_indeces = 5
+        indices = torch.arange(0, T, N_repeated_indeces)
+        batch = {
+            "history_positions"         : centroid[:,indices,:], 
+            "history_yaws"              : yaw[:,indices,None], 
+            "curr_speed"                : yaw[:,-1:]*0,
+            "history_availabilities"    : (0*yaw[:,indices] + 1).int(), 
+            "dt"                        : 0.5*torch.ones(1) 
+        }
+
+        if name == "even_split": 
+            batch4forensic = scene_centric_batch_to_raw(batch, substeps=substeps)
+            forensic_states = batch4forensic["states"].clone()    
+            forensic_inputs = batch4forensic["inputs"].clone()    
+
+        print("Processing Scene" + name)
+        data[name]["batch"] = scene_centric_batch_to_raw(batch, BEZ_TEST=False)
+        data[name]["scene_index"] = scene_index
+
+
+
+    fig, axes = plt.subplots(1,4)
+    fig.set_size_inches(10,2)
+
+    # Set Up Environment
+    scene_indices = [data[name]["scene_index"][0,0].item()]
+    env.scene_indices = scene_indices
+    env.reset(scene_indices=scene_indices, start_frame_index=None)
+    env.update_random_seed(1)
+    simscene = env._current_scenes[0]
+
+    obs = parse_trajdata_batch(simscene.get_obs())
+    batch = {
+        "image": obs["image"][0,-8:,...]
+    }   
+    visualizer_image = generate_3channel_image(batch)
+
+
+    # Plot Other Agents
+    name = "even_split"
+    init_states = data["even_split"]["batch"]["states"][:,0,:] - data["even_split"]["batch"]["states"][0,0,:]
+    ego_yaw = data["even_split"]["batch"]["states"][0,0,3].item() 
+    cars = []
+    for j, x0 in enumerate(init_states):
+        x_agent = x0[0].item()
+        y_agent = x0[1].item()
+        x_pxl = int((np.cos(ego_yaw) * x_agent + np.sin(ego_yaw) * y_agent)*pxls_per_meter + pxl_center[0])
+        y_pxl = int((-np.sin(ego_yaw) * x_agent + np.cos(ego_yaw) * y_agent)*pxls_per_meter + pxl_center[1])
+
+        if y_pxl < len(visualizer_image[:,0,0]) and x_pxl < len(visualizer_image[:,0,0]) and y_pxl>=0 and x_pxl >=0: 
+            visualizer_image[y_pxl, x_pxl] = black
+
+            middle_offset = [
+                extent[j,0,0].item()*pxls_per_meter/2, 
+                extent[j,0,1].item()*pxls_per_meter/2
+            ]
+            rect = patches.Rectangle(
+                (x_pxl-middle_offset[0], y_pxl-middle_offset[1]), 
+                extent[j,0,0].item()*pxls_per_meter, 
+                extent[j,0,1].item()*pxls_per_meter, 
+                alpha = 0.7, 
+                facecolor="b", 
+                edgecolor="k", 
+                linewidth=0.1
+                )
+            t = Affine2D().rotate_around(x_pxl, y_pxl, x0[3]) + axes[0].transData
+            rect.set_transform(t)
+            cars.append(rect)
+    
+    for name in names: 
+        states = data[name]["batch"]["states"] - data[name]["batch"]["states"][0,0,:]
+        rotated_states_x = (np.cos(ego_yaw) * states[...,0] + np.sin(ego_yaw) * states[...,1])*pxls_per_meter + pxl_center[0]
+        rotated_states_y = (-np.sin(ego_yaw) * states[...,0] + np.cos(ego_yaw) * states[...,1])*pxls_per_meter + pxl_center[1]
+        states[...,0] = rotated_states_x
+        states[...,1] = rotated_states_y
+        for j, traj in enumerate(states):
+            if j==0 and name == "even_split":   
+                axes[0].plot(traj[:5,0], traj[:5,1], linewidth=2, color="y")
+                axes[0].plot(traj[4,0], traj[4,1], linewidth=2, color="y", marker="x")
+            if j==0 and name == "gammas":   
+                axes[0].plot(traj[:20,0], traj[:20,1], linewidth=2, color="k")
+            if j==15 and name=="gammas": 
+                axes[0].plot(traj[:20,0], traj[:20,1], linewidth=2, color="r")
+
+    axes[0].imshow(visualizer_image, aspect="auto")
+    for car in cars: axes[0].add_patch(car)
+    axes[0].set_xlim(pxl_center[0]-20, pxl_center[0]+80)
+    axes[0].set_ylim(pxl_center[1]-50, pxl_center[1]+50)
+    axes[0].grid(False)
+    axes[0].get_yaxis().set_visible(False)  
+    axes[0].get_xaxis().set_visible(False)  
+
+    # Plot h's
+    also = [0,1,2]
+    for i, name in enumerate(names): 
+        hs = np.min(h_vals[name], axis=-1)
+        unsafe_idx = np.where(hs<0)[0]
+        experiment_idx = range(unsafe_idx.min()+1)
+    axes[1].plot(hs[experiment_idx], color = "r")
+    axes[1].plot(unsafe_idx.min(), hs[unsafe_idx.min()], marker="x", color="r")
+    # for i, name in enumerate(names): 
+    #     hs = h_vals[name]
+    #     if i == 1: 
+    #         time_idx,_ = np.where(hs<0)
+    #         time = np.arange(17, time_idx.item(), 1)/10
+    #         axes[1].plot(time, hs[17:time_idx.item(),-1], linewidth=1, color="y")
+    #         axes[1].plot(time[-1], hs[time_idx.item(),-1],"x", color="y")
+    #     elif i==0: 
+    #         time = np.arange(17, 35, 1)/10
+    #         axes[1].plot(time, hs[17:35,-1], linewidth=1, color="b")
+    #         store_val = hs[18:20,-1]
+    #     else: 
+    #         axes[1].plot([time[0],time[1]], store_val, marker="x", color="r", linewidth=1) 
+
+    axes[1].grid(False)
+    time = np.arange(17, 35, 1)/10
+    t_min = time.min().item()
+    t_max = time.max().item()
+    axes[1].hlines(0,0, 80, color="k", linewidth=1, linestyle="--")
+    axes[1].set_ylim(-0.2, hs.max())
+    # axes[1].set_xlim(t_min,t_max)
+    axes[1].set_title("$h(\mathbf{x})$")
+    axes[1].set_xlabel("time [sec]")
+    # axes[1].get_yaxis().set_visible(False)  
+    axes[1].yaxis.tick_right()   
+
+
+    # Plot Gammas
+    gammas = gammas["even_split"]
+    time = np.arange(0, len(gammas[:50]), 1)/10
+    axes[2].plot(time, gammas[:50,-1], color="c")
+    axes[2].yaxis.tick_right() 
+    axes[2].grid(False)
+    t_max = time.max().item()
+    axes[2].hlines(0,-0.1, t_max, color="k", linewidth=0.5, linestyle="--")
+    axes[2].set_title("$\gamma(\mathbf{x})$")
+    time = np.arange(17, 35, 1)/10
+    axes[2].vlines(time.min(), gammas[:50,-1].min(), gammas[:50,-1].max(),  color="k", linewidth=0.5, linestyle="--")
+    axes[2].vlines(time.max(), gammas[:50,-1].min(), gammas[:50,-1].max(),  color="k", linewidth=0.5, linestyle="--")
+
+    if False: 
+        # plot Constraint
+        batch4forensic["states"] = forensic_states
+        batch4forensic["inputs"] = forensic_inputs
+        constraintA, constraintB = replay_sim(batch4forensic, simscene, net, device)
+        time = np.arange(0, len(constraintA[1:]), 1)/2/substeps
+        indices = np.where(np.logical_and(time< 3, time>=1.8))
+        axes[3].plot(time[indices], constraintA[indices].cpu().detach().numpy(), color="y")
+        axes[3].plot(time[indices], constraintB[indices].cpu().detach().numpy(), color="r")
+        axes[3].hlines(0,time[indices][0], time[indices][-1], color="k", linewidth=0.5, linestyle="--")
+        axes[3].set_title("Constraint($\mathbf{x}$)")
+        axes[3].yaxis.tick_right() 
+        axes[3].grid(False)
+
+    
+    plt.savefig("test.png", dpi =300)
+    
+
     breakpoint()
-    # path = "/home/rkcosner/Documents/tbsim/results/HierAgentAwareCBFQPeven_split_20_thru_39/run_data.pkl"
-    # file = open(path, "rb")
-    # data = pickle.load(file)
-    # breakpoint()

@@ -548,7 +548,7 @@ def plot_static_gammas_inline(net, type, on_ngc=True, return_data = False):
     net.eval()
     with torch.no_grad():
         datapoints_per_meter = 0.5 
-        window = 20 
+        window = 10 
         rel_vel_max = 12
         if type == 2: 
             if on_ngc: 

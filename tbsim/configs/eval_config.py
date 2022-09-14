@@ -96,8 +96,7 @@ class EvaluationConfig(Dict):
         self.add_vehicle.infront = False
 
         self.nusc.n_step_action = 10# Set to 1 to find gammas, otherwise choose whatever
-        self.num_scenes_to_evaluate = 20
-        self.nusc.eval_scenes = np.arange(20, 40).tolist()#[17,18]#[4,17]#[87,97,99] #2,6,17]#np.arange(100).tolist() # where scene choice is made
+        self.num_scenes_to_evaluate = 120
         # Same Lane Index = [4,17]
         # Intersection Indices = [0,26,41,53,76,82,87,97,99]
         self.cbf.test_type = "gammas" # worst_case, even_split, gammas
@@ -112,7 +111,8 @@ class EvaluationConfig(Dict):
         self.cbf.set_agent_des = False
         self.cbf.aggression_add = 1
 
-        self.suffix = "baymax_20_40"#"test3_04_200_step1"#"pleasework6_u2_0_20"
+        self.nusc.eval_scenes = np.arange(120).tolist()#[17,18]#[4,17]#[87,97,99] #2,6,17]#np.arange(100).tolist() # where scene choice is made
+        self.suffix = "everything_time_compensated"#"test3_04_200_step1"#"pleasework6_u2_0_20"
 
 
     def clone(self):

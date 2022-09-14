@@ -296,8 +296,11 @@ def rollout_episodes(
                     adjust_plan = random_initial_adjust_plan(env,adjust_recipe)
                     
                 else:
-                    adjust_recipe = adjust_plan_recipe
-                    adjust_plan = random_initial_adjust_plan(env, adjust_recipe)
+                    pass
+                    adjust_plan = None
+                    adjust_recipe = None
+                    # adjust_recipe = adjust_plan_recipe
+                    # adjust_plan = random_initial_adjust_plan(env, adjust_recipe)
 
                 
             else:
