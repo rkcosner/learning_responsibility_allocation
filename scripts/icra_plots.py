@@ -1188,7 +1188,7 @@ if EGO_CL_FROM_BATCH:
     col_agent_inputs = []
     dt = 0.1 
     input_window = []
-    window_size = 2
+    window_size = 5
     for i in range(len(states[0,0,:,0])-1): 
         # Apply moving average to other agents' input
         d_state = (states[0, col_agent_idx, i+1,:] - states[0, col_agent_idx, i, :])/dt
@@ -1231,8 +1231,6 @@ if EGO_CL_FROM_BATCH:
     constraintB = np.array(constraintB)
     ego_gammas = np.array(ego_gammas)
     agent_gammas = np.array(agent_gammas)
-
-    breakpoint()
 
     # Plot Gammas
     dt = 0.1
@@ -1288,6 +1286,27 @@ if EGO_CL_FROM_BATCH:
     
     plt.savefig("./paper_figures/closed_loop_even_split.svg")#, dpi =300)
     
+
+    breakpoint()
+
+    
+    ego_inputs = ego_agent_inputs
+    col_inputs = np.vstack(col_agent_inputs)
+    fig, axes = plt.subplots(2,1)
+    time = np.arange(ego_inputs.shape[0])*dt
+    axes[0].plot(time, ego_inputs[:,0], 'b')
+    axes[1].plot(time, ego_inputs[:,1], 'b')
+    time = np.arange(col_inputs.shape[0])*dt
+    axes[0].plot(time, col_inputs[:,0], 'k')
+    axes[1].plot(time, col_inputs[:,1], 'k')
+    
+    axes[0].grid(False)
+    axes[0].yaxis.tick_right()
+    axes[0].get_xaxis().set_ticks([])
+    axes[1].grid(False)
+    axes[1].yaxis.tick_right()
+    plt.savefig("forensic2_inputs.svg")
+
 
     breakpoint()
 
@@ -1617,5 +1636,24 @@ if FORENSIC_1:
     
     plt.savefig("./paper_figures/forensics1.svg")#, dpi =300)
     
+
+    ego_inputs = np.hstack(safe_inputs)
+    col_inputs = np.vstack(col_agent_inputs)
+    fig, axes = plt.subplots(2,1)
+    time = np.arange(ego_inputs.shape[1])*dt
+    axes[0].plot(time, ego_inputs[0,:], 'b')
+    axes[1].plot(time, ego_inputs[1,:], 'b')
+    time = np.arange(col_inputs.shape[0])*dt
+    axes[0].plot(time, col_inputs[:,0], 'k')
+    axes[1].plot(time, col_inputs[:,1], 'k')
+    
+    axes[0].grid(False)
+    axes[0].yaxis.tick_right()
+    axes[0].get_xaxis().set_ticks([])
+    axes[1].grid(False)
+    axes[1].yaxis.tick_right()
+    plt.savefig("forensic2_inputs.svg")
+
+
 
     breakpoint()
