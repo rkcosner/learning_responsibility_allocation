@@ -157,9 +157,8 @@ def run_evaluation(eval_cfg, save_cfg, data_to_disk, render_to_video):
                 total_adjust_plan["{}_{}".format(k,ei)]=v 
         cbf_data_log[env.current_scene_names[0]] = cbf_data
 
-
         print(info["scene_index"])
-        pprint(stats)
+        # pprint(stats)
 
         # aggregate metrics stats
         if result_stats is None:

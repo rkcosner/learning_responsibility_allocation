@@ -156,6 +156,7 @@ def detach(x):
         x,
         {
             torch.Tensor: lambda x: x.detach(),
+            np.ndarray: lambda x: x, 
         },
     )
 

@@ -378,6 +378,7 @@ class EnvUnifiedSimulation(BaseEnv, BatchedEnv):
                     idx += 1
                 scene.step(scene_action, return_obs=False)
 
+
         self._cached_observation = None
 
         if self._frame_index + num_steps_to_take >= self.horizon:

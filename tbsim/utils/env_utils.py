@@ -382,15 +382,15 @@ def rollout_episodes(
 
             if horizon is not None and counter >= horizon:
                 break
-        # metrics = env.get_metrics()
+        metrics = env.get_metrics()
 
-        # for k, v in metrics.items():
-        #     if k not in stats:
-        #         stats[k] = []
-        #     if is_batched_env:  # concatenate by scene
-        #         stats[k] = np.concatenate([stats[k], v], axis=0)
-        #     else:
-        #         stats[k].append(v)
+        for k, v in metrics.items():
+            if k not in stats:
+                stats[k] = []
+            if is_batched_env:  # concatenate by scene
+                stats[k] = np.concatenate([stats[k], v], axis=0)
+            else:
+                stats[k].append(v)
 
         env_info = env.get_info()
         for k, v in env_info.items():
@@ -411,11 +411,9 @@ def rollout_episodes(
             adjust_plans.append(adjust_plan)
 
 
-    # multi_episodes_metrics = env.get_multi_episode_metrics()
-    # stats.update(multi_episodes_metrics)
-    # env.reset_multi_episodes_metrics()
-
-
+    multi_episodes_metrics = env.get_multi_episode_metrics()
+    stats.update(multi_episodes_metrics)
+    env.reset_multi_episodes_metrics()
 
     return stats, info, renderings, adjust_plans, cbf_data_log
 

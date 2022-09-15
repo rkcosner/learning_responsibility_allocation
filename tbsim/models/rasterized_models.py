@@ -99,7 +99,6 @@ class RasterizedResponsibilityModel(nn.Module):
 
             # Compute network output from the perspective of agent B
             B_T_A =  batch["agents_from_center"][:,b_idx]
-
             A_temp = torch.ones_like(A_state[:,[0,1,2]])
             A_temp[:,[0,1]] = A_state[:,[0,1]]
             A_temp = A_temp[:,:,None]

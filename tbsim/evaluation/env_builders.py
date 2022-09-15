@@ -33,15 +33,15 @@ class EnvironmentBuilder(object):
 
     def _get_analytical_metrics(self):
         metrics = dict(
-            all_off_road_rate=EnvMetrics.OffRoadRate(),
+            ego_off_road_rate=EnvMetrics.OffRoadRate(),
             all_collision_rate=EnvMetrics.CollisionRate(),
             agents_collision_rate=EnvMetrics.CollisionRate(),
-            all_coverage=EnvMetrics.OccupancyCoverage(
+            ego_coverage=EnvMetrics.OccupancyCoverage(
                 gridinfo={"offset": np.zeros(2), "step": 2.0*np.ones(2)},
             ),
-            all_diversity=EnvMetrics.OccupancyDiversity(
-                gridinfo={"offset": np.zeros(2), "step": 4.0*np.ones(2)},
-            ),
+            # all_diversity=EnvMetrics.OccupancyDiversity(
+            #     gridinfo={"offset": np.zeros(2), "step": 4.0*np.ones(2)},
+            # ),
             all_failure=EnvMetrics.CriticalFailure(num_offroad_frames=2)
         )
         return metrics

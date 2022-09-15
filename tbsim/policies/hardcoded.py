@@ -704,7 +704,7 @@ class CBFQPController(Policy):
 
             speedup_multiplier = 1 # far left is currently 10 speedup
             for substep in range(speedup_multiplier): # increase contol frequency by factor of 10 
-                # Recenter
+                # Recenter around the current ego state
                 ego_centered_states = self.get_ego_centered_states(ego_world_state, world_states[None,...])
  
                 # Linearly interpolate for the other agents
@@ -712,10 +712,14 @@ class CBFQPController(Policy):
                 if speedup_multiplier > 1: 
                     for other_agents_idx in range(1, len(current_batch["states"][0,1:,0,0])): 
                         current_batch["states"][0,other_agents_idx,0,:] = (speedup_multiplier - 1 - substep) / (speedup_multiplier - 1)*  ego_centered_states[0,other_agents_idx,t_step,:] + (substep) / (speedup_multiplier-1) * ego_centered_states[0,other_agents_idx,t_step+1,:]
+                current_batch["states"][0,0,0,[0,1,3]] = 0 # center ego 
+                current_batch["states"][0,0,0,2] = ego_world_state[0,0,0,2] # get ego velocity  
 
                 # log current_state:
                 self.data_logging["states"].append(current_batch["states"])
-
+                # if obs_dict["scene_ids"][0]=="scene-0591":
+                #     print("recording batch!")
+                #     self.data_logging["current_batches"].append(current_batch)
                 # Set up problem 
                 ego_u = cp.Variable(2)
                 ego_des_input = np.array([accel[t_step], yaw_rate[t_step]])
@@ -743,7 +747,6 @@ class CBFQPController(Policy):
                             LfhA = [LfhA]; LfhB = [LfhB]; 
                         if abs(current_batch["states"][0,i+1,0,3].item()) % 2* torch.pi <=self.angle_max_diff:
                             slack_vars.append(cp.Variable(1))
-
                             relevant_hs.append(i)
                             sign_agent_vel = torch.sign(current_batch["states"][0,i+1,0,2]).item()
                             h_log.append(h_vals[i])
@@ -828,8 +831,8 @@ class CBFQPController(Policy):
 
         action = Action(positions=plan[...,:2], yaws=plan[...,3:])
         self.current_speed = plan[:,t_step,2]        # store current speed to avoid tbsim approximation
-        self.data_logging["safe_inputs"].append(safe_inputs[0].tolist())
-        self.data_logging["des_inputs"].append(ego_des_input[0].tolist())
+        self.data_logging["safe_inputs"].append(safe_inputs)
+        self.data_logging["des_inputs"].append(ego_des_input)
         return action, {"safety_violation_flag":safety_violation_flag}
 
     def get_data_log(self): 
@@ -845,6 +848,7 @@ class CBFQPController(Policy):
             "states"      : [],
             "slack_sum"   : [], 
             "safety_violation":[], 
+            "current_batches" : []
         }
 
     def get_ego_centered_states(self, ego_state, world_states):

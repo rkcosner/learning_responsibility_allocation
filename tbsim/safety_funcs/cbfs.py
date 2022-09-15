@@ -267,7 +267,7 @@ class BackupBarrierCBF(CBF):
         ego_extent   = ego_extent[..., None,:].repeat_interleave(N_tForward*speed_up, axis=-2)
         agent_extent = agent_extent[..., None,:].repeat_interleave(N_tForward*speed_up, axis=-2)
         if self.veh_veh: 
-            veh_radius = 0.4
+            veh_radius = 0.5
             dist = VEH_VEH_distance(ego_traj[...,0:3],agent_traj[...,0:3],ego_extent, agent_extent ) - veh_radius
             # test = VEH_VEH_collision(ego_traj[...,0:3],agent_traj[...,0:3],ego_extent, agent_extent )
             softmin_scaling = 20

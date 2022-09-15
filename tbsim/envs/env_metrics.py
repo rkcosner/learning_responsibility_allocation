@@ -140,7 +140,7 @@ class OffRoadRate(EnvMetrics):
 
     @staticmethod
     def compute_per_step(state_info: dict, all_scene_index: np.ndarray):
-        obs = TensorUtils.to_tensor(state_info)
+        obs = TensorUtils.to_tensor(state_info,ignore_if_unspecified=True)
         drivable_region = batch_utils().get_drivable_region_map(obs["image"])
         centroid_raster = transform_points_tensor(obs["centroid"][:, None], obs["raster_from_world"])[:, 0]
         off_road = Metrics.batch_detect_off_road(centroid_raster, drivable_region)  # [num_agents]
@@ -252,14 +252,22 @@ class CollisionRate(EnvMetrics):
     def get_episode_metrics(self):
 
         self._df.set_index(["scene_index","track_id","type","ts"])
+        ego_df = self._df[self._df["track_id"]==0]
         coll_whole_horizon = self._df.groupby(["scene_index","track_id","type"])["met"].max()
+        ego_coll_whole_horizon = ego_df.groupby(["scene_index","type","ts"])["met"].max()
         met_all = dict()
         
         for k in CollisionType:
             coll_data = coll_whole_horizon[coll_whole_horizon.index.isin([k],level=2)]
+            ego_coll_data = ego_coll_whole_horizon[ego_coll_whole_horizon.index.isin([k],level=1)]
             met_all[str(k)] = coll_data.groupby(["scene_index"]).mean().to_numpy()
+            met_all["ego_"+str(k)] = ego_coll_data.groupby(["scene_index"]).mean().to_numpy()
+
         coll_data = coll_whole_horizon[coll_whole_horizon.index.isin([-1],level=2)]
         met_all["coll_any"] = coll_data.groupby(["scene_index"]).mean().to_numpy()
+        ego_coll_data = ego_coll_whole_horizon[ego_coll_whole_horizon.index.isin([-1],level=1)]
+        met_all["ego_coll_any"] = ego_coll_data.groupby(["scene_index"]).mean().to_numpy()
+
         return met_all
 
 
@@ -300,7 +308,7 @@ class CriticalFailure(EnvMetrics):
 
     def get_episode_metrics(self) -> Dict[str, np.ndarray]:
         num_steps = len(self)
-        grid_points = np.arange(5,num_steps,5)
+        grid_points = np.arange(50,num_steps,50)
 
         coll_fail_cases = self._df.groupby(["scene_index","track_id"])["collision"].any()
         coll_by_scene = coll_fail_cases.groupby(["scene_index"])
@@ -696,8 +704,8 @@ class OccupancyGrid():
     def obtain_lane_flag(self,grid_points,raster_from_world,lane_map):
         raster_points = GeoUtils.batch_nd_transform_points_np(grid_points,raster_from_world)
         raster_points = raster_points.astype(np.int)
-        raster_points[...,0] = raster_points[...,0].clip(0,lane_map.shape[-2]-1)
-        raster_points[...,1] = raster_points[...,1].clip(0,lane_map.shape[-1]-1)
+        raster_points[...,0] = raster_points[...,0].clip(0,lane_map.shape[-2])
+        raster_points[...,1] = raster_points[...,1].clip(0,lane_map.shape[-1])
         lane_flag = list()
         
         for k in range(raster_points.shape[0]):
@@ -854,7 +862,7 @@ class OccupancyDiversity(Occupancymet):
                 self.og[scene_idx] = [OccupancyGrid(self.gridinfo,self.sigma)]
             if len(self.og[scene_idx])==self.episode_index:
                 self.og[scene_idx].append(OccupancyGrid(self.gridinfo,self.sigma))
-            
+            breakpoint()
             assert len(self.og[scene_idx])==self.episode_index+1
             self.og[scene_idx][self.episode_index].update(
                 coords=coords[indices],
