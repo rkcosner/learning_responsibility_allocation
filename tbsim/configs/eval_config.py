@@ -95,8 +95,8 @@ class EvaluationConfig(Dict):
         self.adjustment.num_frame_per_new_agent = 400
         self.add_vehicle.infront = False
 
-        self.nusc.n_step_action = 5# Set to 1 to find gammas, otherwise choose whatever
-        self.num_scenes_to_evaluate = 20
+        self.nusc.n_step_action = 10# Set to 1 to find gammas, otherwise choose whatever
+        self.num_scenes_to_evaluate = 1
         self.cbf.test_type = "gammas" # worst_case, even_split, gammas
         self.cbf.T_horizon=1
         self.cbf.alpha=0.5
@@ -105,14 +105,14 @@ class EvaluationConfig(Dict):
         self.cbf.backup_controller_type="idle"
         self.cbf.saturate_inputs = True
         self.cbf.angle_max_diff = 100.0/180*np.pi
-        self.cbf.set_ego_des = False
+        self.cbf.set_ego_controller = True
         self.cbf.set_agent_des = False
         self.cbf.aggression_add = 1
 
         start = 100
         finish = 120
-        self.nusc.eval_scenes = np.arange(start, finish).tolist()#[17,18]#[4,17]#[87,97,99] #2,6,17]#np.arange(100).tolist() # where scene choice is made
-        self.suffix = "foryuxiao_"+str(start)+"_" + str(finish)#"test3_0_200_step1"#"pleasework6_u2_0_20"
+        self.nusc.eval_scenes = [27] #np.arange(start, finish).tolist()#[17,18]#[4,17]#[87,97,99] #2,6,17]#np.arange(100).tolist() # where scene choice is made
+        self.suffix = "forensic_1"#"foryuxiao_"+str(start)+"_" + str(finish)#"test3_0_200_step1"#"pleasework6_u2_0_20"
 
 
     def clone(self):

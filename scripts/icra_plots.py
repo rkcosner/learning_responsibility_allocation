@@ -15,9 +15,10 @@ HERO_PLOT = False
 GAMMA_SURFACE = False
 SAME_LANE_CL = False
 INTERSECTION_CL = False
-CL_STATS = True
+CL_STATS = False
 CL_FROM_BATCH_1 = False
-EGO_CL_FROM_BATCH = False
+EGO_CL_FROM_BATCH = True
+FORENSIC_1 = False
 
 pxls_per_meter = 2
 pxl_center = [56, 112]
@@ -553,16 +554,17 @@ if CL_STATS:
 
     import json 
 
-        #     [
-        #     "/home/rkcosner/Documents/tbsim/paper_results/foryuxiao30/even_split/HierAgentAwareCBFQP_even_split_foryuxiao_0_20/",
-        #     "/home/rkcosner/Documents/tbsim/paper_results/foryuxiao30/even_split/HierAgentAwareCBFQP_even_split_foryuxiao_20_40/", 
-        #     "/home/rkcosner/Documents/tbsim/paper_results/foryuxiao30/even_split/HierAgentAwareCBFQP_even_split_foryuxiao_40_60/", 
-        #     "/home/rkcosner/Documents/tbsim/paper_results/foryuxiao30/even_split/HierAgentAwareCBFQP_even_split_foryuxiao_60_80/",
-        #     "/home/rkcosner/Documents/tbsim/paper_results/foryuxiao30/even_split/HierAgentAwareCBFQP_even_split_foryuxiao_80_100/", 
-        #     "/home/rkcosner/Documents/tbsim/paper_results/foryuxiao30/even_split/HierAgentAwareCBFQP_even_split_foryuxiao_100_120/", 
-        # ],
+
 
     path_sets = [
+            [
+            "/home/rkcosner/Documents/tbsim/paper_results/foryuxiao30/even_split/HierAgentAwareCBFQP_even_split_foryuxiao_0_20/",
+            "/home/rkcosner/Documents/tbsim/paper_results/foryuxiao30/even_split/HierAgentAwareCBFQP_even_split_foryuxiao_20_40/", 
+            "/home/rkcosner/Documents/tbsim/paper_results/foryuxiao30/even_split/HierAgentAwareCBFQP_even_split_foryuxiao_40_60/", 
+            "/home/rkcosner/Documents/tbsim/paper_results/foryuxiao30/even_split/HierAgentAwareCBFQP_even_split_foryuxiao_60_80/",
+            "/home/rkcosner/Documents/tbsim/paper_results/foryuxiao30/even_split/HierAgentAwareCBFQP_even_split_foryuxiao_80_100/", 
+            "/home/rkcosner/Documents/tbsim/paper_results/foryuxiao30/even_split/HierAgentAwareCBFQP_even_split_foryuxiao_100_120/", 
+        ],
         [
             "/home/rkcosner/Documents/tbsim/paper_results/foryuxiao30/gammas/HierAgentAwareCBFQP_gammas_foryuxiao_0_20/",
             "/home/rkcosner/Documents/tbsim/paper_results/foryuxiao30/gammas/HierAgentAwareCBFQP_gammas_foryuxiao_20_40/", 
@@ -611,11 +613,6 @@ if CL_STATS:
                     if sum(data[scene_name]["safety_violation"])>0: #and sum(data[scene_name]["safety_violation"][0:1])==0: # Don't count if it starts unsafe
                         scenes.append(scene_name)
             unsafe_scenes.append(scenes)
-    breakpoint()
-    # for i, _ in enumerate(path_sets): 
-    #     all_in_pathset = np.hstack(slacker_tracker[i])
-    #     num_slacks = len(all_in_pathset)
-    #     slacker_tracker[i] = sum(all_in_pathset)/num_slacks
 
     total_violations = [0,0,0]
     for idx, paths in enumerate(path_sets): 
@@ -626,7 +623,6 @@ if CL_STATS:
     total_scenes = 120 
     total_percent_violations = np.array(total_violations)/total_scenes
     print(np.array(total_percent_violations))
-    print(np.array(slacker_tracker)/total_scenes)
     print(np.array(total_offroad)/total_scenes)
     print(np.array(total_coverage_onroad)/total_scenes)
     print(np.array(total_coverage_total)/total_scenes)
@@ -1143,8 +1139,6 @@ if EGO_CL_FROM_BATCH:
     axes[0].get_yaxis().set_visible(False)  
     axes[0].get_xaxis().set_visible(False)  
 
-    breakpoint()
-
     dt = 0.1
     col_agent_idx = 6
     for i, name in enumerate(names): 
@@ -1194,7 +1188,7 @@ if EGO_CL_FROM_BATCH:
     col_agent_inputs = []
     dt = 0.1 
     input_window = []
-    window_size = 10
+    window_size = 2
     for i in range(len(states[0,0,:,0])-1): 
         # Apply moving average to other agents' input
         d_state = (states[0, col_agent_idx, i+1,:] - states[0, col_agent_idx, i, :])/dt
@@ -1255,6 +1249,32 @@ if EGO_CL_FROM_BATCH:
     axes[2].set_title("$\gamma(\mathbf{x})$")
 
 
+
+    smooth_constraintA = []
+    input_window = []
+    window_size = 3
+    for i in range(len(states[0,0,:,0])-1): 
+        # Apply moving average to other agents' input
+        input_window.append(constraintA[i])
+        input_averaged = np.mean(np.array(input_window), axis=0)
+        smooth_constraintA.append(input_averaged)
+        if len(input_window)>window_size-1: 
+            input_window.pop(0)
+
+    smooth_constraintB = []
+    input_window = []
+    window_size = 5
+    for i in range(len(states[0,0,:,0])-1): 
+        # Apply moving average to other agents' input
+        input_window.append(constraintB[i])
+        input_averaged = np.mean(np.array(input_window), axis=0)
+        smooth_constraintB.append(input_averaged)
+        if len(input_window)>window_size-1: 
+            input_window.pop(0)
+
+    constraintA = np.array(smooth_constraintA)
+    constraintB = np.array(smooth_constraintB) 
+
     axes[3].plot(time, constraintA[steps], color="b", linewidth=2)
     axes[3].plot(time, constraintB[steps], color="k", linewidth=2)
     axes[3].hlines(0,time[0], t_max, color="k", linewidth=1, linestyle="--")
@@ -1267,6 +1287,335 @@ if EGO_CL_FROM_BATCH:
 
     
     plt.savefig("./paper_figures/closed_loop_even_split.svg")#, dpi =300)
+    
+
+    breakpoint()
+
+
+
+if FORENSIC_1: 
+    # Even Split Unsafe: [scene-0395, scene-0448, scene-0517, scene-0534, scene-0544]
+    # Gammas Unsafe: [scene-0395, scene-0591]
+
+
+    torch.cuda.empty_cache()
+
+    # Imports
+    from tbsim.utils.batch_utils import set_global_batch_type
+    from tbsim.safety_funcs.cbfs import BackupBarrierCBF
+    from tbsim.safety_funcs.utils import scene_centric_batch_to_raw
+    from tbsim.configs.eval_config import EvaluationConfig
+    from tbsim.evaluation.env_builders import EnvNuscBuilder
+    from tbsim.configs.algo_config import ResponsibilityConfig
+    from tbsim.utils.trajdata_utils import parse_trajdata_batch
+    from tbsim.algos.factory import algo_factory
+    from tbsim.configs.base import AlgoConfig
+    import importlib
+    import h5py
+    import json
+    import matplotlib.patches as patches
+    from matplotlib.transforms import Affine2D
+
+    device = "cuda"
+    substeps = 5
+
+    # Load Evaluation Scene
+    set_global_batch_type("trajdata")
+    file = open("/home/rkcosner/Documents/tbsim/paper_results/HierAgentAwareCBFQP_gammas_forensic_1/config.json")
+    eval_cfg = EvaluationConfig()
+    external_cfg = json.load(file)
+    eval_cfg.update(**external_cfg)
+    policy_composers = importlib.import_module("tbsim.evaluation.policy_composers")
+    composer_class = getattr(policy_composers, eval_cfg.eval_class)
+    composer = composer_class(eval_cfg, device, ckpt_root_dir=eval_cfg.ckpt_root_dir)
+
+    policy, exp_config = composer.get_policy()
+    # Set to scene_centric
+    exp_config.algo.scene_centric = True
+    env_builder = EnvNuscBuilder(eval_config=eval_cfg, exp_config=exp_config, device=device)
+    env = env_builder.get_env(split_ego=False,parse_obs=True)
+
+
+
+    # Load Gamma Model
+    file = open("/home/rkcosner/Documents/tbsim/paper_results/final_resp_trained_models/test/run0/config.json")
+    algo_cfg = AlgoConfig()
+    algo_cfg.algo = ResponsibilityConfig()
+    external_algo_cfg = json.load(file)
+    algo_cfg.update(**external_algo_cfg)
+    algo_cfg.algo.update(**external_algo_cfg["algo"])
+    device = "device" 
+    modality_shapes = dict()
+    gamma_algo = algo_factory(algo_cfg, modality_shapes)
+    checkpoint_path = "/home/rkcosner/Documents/tbsim/paper_results/final_resp_trained_models/test/run0/checkpoints/iter9000_ep1_valLoss0.00.ckpt"
+    checkpoint = torch.load(checkpoint_path)
+    gamma_algo.load_state_dict(checkpoint["state_dict"])
+    net = gamma_algo.nets["policy"].cuda()
+
+    # Load CBF
+    cbf = BackupBarrierCBF(T_horizon = algo_cfg.algo.cbf.T_horizon, 
+                        alpha=algo_cfg.algo.cbf.alpha, 
+                        veh_veh=algo_cfg.algo.cbf.veh_veh, 
+                        saturate_cbf=algo_cfg.algo.cbf.saturate_cbf, 
+                        backup_controller_type=algo_cfg.algo.cbf.backup_controller_type
+                        )
+
+
+
+    names = [ "gammas"]
+    scene_name = "scene-0446" #scene-0448, scene-0517, scene-0534, scene-0544]
+    data = dict()
+    h_vals = dict()
+    gammas = dict()
+    for name in names:
+        data_path = "/home/rkcosner/Documents/tbsim/paper_results/HierAgentAwareCBFQP_gammas_forensic_1/run_data.pkl"#"/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/"+name+"/HierAgentAwareCBFQP_"+ name + "_baymax3_100_120/run_data.pkl"
+        file = open(data_path, "rb")    
+        data[name] = pickle.load(file)[scene_name]
+        h_vals[name] = np.array(data[name]["h_vals"])
+        gammas[name] = np.array(data[name]["gammas"])
+
+        h5_path = "/home/rkcosner/Documents/tbsim/paper_results/HierAgentAwareCBFQP_gammas_forensic_1/data.hdf5"#"/home/rkcosner/Documents/tbsim/paper_results/cl_baymax/"+name+"/HierAgentAwareCBFQP_"+name+"_baymax3_100_120/data.hdf5"
+        with h5py.File(h5_path, "r") as file: 
+            extent             = torch.tensor(file[scene_name+"_0"]["extent"])                  # [A, T, 3]
+            action_pos         = torch.tensor(file[scene_name+"_0"]["action_positions"])        # [A, T, 1, 2]
+            action_yaws        = torch.tensor(file[scene_name+"_0"]["action_yaws"])             # [A, T]
+            centroid           = torch.tensor(file[scene_name+"_0"]["centroid"])                # [A, T, 2]
+            yaw                = torch.tensor(file[scene_name+"_0"]["yaw"])                     # [A, T]
+            scene_index        = torch.tensor(file[scene_name+"_0"]["scene_index"])             # [A, T]
+            track_id           = torch.tensor(file[scene_name+"_0"]["track_id"])                # [A, T]
+            world_from_agent   = torch.tensor(file[scene_name+"_0"]["world_from_agent"])        # [A, T, 3, 3]
+    
+        T = int(centroid.shape[1])
+        N_repeated_indeces = 1
+        indices = torch.arange(0, T, N_repeated_indeces)
+        batch = {
+            "history_positions"         : centroid[:,indices,:], 
+            "history_yaws"              : yaw[:,indices,None], 
+            "curr_speed"                : yaw[:,-1:]*0,
+            "history_availabilities"    : (0*yaw[:,indices] + 1).int(), 
+            "dt"                        : 0.5*torch.ones(1) 
+        }
+
+        if name == "even_split": 
+            batch4forensic = scene_centric_batch_to_raw(batch, substeps=substeps)
+            forensic_states = batch4forensic["states"].clone()    
+            forensic_inputs = batch4forensic["inputs"].clone()    
+
+        print("Processing Scene" + name)
+        data[name]["batch"] = scene_centric_batch_to_raw(batch, BEZ_TEST=False)
+        data[name]["scene_index"] = scene_index
+
+
+
+    fig, axes = plt.subplots(1,4)
+    fig.set_size_inches(10,2)
+
+    # Set Up Environment
+    scene_indices = [data[name]["scene_index"][0,0].item()]
+    env.scene_indices = scene_indices
+    env.reset(scene_indices=scene_indices, start_frame_index=None)
+    env.update_random_seed(1)
+    simscene = env._current_scenes[0]
+
+    obs = parse_trajdata_batch(simscene.get_obs())
+    batch = {
+        "image": obs["image"][0,-8:,...]
+    }   
+    visualizer_image = generate_3channel_image(batch)
+
+    # Plot Other Agents
+    name = "gammas"
+    init_states = data["gammas"]["batch"]["states"][:,0,:] - data["gammas"]["batch"]["states"][0,0,:]
+    ego_yaw = data["gammas"]["batch"]["states"][0,0,3].item() 
+    cars = []
+    for j, x0 in enumerate(init_states):
+        x_agent = x0[0].item()
+        y_agent = x0[1].item()
+        x_pxl = int((np.cos(ego_yaw) * x_agent + np.sin(ego_yaw) * y_agent)*pxls_per_meter + pxl_center[0])
+        y_pxl = int((-np.sin(ego_yaw) * x_agent + np.cos(ego_yaw) * y_agent)*pxls_per_meter + pxl_center[1])
+
+        if y_pxl < len(visualizer_image[:,0,0]) and x_pxl < len(visualizer_image[:,0,0]) and y_pxl>=0 and x_pxl >=0: 
+            visualizer_image[y_pxl, x_pxl] = black
+
+            middle_offset = [
+                extent[j,0,0].item()*pxls_per_meter/2, 
+                extent[j,0,1].item()*pxls_per_meter/2
+            ]
+            rect = patches.Rectangle(
+                (x_pxl-middle_offset[0], y_pxl-middle_offset[1]), 
+                extent[j,0,0].item()*pxls_per_meter, 
+                extent[j,0,1].item()*pxls_per_meter, 
+                alpha = 0.7, 
+                facecolor="b", 
+                edgecolor="k", 
+                linewidth=0.1
+                )
+            t = Affine2D().rotate_around(x_pxl, y_pxl, x0[3]) + axes[0].transData
+            rect.set_transform(t)
+            cars.append(rect)
+    
+    names = ["gammas",]
+    for name in names: 
+        states = data[name]["batch"]["states"] - data[name]["batch"]["states"][0,0,:]
+        rotated_states_x = (np.cos(ego_yaw) * states[...,0] + np.sin(ego_yaw) * states[...,1])*pxls_per_meter + pxl_center[0]
+        rotated_states_y = (-np.sin(ego_yaw) * states[...,0] + np.cos(ego_yaw) * states[...,1])*pxls_per_meter + pxl_center[1]
+        states[...,0] = rotated_states_x
+        states[...,1] = rotated_states_y
+        for j, traj in enumerate(states):
+            if j==0 and name == "gammas": 
+                sub_hs = np.array(data["gammas"]["h_vals"])
+                unsafe_idx =np.where(sub_hs<0)[0].min() 
+                unsafe_idx_shrunk = int(unsafe_idx)
+                axes[0].plot(traj[:unsafe_idx_shrunk+1,0], traj[:unsafe_idx_shrunk+1,1], linewidth=2, color="b")
+                axes[0].plot(traj[unsafe_idx_shrunk,0], traj[unsafe_idx_shrunk,1], linewidth=2, color="b", marker="x")
+            elif name=="gammas": # other agent 
+                axes[0].plot(traj[:,0], traj[:,1],linewidth=0.5, color="k")       
+            
+            if j==0 and name == "even_split":   
+                axes[0].plot(traj[:,0], traj[:,1], linewidth=2, color="y")
+
+            if j==0 and name == "worst_case": 
+                axes[0].plot(traj[:,0], traj[:,1], linewidth=2, color="r")
+
+    axes[0].imshow(visualizer_image, aspect="auto")
+    for car in cars:  
+        axes[0].add_patch(car)
+    axes[0].set_xlim(pxl_center[0]-20, pxl_center[0]+140)
+    axes[0].set_ylim(pxl_center[1]-80, pxl_center[1]+80)
+    axes[0].grid(False)
+    axes[0].get_yaxis().set_visible(False)  
+    axes[0].get_xaxis().set_visible(False)  
+    
+
+    dt = 0.1
+    hs = sub_hs
+    axes[1].plot(np.arange(len(sub_hs))*dt , hs, linewidth=2, color="b")
+    axes[1].plot(unsafe_idx*dt,hs[unsafe_idx],"x", color="b")
+
+    axes[1].grid(False)
+    # time = np.arange(17, 35, 1)/10
+    # t_min = time.min().item()
+    # t_max = time.max().item()
+    T = 10 
+    axes[1].hlines(0,-1, T, color="k", linewidth=1, linestyle="--")
+    axes[1].set_xlim(-0.50, 6)
+    axes[1].set_ylim(-0.5, 4)
+    axes[1].set_title("$h(\mathbf{x})$")
+    axes[1].set_xlabel("time [sec]")
+    # axes[1].get_yaxis().set_visible(False)  
+    axes[1].yaxis.tick_right()   
+
+
+    # Get h's using recorded batch
+    col_agent_idx = 19
+    states = torch.cat(data["gammas"]["states"], axis=-2)
+
+    col_agent_inputs = []
+    dt = 0.1 
+    input_window = []
+    window_size = 10
+    for i in range(len(states[0,0,:,0])-1): 
+        # Apply moving average to other agents' input
+        d_state = (states[0, col_agent_idx, i+1,:] - states[0, col_agent_idx, i, :])/dt
+        input_window.append([d_state[2].item(), d_state[3].item()])
+        input_averaged = np.mean(np.array(input_window), axis=0)
+        col_agent_inputs.append(input_averaged)
+        if len(input_window)>window_size-1: 
+            input_window.pop(0)
+
+
+
+    safe_inputs = []
+    for steps in data["gammas"]["safe_inputs"]: 
+        for step in steps: 
+            safe_inputs.append(np.array([[step[0].item()], [step[1].item()]]))
+    
+    constraintA = []
+    constraintB = []
+    agent_gammas = []
+    ego_gammas = []
+    print("Replaying Experiment")
+    for t_idx, current_batch in tqdm(enumerate(data["gammas"]["current_batches"])): 
+        current_data = cbf.process_batch(current_batch)
+        ego_state = current_batch["states"][0,0,0,:]
+        col_state = current_batch["states"][0,col_agent_idx,0,:]
+        # Get planar rotation matrix
+        Rotation = torch.tensor([
+            [torch.cos(col_state[3]-ego_state[3]),  -torch.sin(col_state[3]-ego_state[3]), -torch.cos(col_state[3]-ego_state[3])*(col_state[0]-ego_state[0]) + torch.cos(col_state[3]-ego_state[3])*(col_state[1]-ego_state[1]) ],
+            [torch.sin(col_state[3]-ego_state[3]),   torch.cos(col_state[3]-ego_state[3]), -torch.sin(col_state[3]-ego_state[3])*(col_state[0]-ego_state[0]) - torch.cos(col_state[3]-ego_state[3])*(col_state[1]-ego_state[1])],
+            [0, 0, 1]
+        ])
+        current_batch["agents_from_center"][0, col_agent_idx,...] = Rotation
+
+        if t_idx < len(col_agent_inputs):
+            current_data.requires_grad_()
+            h = cbf(current_data)
+            gammas_recalc = net(current_batch)
+            LfhA, LfhB, LghA, LghB = cbf.get_barrier_bits(h, current_data)
+            constraintA.append((- gammas_recalc["gammas_A"][0, col_agent_idx-1,0,0].detach().cpu() + LghA[col_agent_idx-1].detach().cpu() @ safe_inputs[t_idx]      + 1.0/2*(LfhA[col_agent_idx-1].detach().cpu() + LfhB[col_agent_idx-1].detach().cpu() + cbf.alpha * h[0, col_agent_idx-1].detach().cpu() ) ).item())
+            constraintB.append((- gammas_recalc["gammas_B"][0, col_agent_idx-1,0,0].detach().cpu() + LghB[col_agent_idx-1].detach().cpu() @ col_agent_inputs[t_idx] + 1.0/2*(LfhA[col_agent_idx-1].detach().cpu() + LfhB[col_agent_idx-1].detach().cpu() + cbf.alpha * h[0, col_agent_idx-1].detach().cpu() )).item()) # stopped agent input zero
+            agent_gammas.append((gammas_recalc["gammas_B"][0, col_agent_idx-1,0,0]).item())
+            ego_gammas.append((gammas_recalc["gammas_A"][0, col_agent_idx-1,0,0]).item())
+
+
+
+    constraintA = np.array(constraintA)
+    constraintB = np.array(constraintB)
+    ego_gammas = np.array(ego_gammas)
+    agent_gammas = np.array(agent_gammas)
+
+
+    # Plot Gammas
+    dt = 0.1
+    start = 30 
+    steps = np.arange(unsafe_idx-10-start, len(ego_gammas))
+    time = steps*dt
+    axes[2].plot(time, ego_gammas[steps], color="b", linewidth=2 )
+    axes[2].plot(time, agent_gammas[steps], color="k", linewidth=2 )
+    # axes[2].plot(time[-1], ego_gammas[unsafe_idx+1,col_agent_idx-1], marker="x", color="y")
+    axes[2].yaxis.tick_right() 
+    axes[2].grid(False)
+    t_max = time.max().item()
+    axes[2].hlines(0,time[0], t_max, color="k", linewidth=1, linestyle="--")
+    axes[2].set_title("$\gamma(\mathbf{x})$")
+
+
+    smooth_constraintA = []
+    input_window = []
+    window_size = 3
+    for i in range(len(states[0,0,:,0])-1): 
+        # Apply moving average to other agents' input
+        input_window.append(constraintA[i])
+        input_averaged = np.mean(np.array(input_window), axis=0)
+        smooth_constraintA.append(input_averaged)
+        if len(input_window)>window_size-1: 
+            input_window.pop(0)
+
+    smooth_constraintB = []
+    input_window = []
+    window_size = 5
+    for i in range(len(states[0,0,:,0])-1): 
+        # Apply moving average to other agents' input
+        input_window.append(constraintB[i])
+        input_averaged = np.mean(np.array(input_window), axis=0)
+        smooth_constraintB.append(input_averaged)
+        if len(input_window)>window_size-1: 
+            input_window.pop(0)
+
+    constraintA = np.array(smooth_constraintA)
+    constraintB = np.array(smooth_constraintB) 
+    axes[3].plot(time, constraintA[steps], color="b", linewidth=2)
+    axes[3].plot(time, constraintB[steps], color="k", linewidth=2)
+    axes[3].hlines(0,time[0], t_max, color="k", linewidth=1, linestyle="--")
+    axes[3].set_title("Constraint($\mathbf{x}$)")
+    axes[3].yaxis.tick_right() 
+    axes[3].grid(False)
+    axes[3].set_xlabel("time [sec]")
+
+    
+
+    
+    plt.savefig("./paper_figures/forensics1.svg")#, dpi =300)
     
 
     breakpoint()

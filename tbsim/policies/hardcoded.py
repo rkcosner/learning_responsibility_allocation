@@ -546,8 +546,8 @@ class CBFQPController(Policy):
         self.n_step_action = exp_cfg["eval"]["nusc"]["n_step_action"]
         self.test_type = exp_cfg["eval"]["cbf"]["test_type"]
         
-        self.set_ego_des   = exp_cfg["eval"]["cbf"]["set_ego_des"]
-        self.set_agent_des = exp_cfg["eval"]["cbf"]["set_agent_des"]
+        self.set_ego_controller   = exp_cfg["eval"]["cbf"]["set_ego_controller"]
+        self.set_agent_controller = exp_cfg["eval"]["cbf"]["set_agent_controller"]
         self.aggression_add = exp_cfg["eval"]["cbf"]["aggression_add"]
 
 
@@ -606,8 +606,8 @@ class CBFQPController(Policy):
 
             # Set Desired Ego Controller
             time_steps = torch.linspace(1,20,20, device = curr_pos.device)
-            if idx == 0 and self.set_ego_des: 
-                v_des = 10
+            if idx == 0 and self.set_ego_controller: 
+                v_des = 12
                 vs = torch.linspace(curr_vel.item()+(v_des-curr_vel.item())/20 ,v_des,20, device = curr_pos.device)
                 # thetas = torch.linspace((obs_dict["curr_agent_state"][2, -1]-curr_yaw.item())/20, obs_dict["curr_agent_state"][2, -1]-curr_yaw.item(), 20, device = curr_pos.device ) # track heading of forward vehicle
                 xs = []
@@ -618,7 +618,7 @@ class CBFQPController(Policy):
                 xref[0,:,1] = 0
                 xref[0,:,2] = vs
                 xref[0,:,3] = 0
-            elif idx == xref.shape[0]-1 and self.set_agent_des: 
+            elif idx == xref.shape[0]-1 and self.set_agent_controller: 
                 # default other agent
                 if True:
                     v_des = 5
@@ -655,7 +655,6 @@ class CBFQPController(Policy):
                 state_veh_idx.append(next_state.tolist())
             world_states.append(state_veh_idx)
         
-
 
         world_states = torch.tensor(world_states)
         coarse_batch = {
@@ -717,9 +716,9 @@ class CBFQPController(Policy):
 
                 # log current_state:
                 self.data_logging["states"].append(current_batch["states"])
-                # if obs_dict["scene_ids"][0]=="scene-0591":
-                #     print("recording batch!")
-                #     self.data_logging["current_batches"].append(current_batch)
+
+                
+
                 # Set up problem 
                 ego_u = cp.Variable(2)
                 ego_des_input = np.array([accel[t_step], yaw_rate[t_step]])
@@ -730,82 +729,92 @@ class CBFQPController(Policy):
                     h_vals = self.cbf(data)
                     LfhA, LfhB, LghA, LghB = self.cbf.get_barrier_bits(h_vals, data)
                 h_vals = h_vals[0].cpu().detach().numpy()
-                LfhA = LfhA.cpu().detach().numpy()
-                LfhB = LfhB.cpu().detach().numpy()
-                LghA = LghA.cpu().detach().numpy()
-                LghB = LghB.cpu().detach().numpy()
-                gammas = self.gamma_net(current_batch)["gammas_A"][0,:,0,0]
-
-                # Add Constraints
-                relevant_hs = []
-                gamma_log = []
-                h_log = []
-                slack_vars = []
-                for i in range(LfhA.size): 
-                    try:
-                        if LfhA.size == 1: # stupid sizing problem
-                            LfhA = [LfhA]; LfhB = [LfhB]; 
-                        if abs(current_batch["states"][0,i+1,0,3].item()) % 2* torch.pi <=self.angle_max_diff:
-                            slack_vars.append(cp.Variable(1))
-                            relevant_hs.append(i)
-                            sign_agent_vel = torch.sign(current_batch["states"][0,i+1,0,2]).item()
-                            h_log.append(h_vals[i])
-                            gamma_log.append(gammas[i].item())
-                            discrete_time_compensation = 0.0
-                            # Model worst case other agents
-                            if self.test_type == "worst_case":  
-                                worst_case = [[9,np.pi/4], [9,-np.pi/4], [-9,np.pi/4], [-9,-np.pi/4]] 
-                                for input in worst_case:
-                                    u_worst_case = np.array(input)
-                                    constraints.append(LfhA[i] + LfhB[i] + LghA[i]@ego_u + LghB[i]@u_worst_case + slack_vars[-1] >= -self.cbf.alpha * h_vals[i] + discrete_time_compensation)                   
-                            # Even split decentralized
-                            elif self.test_type == "even_split": 
-                                constraints.append(1.0/2*(LfhA[i] + LfhB[i] + self.cbf.alpha*h_vals[i]) + LghA[i]@ego_u + slack_vars[-1] >= 0 + discrete_time_compensation)
-                            # Use responsibility gammas
-                            elif self.test_type == "gammas": 
-                                # print("gamma = ", gammas[i].item())
-                                constraints.append(1.0/2*(LfhA[i] + LfhB[i] + self.cbf.alpha*h_vals[i])  + LghA[i]@ego_u + slack_vars[-1]  >= gammas[i].item() + discrete_time_compensation)
-                            else: 
-                                raise Exception("please select a valid constraint type")
-                    except: 
-                        breakpoint()
-
-                # selected_constraint_idx = np.argmin(h_vals[relevant_hs]) # only enforcing the smallest constraint
-                cost = (self.aggression_add + ego_des_input[0] - ego_u[0])**2 + 200*(ego_des_input[1] - ego_u[1])**2
-                for var in slack_vars: 
-                    cost += 1e4*var**2
-                objective = cp.Minimize(cost)
-                self.data_logging["h_vals"].append(h_log)
-                self.data_logging["gammas"].append(gamma_log)
-
-                if len(relevant_hs)>0: 
-                    # print("h_val = ", np.min(h_vals[relevant_hs]), " wrt agent ", np.argmin(h_vals) + 1)
-                    if np.min(h_vals[relevant_hs]) < 0: 
+                if self.set_ego_controller:
+                    self.data_logging["current_batches"].append(current_batch)
+                    ego_safe_input = [(xref[0,t_step+1,2] -xref[0,t_step,2])/dt, (xref[0,t_step+1,3] -xref[0,t_step,3])/dt ]
+                    self.data_logging["h_vals"].append(np.min(h_vals))
+                    print("h_val = ", np.min(h_vals), " wrt agent ", np.argmin(h_vals) + 1)
+                    if np.min(h_vals) < 0: 
                         safety_violation_flag = True
                     self.data_logging["safety_violation"].append(safety_violation_flag)
+                else: 
+                    LfhA = LfhA.cpu().detach().numpy()
+                    LfhB = LfhB.cpu().detach().numpy()
+                    LghA = LghA.cpu().detach().numpy()
+                    LghB = LghB.cpu().detach().numpy()
+                    gammas = self.gamma_net(current_batch)["gammas_A"][0,:,0,0]
 
-                sign_ego_vel = torch.sign(current_batch["states"][0,0,0,2]).item()
-                prob = cp.Problem(objective, constraints)
-                # Try Solving the CBF-QP 
-                try:
-                    result = prob.solve()
-                    if prob.status == "optimal" or prob.status == "optimal_inaccurate": 
-                        ego_safe_input = ego_u.value[0:2]
-                        slacks = sum([var.value for var in slack_vars])
-                        self.data_logging["slack_sum"].append(slacks)
-                    else: 
-                        print(prob.status)
+                    # Add Constraints
+                    relevant_hs = []
+                    gamma_log = []
+                    h_log = []
+                    slack_vars = []
+                    for i in range(LfhA.size): 
+                        try:
+                            if LfhA.size == 1: # stupid sizing problem
+                                LfhA = [LfhA]; LfhB = [LfhB]; 
+                            if abs(current_batch["states"][0,i+1,0,3].item()) % 2* torch.pi <=self.angle_max_diff:
+                                slack_vars.append(cp.Variable(1))
+                                relevant_hs.append(i)
+                                sign_agent_vel = torch.sign(current_batch["states"][0,i+1,0,2]).item()
+                                h_log.append(h_vals[i])
+                                gamma_log.append(gammas[i].item())
+                                discrete_time_compensation = 0.0
+                                # Model worst case other agents
+                                if self.test_type == "worst_case":  
+                                    worst_case = [[9,np.pi/4], [9,-np.pi/4], [-9,np.pi/4], [-9,-np.pi/4]] 
+                                    for input in worst_case:
+                                        u_worst_case = np.array(input)
+                                        constraints.append(LfhA[i] + LfhB[i] + LghA[i]@ego_u + LghB[i]@u_worst_case + slack_vars[-1] >= -self.cbf.alpha * h_vals[i] + discrete_time_compensation)                   
+                                # Even split decentralized
+                                elif self.test_type == "even_split": 
+                                    constraints.append(1.0/2*(LfhA[i] + LfhB[i] + self.cbf.alpha*h_vals[i]) + LghA[i]@ego_u + slack_vars[-1] >= 0 + discrete_time_compensation)
+                                # Use responsibility gammas
+                                elif self.test_type == "gammas": 
+                                    # print("gamma = ", gammas[i].item())
+                                    constraints.append(1.0/2*(LfhA[i] + LfhB[i] + self.cbf.alpha*h_vals[i])  + LghA[i]@ego_u + slack_vars[-1]  >= gammas[i].item() + discrete_time_compensation)
+                                else: 
+                                    raise Exception("please select a valid constraint type")
+                        except: 
+                            breakpoint()
+
+                    # selected_constraint_idx = np.argmin(h_vals[relevant_hs]) # only enforcing the smallest constraint
+                    cost = (self.aggression_add + ego_des_input[0] - ego_u[0])**2 + 200*(ego_des_input[1] - ego_u[1])**2
+                    for var in slack_vars: 
+                        cost += 1e4*var**2
+                    objective = cp.Minimize(cost)
+                    self.data_logging["h_vals"].append(h_log)
+                    self.data_logging["gammas"].append(gamma_log)
+
+                    if len(relevant_hs)>0: 
+                        # print("h_val = ", np.min(h_vals[relevant_hs]), " wrt agent ", np.argmin(h_vals) + 1)
+                        if np.min(h_vals[relevant_hs]) < 0: 
+                            safety_violation_flag = True
+                        self.data_logging["safety_violation"].append(safety_violation_flag)
+
+                    sign_ego_vel = torch.sign(current_batch["states"][0,0,0,2]).item()
+                    prob = cp.Problem(objective, constraints)
+                    # Try Solving the CBF-QP 
+                    try:
+                        result = prob.solve()
+                        if prob.status == "optimal" or prob.status == "optimal_inaccurate": 
+                            ego_safe_input = ego_u.value[0:2]
+                            slacks = sum([var.value for var in slack_vars])
+                            self.data_logging["slack_sum"].append(slacks)
+                        else: 
+                            print(prob.status)
+                            ego_safe_input = np.array([-sign_ego_vel*9,0])
+                    except:
+                        print("infeasible!\n\n")
                         ego_safe_input = np.array([-sign_ego_vel*9,0])
-                except:
-                    print("infeasible!\n\n")
-                    ego_safe_input = np.array([-sign_ego_vel*9,0])
 
-                # Saturate Inputs
-                if self.saturate:
-                    if ego_safe_input[0] >=9: ego_safe_input[0] = 9
-                    if ego_safe_input[0] <=-9: ego_safe_input[0] = -9
-                    if ego_safe_input[1] >= np.pi/4: ego_safe_input[1] = np.pi/4
-                    if ego_safe_input[1] <= -np.pi/4: ego_safe_input[1] = -np.pi/4
+                    # Saturate Inputs
+                    if self.saturate:
+                        if ego_safe_input[0] >=9: ego_safe_input[0] = 9
+                        if ego_safe_input[0] <=-9: ego_safe_input[0] = -9
+                        if ego_safe_input[1] >= np.pi/4: ego_safe_input[1] = np.pi/4
+                        if ego_safe_input[1] <= -np.pi/4: ego_safe_input[1] = -np.pi/4
+
 
                 # Update ego world state
                 ego_world_state[0,0,0,:]= torch.tensor([
@@ -832,7 +841,8 @@ class CBFQPController(Policy):
         action = Action(positions=plan[...,:2], yaws=plan[...,3:])
         self.current_speed = plan[:,t_step,2]        # store current speed to avoid tbsim approximation
         self.data_logging["safe_inputs"].append(safe_inputs)
-        self.data_logging["des_inputs"].append(ego_des_input)
+        if not self.set_ego_controller:
+            self.data_logging["des_inputs"].append(ego_des_input)
         return action, {"safety_violation_flag":safety_violation_flag}
 
     def get_data_log(self): 
