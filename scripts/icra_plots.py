@@ -1076,9 +1076,9 @@ if EGO_CL_FROM_BATCH:
 
 
     # Plot Other Agents
-    name = "even_split"
-    init_states = data["even_split"]["batch"]["states"][:,0,:] - data["even_split"]["batch"]["states"][0,0,:]
-    ego_yaw = data["even_split"]["batch"]["states"][0,0,3].item() 
+    name = "gammas"
+    init_states = data["gammas"]["batch"]["states"][:,0,:] - data["gammas"]["batch"]["states"][0,0,:]
+    ego_yaw = data["gammas"]["batch"]["states"][0,0,3].item() 
     cars = []
     for j, x0 in enumerate(init_states):
         x_agent = x0[0].item()

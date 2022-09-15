@@ -96,7 +96,7 @@ class EvaluationConfig(Dict):
         self.add_vehicle.infront = False
 
         self.nusc.n_step_action = 5# Set to 1 to find gammas, otherwise choose whatever
-        self.num_scenes_to_evaluate = 120
+        self.num_scenes_to_evaluate = 10
         self.cbf.test_type = "gammas" # worst_case, even_split, gammas
         self.cbf.T_horizon=1
         self.cbf.alpha=0.5
@@ -109,8 +109,8 @@ class EvaluationConfig(Dict):
         self.cbf.set_agent_des = False
         self.cbf.aggression_add = 1
 
-        start = 0
-        finish = 120
+        start = 80
+        finish = 100
         self.nusc.eval_scenes = [27] #np.arange(start, finish).tolist()#[17,18]#[4,17]#[87,97,99] #2,6,17]#np.arange(100).tolist() # where scene choice is made
         self.suffix = "foryuxiao_"+str(start)+"_" + str(finish)#"test3_0_200_step1"#"pleasework6_u2_0_20"
 
