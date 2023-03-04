@@ -7,9 +7,9 @@ Software infrastructure for learning-based traffic simulation.
 
 Install `tbsim`
 ```angular2html
-conda env create -n tbsim python=3.8
-conda activate tbsim
-git clone ssh://git@gitlab-master.nvidia.com:12051/nvr-av/behavior-generation.git tbsim
+conda create -n lra python=3.8
+conda activate lra
+git clone git@github.com:rkcosner/learning_responsibility_allocation.git
 cd tbsim
 pip install -e .
 ```
