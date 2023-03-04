@@ -1,5 +1,9 @@
-# Traffic Behavior Simulation (tbsim)
-Software infrastructure for learning-based traffic simulation.
+# Learning Responsibility Allocations
+
+**Learning Responsibility Allocations for Safe Human-Robot Interaction
+with Applications to Autonomous Driving**
+
+Ryan K. Cosner, Yuxiao Chen, Karen Leung, and Marco Pavone
 
 <img src="assets/sample_rollout.gif" width="750" height="250"/>
 
