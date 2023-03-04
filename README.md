@@ -10,7 +10,7 @@ Install `tbsim`
 conda create -n lra python=3.8
 conda activate lra
 git clone git@github.com:rkcosner/learning_responsibility_allocation.git
-cd tbsim
+cd learning_responsibility_allocation
 pip install -e .
 ```
 
