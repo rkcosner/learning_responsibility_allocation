@@ -5,7 +5,7 @@ Software infrastructure for learning-based traffic simulation.
 
 ## Installation
 
-Install `tbsim`
+Install `learning_responsibility_allocation`
 ```angular2html
 conda create -n lra python=3.8
 conda activate lra
