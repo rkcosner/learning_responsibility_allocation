@@ -5,7 +5,7 @@ with Applications to Autonomous Driving**
 
 Ryan K. Cosner, Yuxiao Chen, Karen Leung, and Marco Pavone
 
-<img src="assets/hero_figure.png" width="750" height="250"/>
+<img src="assets/hero_figure.png"/>
 
 ## Installation
 
