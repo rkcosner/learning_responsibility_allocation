@@ -7,6 +7,9 @@ import wandb
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
 
+
+import sys
+sys.path.append("./")
 from tbsim.utils.log_utils import PrintLogger
 import tbsim.utils.train_utils as TrainUtils
 from tbsim.utils.env_utils import RolloutCallback
