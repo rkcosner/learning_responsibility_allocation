@@ -29,21 +29,7 @@ pip install -e .
 
 ## Quick start
 ### 1. Obtain the nuScenes dataset 
-Download the nuScenes [dataset](https://www.nuscenes.org/nuscenes).
-
-#### Lyft Level 5:
-* Download the Lyft Prediction dataset (only the metadata and the map) and organize the dataset directory as follows:
-    ```
-    lyft_prediction/
-    │   aerial_map/
-    │   semantic_map/
-    │   meta.json
-    └───scenes
-    │   │   sample.zarr
-    │   │   train_full.zarr
-    │   │   train.zarr
-    |   |   validate.zarr
-    ```
+nuScenes [dataset](https://www.nuscenes.org/nuscenes).
 
 #### nuScenes
 * Download the nuScenes dataset (with the v1.3 map extension pack) and organize the dataset directory as follows:
