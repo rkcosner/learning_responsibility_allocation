@@ -28,8 +28,8 @@ pip install -e .
 ```
 
 ## Quick start
-### 1. Obtain dataset(s)
-We currently support the Lyft Level 5 [dataset](https://level-5.global/data/) and the nuScenes [dataset](https://www.nuscenes.org/nuscenes).
+### 1. Obtain the nuScenes dataset 
+Download the nuScenes [dataset](https://www.nuscenes.org/nuscenes).
 
 #### Lyft Level 5:
 * Download the Lyft Prediction dataset (only the metadata and the map) and organize the dataset directory as follows:
