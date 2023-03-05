@@ -29,7 +29,7 @@ pip install -e .
 
 ## Quick start
 ### 1. Obtain the nuScenes dataset 
-nuScenes [dataset](https://www.nuscenes.org/nuscenes).
+Link to the nuScenes [dataset](https://www.nuscenes.org/nuscenes).
 
 #### nuScenes
 * Download the nuScenes dataset (with the v1.3 map extension pack) and organize the dataset directory as follows:
