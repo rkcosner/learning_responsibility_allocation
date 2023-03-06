@@ -502,9 +502,9 @@ path2way_ngc = "/workspace/static_scenes/batch2wayDivider.pickle"
 path4way_ngc = "/workspace/static_scenes/batch4way.pickle"
 pathRoundabout_ngc = "/workspace/static_scenes/batchRoundabout.pickle"
 
-path2way_local = "/home/rkcosner/Documents/tbsim/tbsim/safety_funcs/static_scenes/batch2wayDivider.pickle"
-path4way_local = "/home/rkcosner/Documents/tbsim/tbsim/safety_funcs/static_scenes/batch4way.pickle"
-pathRoundabout_local = "/home/rkcosner/Documents/tbsim/tbsim/safety_funcs/static_scenes/batchRoundabout.pickle"
+path2way_local = "./tbsim/safety_funcs/static_scenes/batch2wayDivider.pickle"
+path4way_local = "./tbsim/safety_funcs/static_scenes/batch4way.pickle"
+pathRoundabout_local = "./tbsim/safety_funcs/static_scenes/batchRoundabout.pickle"
 
 
 def generate_3channel_image(batch):  
@@ -548,7 +548,7 @@ def plot_static_gammas_inline(net, type, on_ngc=True, return_data = False):
     net.eval()
     with torch.no_grad():
         datapoints_per_meter = 0.5 
-        window = 10 
+        window = 20 
         rel_vel_max = 12
         if type == 2: 
             if on_ngc: 
