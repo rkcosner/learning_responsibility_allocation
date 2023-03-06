@@ -12,7 +12,6 @@ import sys
 sys.path.append("./")
 from tbsim.utils.log_utils import PrintLogger
 import tbsim.utils.train_utils as TrainUtils
-# from tbsim.utils.env_utils import RolloutCallback
 from tbsim.configs.registry import get_registered_experiment_config
 from tbsim.datasets.factory import datamodule_factory
 from tbsim.utils.config_utils import get_experiment_config_from_file
