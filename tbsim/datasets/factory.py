@@ -1,6 +1,5 @@
 """DataModule / Dataset factory"""
 from tbsim.utils.config_utils import translate_l5kit_cfg, translate_trajdata_cfg
-from tbsim.datasets.l5kit_datamodules import L5MixedDataModule, L5RasterizedDataModule
 from tbsim.datasets.trajdata_datamodules import UnifiedDataModule
 
 def datamodule_factory(cls_name: str, config):
