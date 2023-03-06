@@ -4,7 +4,6 @@ from copy import deepcopy
 
 import tbsim.utils.tensor_utils as TensorUtils
 from tbsim.utils.geometry_utils import transform_points_tensor
-from l5kit.geometry import transform_points
 
 
 class Trajectory(object):
