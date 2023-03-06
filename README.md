@@ -20,6 +20,8 @@ cd learning_responsibility_allocation
 pip install -e .
 ```
 
+Download [Static Scenes](https://drive.google.com/file/d/1YxoIXaBjAj7sc_thU2lfjkFy2fRyvnQu/view?usp=sharing) and unzip it in the ```learning_responsibility_allocation/tbsim/safety_funcs/``` folder.
+
 Install `trajdata`
 ```
 cd ..
