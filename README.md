@@ -7,6 +7,8 @@ Ryan K. Cosner, Yuxiao Chen, Karen Leung, and Marco Pavone
 
 <img src="assets/hero_figure.png"/>
 
+This code base trains responsibility allocation functions $\gamma$ as described in our paper. Closed-loop simulation is currently unavailable as it relies on other people's unpublished code. 
+
 ## Installation
 
 Install `learning_responsibility_allocation`
@@ -61,6 +63,3 @@ If you do not want logging to WandB, then enter the same command with the ```--d
 ```
 python3 scripts/train.py --dataset_path <path-to-nuscenes-data-directory> --config_name nusc_resp ---debug
 ```
-
-
-
