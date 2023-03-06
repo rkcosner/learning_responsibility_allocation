@@ -27,42 +27,26 @@ cd trajdata
 pip install -e .
 ```
 
-## Quick start
-### 1. Obtain the nuScenes dataset 
-Link to the nuScenes [dataset](https://www.nuscenes.org/nuscenes).
-
 #### nuScenes
-* Download the nuScenes dataset (with the v1.3 map extension pack) and organize the dataset directory as follows:
+* Follow [this link](https://www.nuscenes.org/nuscenes) to the nuScenes dataset.
+* Register an account with nuscenes.
+* Download the US files for ```Full dataset (v1.0)>mini```, ```Full dataset (v1.0)>train_val``` 1 through 10 and the metadata, and the ```Map expansion``` pack v1.3 
+* Organize the dataset directory as follows:
     ```
     nuscenes/
-    │   maps/
+    │   maps/ this should include everything from the map expansion too
+    |   samples
+    |   sweeps
     │   v1.0-mini/
     │   v1.0-trainval/
+    learing_responsibility_allocation/
     ```
+#### WandB
+set up your weights and biases account using ```wandb login```
+  
 ### 2. Train a behavior cloning model
-Lyft dataset (set `--debug` flag to suppress wandb logging):
-```
-python scripts/train.py --dataset_path <path-to-lyft-data-directory> --config_name l5_bc --debug
-```
-
 nuScenes dataset (set `--debug` flag to suppress wandb logging):
 ```
 python scripts/train.py --dataset_path <path-to-nuscenes-data-directory> --config_name nusc_bc --debug
 ```
 
-See the list of registered algorithms in `configs/registry.py`
-
-### 3. Evaluate a trained model (closed-loop simulation)
-```
-python scripts/evaluate.py \
-  --results_root_dir results/ \
-  --num_scenes_per_batch 2 \
-  --dataset_path <your-dataset-path> \
-  --env <l5kit|nusc> \
-  --policy_ckpt_dir <path-to-checkpoint-dir> \
-  --policy_ckpt_key <ckpt-file-identifier> \
-  --eval_class BC \
-  --render
-```
-
-## Launch training runs on NGC
