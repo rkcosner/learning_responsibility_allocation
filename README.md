@@ -9,6 +9,8 @@ Ryan K. Cosner, Yuxiao Chen, Karen Leung, and Marco Pavone
 
 This code base trains responsibility allocation functions $\gamma$ as described in our paper. Closed-loop simulation is currently unavailable as it relies on other people's unpublished code. 
 
+The pretrained model used to produce figures 2 and 3 and table 1 can be found [here](https://drive.google.com/file/d/1aTrjPtGGgnTG9B_31yVtDTjsdwIcH64c/view?usp=sharing). 
+
 ## Installation
 
 Install `learning_responsibility_allocation`
